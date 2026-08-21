@@ -321,14 +321,37 @@ function renderContentLayer() {
             .map(x => x.trim())
             .filter(Boolean);
 
+        const hasContent = !!(
+            (c.definition && c.definition.trim()) ||
+            (c.explanation && c.explanation.trim()) ||
+            (c.example && c.example.trim()) ||
+            (c.keyPoints && c.keyPoints.length)
+        );
+
         el.innerHTML = `
             <h2>${escapeHtml(node.title || "")}</h2>
 
             <div class="content-action-row content-action-row-top">
+                <span class="content-status-tag">${hasContent ? "Content added" : "No content yet"}</span>
                 <button class="content-action" data-action="edit-content">
                     ✎ Add / Edit Content
                 </button>
+                <button class="content-action" data-action="upload-markdown">
+                    ⬆ ${hasContent ? "Replace with Markdown" : "Upload Markdown"}
+                </button>
+                ${hasContent ? `
+                <button class="content-action resource-delete-btn" data-action="remove-content">
+                    🗑 Remove Content
+                </button>` : ""}
             </div>
+
+            ${!hasContent ? `
+                <div class="empty-content-block">
+                    <p>This topic has no content yet. Upload a <strong>.md</strong> file to add
+                       rich, formatted content immediately, or use "Add / Edit Content" to type it
+                       in directly. Both support Markdown, tables, mermaid diagrams and charts.</p>
+                    <button class="content-action" data-action="upload-markdown">⬆ Upload Markdown</button>
+                </div>` : ""}
 
             <div class="topic-section">
                 <h3>Definition</h3>
@@ -394,8 +417,134 @@ document.addEventListener("click", e => {
             openEditContentModal();
             return;
         }
+
+        if (action.dataset.action === "upload-markdown") {
+            triggerMarkdownUpload();
+            return;
+        }
+
+        if (action.dataset.action === "remove-content") {
+            removeTopicContent();
+            return;
+        }
     }
 });
+
+/* =========================================================
+   ALPHA-PLUS — MARKDOWN UPLOAD
+   A topic's Explanation is the main rich-content area (already
+   rendered through renderRichContent: Markdown, tables, mermaid,
+   charts). Uploading a .md file simply reads it as text in the
+   browser and saves it through the SAME save_core endpoint the
+   "Add / Edit Content" form already uses — no Google Drive file
+   storage, file IDs or extra Apps Script endpoint are needed for
+   plain-text Markdown, since a Google Sheets cell already holds
+   this much text comfortably. See the implementation report for
+   why this is simpler than routing the file through Drive.
+   ========================================================= */
+
+function triggerMarkdownUpload() {
+    if (!selectedTopicNode) return;
+
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".md,text/markdown,text/plain";
+    input.style.display = "none";
+
+    input.addEventListener("change", async () => {
+        const file = input.files && input.files[0];
+        input.remove();
+        if (!file) return;
+
+        if (file.size > 45000) {
+            alert(
+                "This file is quite large for a single topic's content " +
+                "(Google Sheets cells hold roughly 50,000 characters). " +
+                "Consider splitting it across subtopics."
+            );
+        }
+
+        try {
+            const text = await file.text();
+            await saveMarkdownAsExplanation(text);
+        } catch (error) {
+            console.error("Could not read the Markdown file:", error);
+            alert("Could not read that file. Please choose a .md text file and try again.");
+        }
+    });
+
+    document.body.appendChild(input);
+    input.click();
+}
+
+async function saveMarkdownAsExplanation(markdownText) {
+    if (!selectedTopicNode) return;
+    const c = selectedTopicNode.content || {};
+
+    try {
+        await fetch(GOOGLE_SHEET_API, {
+            method: "POST",
+            mode: "no-cors",
+            body: JSON.stringify({
+                action: "save_core",
+                node_id: selectedTopicNode.id,
+                content_type: "explanation",
+                title: selectedTopicNode.title,
+                content: markdownText,
+                status: "published",
+                author_id: "author",
+                version: 1
+            })
+        });
+
+        selectedTopicNode.content = { ...c, explanation: markdownText };
+        invalidateIndexCache();
+        renderContentLayer();
+        document.getElementById("middle-panel").scrollTop = 0;
+
+    } catch (error) {
+        console.error("Markdown upload failed:", error);
+        alert("Could not save the uploaded Markdown. Please check your connection and try again.");
+    }
+}
+
+async function removeTopicContent() {
+    if (!selectedTopicNode) return;
+    if (!confirm("Remove all content for this topic? This cannot be undone.")) return;
+
+    const clearedFields = ["definition", "explanation", "example", "key_points", "diagram"];
+
+    try {
+        for (const content_type of clearedFields) {
+            await fetch(GOOGLE_SHEET_API, {
+                method: "POST",
+                mode: "no-cors",
+                body: JSON.stringify({
+                    action: "save_core",
+                    node_id: selectedTopicNode.id,
+                    content_type,
+                    title: selectedTopicNode.title,
+                    content: "",
+                    status: "published",
+                    author_id: "author",
+                    version: 1
+                })
+            });
+        }
+
+        const c = selectedTopicNode.content || {};
+        selectedTopicNode.content = {
+            definition: "", explanation: "", example: "", keyPoints: [], diagram: "",
+            index_terms: c.index_terms || ""
+        };
+        invalidateIndexCache();
+        renderContentLayer();
+
+    } catch (error) {
+        console.error("Remove content failed:", error);
+        alert("Could not remove content. Please try again.");
+    }
+}
 
 function openEditContentModal() {
     if (!selectedTopicNode) return;
@@ -427,6 +576,9 @@ function openEditContentModal() {
                 <label>Diagram / Graph image URLs <span class="field-optional">(one per line, optional)</span></label>
                 <textarea id="edit-content-diagram" placeholder="https://... (one image URL per line)">${escapeHtml(c.diagram || "")}</textarea>
 
+                <label>Also known as <span class="field-optional">(comma-separated — helps this topic show up in the Index under other names, e.g. RFID, Radio Frequency Identification)</span></label>
+                <textarea id="edit-content-index-terms" placeholder="Alternate names or terms, separated by commas...">${escapeHtml(c.index_terms || "")}</textarea>
+
                 <button class="resource-submit-btn" type="button" onclick="submitEditContent()">Save Content</button>
             </div>
         </div>
@@ -450,6 +602,7 @@ async function submitEditContent() {
     const example = document.getElementById("edit-content-example").value.trim();
     const keyPointsRaw = document.getElementById("edit-content-keypoints").value.trim();
     const diagram = document.getElementById("edit-content-diagram").value.trim();
+    const indexTerms = document.getElementById("edit-content-index-terms").value.trim();
 
     const keyPoints = keyPointsRaw
         .split(/\r?\n/)
@@ -464,7 +617,8 @@ async function submitEditContent() {
         { content_type: "explanation", content: explanation },
         { content_type: "example", content: example },
         { content_type: "key_points", content: keyPointsRaw },
-        { content_type: "diagram", content: diagram }
+        { content_type: "diagram", content: diagram },
+        { content_type: "index_terms", content: indexTerms }
     ];
 
     try {
@@ -490,9 +644,11 @@ async function submitEditContent() {
             explanation,
             example,
             keyPoints,
-            diagram
+            diagram,
+            index_terms: indexTerms
         };
 
+        invalidateIndexCache();
         closeEditContentModal();
         renderContentLayer();
         document.getElementById("middle-panel").scrollTop = 0;
@@ -932,6 +1088,7 @@ function createTreeNode(node, depth = 0) {
     const label = document.createElement("button");
     label.className = "tree-label";
     label.type = "button";
+    label.dataset.nodeId = node.id;
     const levelLabel = getNodeLevelLabel(node, depth);
 
     // Titles get ellipsis-truncated in the narrow index panel, so a
@@ -1061,6 +1218,347 @@ function renderStudyTree(data) {
 
 function renderMcqs(node) { /* MCQ practice is handled by mcq.html. */ }
 
+/* =========================================================
+   ALPHA-PLUS — RIGHT PANEL: REFERENCES | INDEX TABS
+   ========================================================= */
+
+function initRightPanelTabs() {
+    const tabs = document.querySelectorAll(".right-panel-tab");
+    if (!tabs.length) return;
+
+    tabs.forEach(btn => {
+        btn.addEventListener("click", () => {
+            tabs.forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+
+            const tab = btn.dataset.rightTab;
+            document.getElementById("right-tab-references").hidden = tab !== "references";
+            document.getElementById("right-tab-index").hidden = tab !== "index";
+
+            if (tab === "index") {
+                renderIndexAZList(document.getElementById("index-search-input")?.value.trim().toLowerCase() || "");
+            }
+        });
+    });
+}
+
+/* =========================================================
+   ALPHA-PLUS — INDEX
+   The Index is NOT a separate content store. Every entry simply
+   points back at an existing node id from the SAME tree the Table
+   of Contents already renders. Clicking an entry reuses the exact
+   selection path a Table of Contents click uses (selectNodeById),
+   so there is only ever one place topic content actually lives.
+
+   Entries come from two places, both already part of the existing
+   data model:
+     1. Every node's own title (Subject/Course/Unit/Chapter/Topic/
+        Subtopic) — zero extra authoring effort.
+     2. An optional "Also known as" alias list, stored using the
+        SAME generic content_type mechanism as definition/
+        explanation/example (content_type = "index_terms"), so it
+        needs no new Google Sheets columns and no Apps Script changes.
+   Several different terms (RFID / Radio Frequency Identification /
+   RFID tag) can therefore resolve to the very same node id without
+   duplicating any content.
+   ========================================================= */
+
+let indexEntriesCache = null;
+
+function invalidateIndexCache() {
+    indexEntriesCache = null;
+}
+
+function buildIndexEntries(data) {
+    const entries = [];
+
+    function walk(nodes) {
+        (nodes || []).forEach(node => {
+            const title = (node.title || "").trim();
+            if (title) {
+                entries.push({ term: title, nodeId: node.id, nodeTitle: node.title, isAlias: false });
+            }
+
+            const aliasRaw = node.content && node.content.index_terms;
+            if (aliasRaw) {
+                String(aliasRaw)
+                    .split(/[,\n]/)
+                    .map(x => x.trim())
+                    .filter(Boolean)
+                    .forEach(alias => {
+                        if (alias.toLowerCase() !== title.toLowerCase()) {
+                            entries.push({ term: alias, nodeId: node.id, nodeTitle: node.title, isAlias: true });
+                        }
+                    });
+            }
+
+            walk(node.children);
+        });
+    }
+
+    walk(data.subjects);
+    return entries;
+}
+
+function getIndexEntries() {
+    if (!indexEntriesCache) {
+        indexEntriesCache = buildIndexEntries(window.__studyData || {});
+    }
+    return indexEntriesCache;
+}
+
+// Groups entries that share the exact same term text (case-insensitive),
+// since two different topics could legitimately use the same alias.
+function groupIndexEntries(entries) {
+    const map = new Map();
+
+    entries.forEach(e => {
+        const key = e.term.toLowerCase();
+        if (!map.has(key)) map.set(key, { term: e.term, matches: [] });
+
+        const group = map.get(key);
+        if (!group.matches.some(m => m.nodeId === e.nodeId)) {
+            group.matches.push({ nodeId: e.nodeId, nodeTitle: e.nodeTitle, isAlias: e.isAlias });
+        }
+    });
+
+    return [...map.values()].sort((a, b) =>
+        a.term.localeCompare(b.term, undefined, { sensitivity: "base" })
+    );
+}
+
+function renderIndexAZList(filterText = "") {
+    const container = document.getElementById("index-az-list");
+    if (!container) return;
+
+    let groups = groupIndexEntries(getIndexEntries());
+
+    if (filterText) {
+        groups = groups.filter(g => g.term.toLowerCase().includes(filterText));
+    }
+
+    container.innerHTML = "";
+
+    if (!groups.length) {
+        container.innerHTML = `<p class="index-empty-note">${
+            filterText ? "No index entries match your search." : "No index entries yet."
+        }</p>`;
+        return;
+    }
+
+    const byLetter = {};
+    groups.forEach(group => {
+        const first = group.term.trim().charAt(0).toUpperCase();
+        const letter = /[A-Z]/.test(first) ? first : "#";
+        (byLetter[letter] = byLetter[letter] || []).push(group);
+    });
+
+    Object.keys(byLetter).sort().forEach(letter => {
+        const letterGroup = document.createElement("div");
+        letterGroup.className = "index-letter-group";
+
+        const heading = document.createElement("h4");
+        heading.className = "index-letter-heading";
+        heading.textContent = letter;
+        letterGroup.appendChild(heading);
+
+        byLetter[letter].forEach(group => {
+            const row = document.createElement("div");
+            row.className = "index-term-row";
+
+            const singleMatch = group.matches.length === 1 ? group.matches[0] : null;
+            row.innerHTML = `
+                <span class="index-term-name">${escapeHtml(group.term)}</span>
+                ${singleMatch && singleMatch.isAlias
+                    ? `<span class="index-term-alias-of">see ${escapeHtml(singleMatch.nodeTitle)}</span>`
+                    : ""}
+                ${group.matches.length > 1
+                    ? `<span class="index-term-alias-of">${group.matches.length} topics</span>`
+                    : ""}
+            `;
+
+            row.addEventListener("click", () => handleIndexGroupClick(group));
+            letterGroup.appendChild(row);
+        });
+
+        container.appendChild(letterGroup);
+    });
+}
+
+function handleIndexGroupClick(group) {
+    if (group.matches.length === 1) {
+        selectNodeById(group.matches[0].nodeId);
+    } else {
+        showIndexPicker(group);
+    }
+}
+
+function showIndexPicker(group) {
+    document.getElementById("index-picker-modal")?.remove();
+
+    const backdrop = document.createElement("div");
+    backdrop.id = "index-picker-modal";
+    backdrop.className = "structure-dialog-backdrop";
+    backdrop.innerHTML = `
+        <div class="structure-dialog">
+            <h3>${escapeHtml(group.term)}</h3>
+            <p>This term appears in more than one place. Choose the topic you meant:</p>
+            <div class="index-picker-list">
+                ${group.matches.map(m => `
+                    <button type="button" class="index-picker-option" data-node-id="${escapeHtml(m.nodeId)}">
+                        ${escapeHtml(m.nodeTitle)}
+                    </button>`).join("")}
+            </div>
+            <div class="structure-dialog-actions">
+                <button type="button" id="index-picker-cancel">Cancel</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(backdrop);
+
+    backdrop.querySelector("#index-picker-cancel").onclick = () => backdrop.remove();
+    backdrop.querySelectorAll(".index-picker-option").forEach(btn => {
+        btn.addEventListener("click", () => {
+            const nodeId = btn.dataset.nodeId;
+            backdrop.remove();
+            selectNodeById(nodeId);
+        });
+    });
+}
+
+// Finds the full root-to-node path by walking the actual nested
+// children arrays (works regardless of whether parentId is present,
+// so it's reliable for both the Sheets-driven data and the local
+// JSON fallback).
+function findPathToNode(nodes, targetId, path = []) {
+    for (const node of nodes || []) {
+        const nextPath = [...path, node];
+        if (node.id === targetId) return nextPath;
+
+        const found = findPathToNode(node.children, targetId, nextPath);
+        if (found) return found;
+    }
+    return null;
+}
+
+// The single mechanism ANY entry point (Table of Contents click, Index
+// click, or a future MCQ "related topic" link) should use to select a
+// topic. It reuses the exact same rendering path as a direct tree click.
+function selectNodeById(nodeId) {
+    const path = findPathToNode(window.__studyData?.subjects || [], nodeId);
+    if (!path) {
+        console.warn("Index: could not locate node", nodeId);
+        return false;
+    }
+
+    const rootSubject = path[0];
+
+    // Make sure the owning Subject's branch is actually present in the
+    // Table of Contents DOM (it may currently be filtered out by the
+    // subject ribbon), then rebuild so ancestors start collapsed and we
+    // expand exactly the ones we need below.
+    activeSubjectId = rootSubject.id;
+    subjectFilterActive = true;
+    renderStudyTree(window.__studyData);
+
+    const label = document.querySelector(
+        `.tree-label[data-node-id="${cssEscapeId(nodeId)}"]`
+    );
+    if (!label) return false;
+
+    // Expand every ancestor .tree-children container up to the root so
+    // the target label is actually visible before we click it.
+    let current = label.closest(".tree-node");
+    while (current) {
+        const childrenContainer = current.parentElement;
+        if (childrenContainer && childrenContainer.classList.contains("tree-children")) {
+            childrenContainer.hidden = false;
+            const parentWrapper = childrenContainer.closest(".tree-node");
+            const toggle = parentWrapper?.querySelector(":scope > .tree-row > .tree-toggle");
+            if (toggle) toggle.textContent = "▾";
+            current = parentWrapper;
+        } else {
+            current = null;
+        }
+    }
+
+    label.scrollIntoView({ block: "center" });
+    label.click();
+    return true;
+}
+
+function cssEscapeId(id) {
+    return (window.CSS && CSS.escape) ? CSS.escape(id) : String(id).replace(/["\\]/g, "\\$&");
+}
+
+function initIndexSearch() {
+    const input = document.getElementById("index-search-input");
+    const suggestions = document.getElementById("index-suggestions");
+    if (!input || !suggestions) return;
+
+    input.addEventListener("input", () => {
+        const query = input.value.trim().toLowerCase();
+        renderIndexAZList(query);
+        renderIndexSuggestions(query);
+    });
+
+    input.addEventListener("focus", () => {
+        if (input.value.trim()) renderIndexSuggestions(input.value.trim().toLowerCase());
+    });
+
+    document.addEventListener("click", (event) => {
+        if (!suggestions.contains(event.target) && event.target !== input) {
+            suggestions.hidden = true;
+        }
+    });
+}
+
+function renderIndexSuggestions(query) {
+    const suggestions = document.getElementById("index-suggestions");
+    if (!suggestions) return;
+
+    if (!query) {
+        suggestions.hidden = true;
+        suggestions.innerHTML = "";
+        return;
+    }
+
+    const groups = groupIndexEntries(getIndexEntries());
+
+    const startsWith = groups.filter(g => g.term.toLowerCase().startsWith(query));
+    const contains = groups.filter(g =>
+        !g.term.toLowerCase().startsWith(query) && g.term.toLowerCase().includes(query)
+    );
+    const results = [...startsWith, ...contains].slice(0, 8);
+
+    if (!results.length) {
+        suggestions.innerHTML = `<div class="index-suggestion-empty">No matching index terms.</div>`;
+        suggestions.hidden = false;
+        return;
+    }
+
+    suggestions.innerHTML = results.map((group, i) => `
+        <div class="index-suggestion-item" data-suggestion-index="${i}">
+            <span class="index-suggestion-term">${escapeHtml(group.term)}</span>
+            ${group.matches.length === 1
+                ? (group.matches[0].isAlias
+                    ? `<span class="index-suggestion-path">see ${escapeHtml(group.matches[0].nodeTitle)}</span>`
+                    : "")
+                : `<span class="index-suggestion-path">${group.matches.length} topics</span>`}
+        </div>
+    `).join("");
+
+    suggestions.querySelectorAll(".index-suggestion-item").forEach((el, i) => {
+        el.addEventListener("click", () => {
+            handleIndexGroupClick(results[i]);
+            suggestions.hidden = true;
+        });
+    });
+
+    suggestions.hidden = false;
+}
+
 async function startApp() {
     let data = await loadStudyData();
 
@@ -1077,6 +1575,9 @@ async function startApp() {
 
     data = window.__studyData;
     renderStudyTree(data);
+    invalidateIndexCache();
+    initRightPanelTabs();
+    initIndexSearch();
 
     // Select the first topic automatically so the notebook is not empty.
     const firstTopic = studyTreeElement.querySelector(
@@ -1332,6 +1833,7 @@ function openStructureDialog(){
 
 function persistAlphaContent(){
     localStorage.setItem("study-notebook-alpha-content",JSON.stringify(window.__studyData));
+    invalidateIndexCache();
 }
 
 

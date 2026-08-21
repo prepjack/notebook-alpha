@@ -23,12 +23,29 @@ field, so old nodes automatically picked up their new labels.)
 
 The labels shown before node names are classification labels; the actual node title is shown darker.
 
-## Main notebook panels
-INDEX | CONTENT | RESOURCES
+## Main notebook panels (Alpha-Plus)
+TABLE OF CONTENTS | CONTENT | REFERENCES / INDEX
 
-- INDEX: user-built hierarchy.
-- CONTENT: author/core content, community contribution and My Notes layers.
-- RESOURCES: links such as Google Drive/Web and YouTube, with page/location reference.
+- TABLE OF CONTENTS (left, was "Index"): the same hierarchical
+  Subject → Course → Unit → Chapter → Topic → Subtopic tree, unchanged
+  in behaviour — only the visible label changed, since "structural
+  navigation tree" is what it actually is, and the word "Index" is now
+  used for the alphabetical panel below.
+- CONTENT (middle): author/core content, community contribution and
+  My Notes layers, plus a "Upload Markdown" path for adding a topic's
+  explanation from a .md file in one step (see js/app.js,
+  triggerMarkdownUpload / saveMarkdownAsExplanation).
+- RIGHT PANEL now has two tabs:
+  - REFERENCES (was "Resources"): unchanged — links such as Google
+    Drive/Web and YouTube, with a page/location reference.
+  - INDEX (new): a book-style A–Z index with a search box and
+    suggestions. Every entry (a node's own title, or an optional
+    "Also known as" alias saved via content_type "index_terms")
+    resolves back to the SAME node id the Table of Contents already
+    uses — clicking an entry calls the same selectNodeById() function
+    that expands/highlights the Table of Contents and loads the topic
+    into CONTENT. There is only one place topic content lives; the
+    Index is an alternate way to find it, not a second copy of it.
 
 ## Resource rule
 Do not ask the user to upload a PDF. Users add a Google Drive/Web link or YouTube link. A `page_ref` field records the relevant PDF page/range or video timestamp.

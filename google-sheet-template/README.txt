@@ -1,5 +1,14 @@
 ALPHA GOOGLE SHEET DATA CONTRACT
 
+NOTE ON THIS FILE: Topics.csv / Resources.csv / MCQs.csv in this same
+folder are an early, illustrative template (they use "topic_id"). The
+site's actual live Apps Script contract — the one js/app.js really talks
+to (see convertApiDataToStudyData() and the save_core/save_resource/
+save_structure/delete_* actions) — is the Nodes + Content + Resources +
+MCQs + Community shape described from section 4 onward below, keyed on
+"node_id". Treat node_id as the one canonical, stable ID; nothing in
+Alpha-Plus introduces a second/duplicate ID system.
+
 The website should eventually read three logical tables:
 
 1. Topics
@@ -51,7 +60,36 @@ Google Sheets
 Adding a new row to Resources or MCQs should therefore become the normal
 "add content" operation later.
 
-5. RICH CONTENT SYNTAX (definition / explanation / example columns)
+5. ALPHA-PLUS — INDEX TERMS (optional, reuses the Content table above)
+--------------------------------------------------------------------
+No new sheet is needed for the Index feature. A node can optionally get
+one more Content row with:
+
+    content_type = "index_terms"
+    content      = "RFID, Radio Frequency Identification, RFID tag"
+
+This is written by the same "save_core" action as definition/explanation/
+example/key_points/diagram, and is filled in from the website's existing
+"Add / Edit Content" form (field: "Also known as") — nothing new to build
+in Apps Script, since content_type is already handled generically:
+node.content[content_type] = row.content for any type that isn't
+"key_points". Comma or newline separated. Every node's own title is
+already an index entry automatically; index_terms only adds ALIASES
+that should resolve to the same node/topic without duplicating content.
+
+6. ALPHA-PLUS — MARKDOWN UPLOAD
+--------------------------------------------------------------------
+"Upload Markdown" in the middle panel reads the chosen .md file as plain
+text in the browser and saves it as this node's "explanation" content_type
+through the existing save_core action — the very same call "Add / Edit
+Content" already makes. No Google Drive file, file ID, or new Apps Script
+endpoint is used for this, because the content is plain text and a single
+Google Sheets cell already holds far more than a typical topic's worth of
+Markdown (tens of thousands of characters). Drive remains the right choice
+later only for large binary attachments (e.g. scanned PDFs, big images),
+which is a separate concern from topic prose.
+
+7. RICH CONTENT SYNTAX (definition / explanation / example columns)
 --------------------------------------------------------------------
 No new columns needed. Type into the SAME cells as before — the website
 now renders Markdown instead of plain text. Fill fast in one cell using

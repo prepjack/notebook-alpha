@@ -25,7 +25,7 @@
 
             <!-- LEFT: expandable knowledge index -->
             <aside id="left-panel" class="panel">
-                <div class="panel-heading">INDEX</div>
+                <div class="panel-heading">TABLE OF CONTENTS</div>
                 <div id="left-resizer" class="panel-resizer"
                      title="Drag this RIGHT edge left/right to resize"></div>
                 <div class="tree-toolbar">
@@ -54,12 +54,29 @@
                 </div>
             </section>
 
-            <!-- RIGHT: resources -->
+            <!-- RIGHT: references / index -->
             <aside id="right-panel" class="panel">
-                <div class="panel-heading">RESOURCES</div>
+                <div class="panel-heading">REFERENCES &amp; INDEX</div>
                 <div id="right-resizer" class="panel-resizer"
                      title="Drag this LEFT edge left/right to resize"></div>
-                <div id="resources"></div>
+
+                <div class="right-panel-tabs">
+                    <button type="button" class="right-panel-tab active" data-right-tab="references">References</button>
+                    <button type="button" class="right-panel-tab" data-right-tab="index">Index</button>
+                </div>
+
+                <div id="right-tab-references" class="right-tab-view">
+                    <div id="resources"></div>
+                </div>
+
+                <div id="right-tab-index" class="right-tab-view" hidden>
+                    <div class="index-search-wrap">
+                        <input type="text" id="index-search-input" class="index-search-input"
+                               placeholder="Search the index... e.g. bibli" autocomplete="off">
+                        <div id="index-suggestions" class="index-suggestions" hidden></div>
+                    </div>
+                    <div id="index-az-list" class="index-az-list"></div>
+                </div>
             </aside>
 
         </section>

@@ -621,6 +621,46 @@ body.resizing-panels {
 .structure-dialog-actions button{padding:8px 12px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--green);cursor:pointer;font:700 11px Arial,sans-serif}
 .structure-dialog-actions .save{border-color:#9bb2a2;background:var(--green-soft)}
 
+/* ALPHA-PLUS — RIGHT PANEL TABS (References | Index) */
+.right-panel-tabs{display:flex;gap:4px;margin:0 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+.right-panel-tab{padding:7px 10px;border:0;border-radius:6px;background:transparent;color:#6a746d;cursor:pointer;font:700 10px Arial,sans-serif;letter-spacing:.06em}
+.right-panel-tab:hover{background:#f1f4ee}
+.right-panel-tab.active{background:var(--green-soft);color:var(--green)}
+.right-tab-view{}
+
+/* ALPHA-PLUS — INDEX (A–Z, book-style) */
+.index-search-wrap{position:relative;margin-bottom:14px}
+.index-search-input{width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid var(--line);border-radius:7px;font:12px Arial,sans-serif;background:#fff;color:var(--text)}
+.index-search-input:focus{outline:none;border-color:#9bb2a2}
+.index-suggestions{position:absolute;z-index:40;top:calc(100% + 4px);left:0;right:0;max-height:260px;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 28px rgba(0,0,0,.12)}
+.index-suggestion-item{padding:8px 10px;cursor:pointer;font:12px Arial,sans-serif;color:#354239;border-bottom:1px solid var(--line)}
+.index-suggestion-item:last-child{border-bottom:0}
+.index-suggestion-item:hover,.index-suggestion-item.active{background:var(--green-soft);color:var(--green)}
+.index-suggestion-term{font-weight:700}
+.index-suggestion-path{display:block;margin-top:2px;color:var(--muted);font-size:10px}
+.index-suggestion-empty{padding:10px;color:var(--muted);font:12px Arial,sans-serif;text-align:center}
+
+.index-az-list{font-family:Arial,sans-serif}
+.index-letter-group{margin-bottom:10px}
+.index-letter-heading{position:sticky;top:0;z-index:2;margin:0 0 4px;padding:4px 6px;background:var(--page);color:var(--green);font:700 13px Arial,sans-serif;border-bottom:1px solid var(--line)}
+.index-term-row{padding:6px 6px;cursor:pointer;border-radius:6px;font-size:12.5px;color:#354239;display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.index-term-row:hover{background:#f1f4ee;color:var(--green)}
+.index-term-name{flex:1}
+.index-term-alias-of{color:var(--muted);font-size:10px;font-style:italic}
+.index-empty-note{padding:12px 4px;color:var(--muted);font:12px/1.5 Arial,sans-serif}
+
+/* ALPHA-PLUS — index term picker (when a term matches more than one topic) */
+.index-picker-list{margin-top:8px}
+.index-picker-option{width:100%;box-sizing:border-box;margin-top:6px;padding:9px 10px;border:1px solid var(--line);border-radius:7px;background:#fff;color:#354239;cursor:pointer;text-align:left;font:12px Arial,sans-serif}
+.index-picker-option:hover{background:var(--green-soft);color:var(--green)}
+
+/* ALPHA-PLUS — Markdown upload / empty-content state */
+.empty-content-block{max-width:520px;margin:26px auto 0;padding:22px;border:1px dashed var(--line);border-radius:10px;text-align:center;background:#fafaf6}
+.empty-content-block p{margin:0 0 14px;color:var(--muted);font:12px/1.6 Arial,sans-serif}
+.markdown-upload-input{display:none}
+.content-status-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.content-status-tag{padding:3px 8px;border-radius:5px;background:var(--green-soft);color:var(--green);font:700 10px Arial,sans-serif;letter-spacing:.04em}
+
 /* STEP 12 — CONTENT LAYERS */
 .content-layer-tabs{display:flex;gap:4px;margin:0 0 22px;padding-bottom:8px;border-bottom:1px solid var(--line)}
 .content-layer-tab{padding:7px 10px;border:0;border-radius:6px;background:transparent;color:#6a746d;cursor:pointer;font:700 10px Arial,sans-serif;letter-spacing:.06em}
