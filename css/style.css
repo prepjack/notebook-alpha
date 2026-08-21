@@ -1,0 +1,2466 @@
+/* =========================================================
+   PROJECT ALPHA — STUDY NOTEBOOK
+   Step 1: visual/layout foundation
+   ========================================================= */
+
+* {
+    box-sizing: border-box;
+}
+
+:root {
+    --page: #eef1e9;
+    --paper: #fffefa;
+    --line: #d8ddd2;
+    --text: #26332b;
+    --muted: #7d8780;
+    --green: #315f4c;
+    --green-soft: #e4ece4;
+}
+
+html,
+body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+}
+
+body {
+    background: var(--page);
+    color: var(--text);
+    font-family: Georgia, "Times New Roman", serif;
+    /* The three panels below still fill the full viewport height (see
+       .workspace); this only lets the page scroll far enough to reach the
+       footer instead of clipping it off. */
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+.app-footer {
+    height: 34px;
+    margin-top: 14px;
+    box-sizing: border-box;
+    padding: 8px 20px;
+    text-align: center;
+    color: var(--muted);
+    font: 11px/1 Arial, sans-serif;
+    letter-spacing: .3px;
+}
+
+/* Header */
+.app-header {
+    height: 110px;
+    padding: 0 20px;
+    display: flex;
+    align-items: flex-start;
+    background: var(--paper);
+    border-bottom: 1px solid var(--line);
+}
+
+.app-header h1 {
+    margin: 0;
+    padding-top: 2px;
+    font-size: 27px;
+    font-weight: 500;
+}
+
+/* Three-panel workspace */
+.workspace {
+    height: calc(100vh - 110px);
+    display: grid;
+    grid-template-columns: 360px minmax(300px, 1fr) 360px;
+    gap: 0;
+    overflow: hidden;
+}
+
+/* Panels */
+.panel {
+    min-width: 0;
+    min-height: 0;
+    margin-top: 18px;
+    margin-bottom: 18px;
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: auto;
+}
+
+/* The panel itself exposes a narrow resize zone at its OUTER edge. */
+#left-panel {
+    position: relative;
+}
+
+#right-panel {
+    position: relative;
+}
+
+#left-panel {
+    margin-left: 18px;
+    margin-right: 8px;
+    padding: 16px 14px;
+    overflow-x: hidden;
+}
+
+#middle-panel {
+    margin-left: 10px;
+    margin-right: 10px;
+    padding: 16px 34px 34px;
+}
+
+#right-panel {
+    margin-left: 8px;
+    margin-right: 18px;
+    padding: 16px 14px;
+    overflow-x: hidden;
+}
+
+/* Headings */
+.panel-heading {
+    margin-bottom: 16px;
+    color: var(--muted);
+    font-family: Arial, sans-serif;
+    font-size: 13px;
+    letter-spacing: .08em;
+}
+
+/* Middle placeholder */
+#topic-content {
+    max-width: 820px;
+    margin: 0 auto;
+    text-align: center;
+}
+
+#topic-content h2 {
+    margin: 0 0 8px;
+    font-size: 20px;
+    font-weight: 400;
+    font-style: italic;
+    color: var(--muted);
+}
+
+#topic-content p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 17px;
+    line-height: 1.6;
+    font-style: italic;
+}
+
+/* =========================================================
+   Responsive foundation
+   ========================================================= */
+
+@media (max-width: 900px) {
+    body {
+        overflow: auto;
+    }
+
+    .workspace {
+        height: auto;
+        grid-template-columns: 240px minmax(0, 1fr);
+    }
+
+    #right-panel {
+        grid-column: 1 / -1;
+        margin: 10px 18px 18px;
+    }
+}
+
+@media (max-width: 650px) {
+    .workspace {
+        display: block;
+    }
+
+    .panel {
+        margin: 10px 12px;
+    }
+
+    #middle-panel {
+        padding: 55px 20px 25px;
+    }
+}
+
+
+/* =========================================================
+   STEP 2 — HORIZONTAL PANEL RESIZERS
+   Only LEFT/RIGHT panel WIDTH can be changed by dragging.
+   Panel HEIGHT is not resizable.
+   ========================================================= */
+
+.workspace {
+    --left-width: 360px;
+    --right-width: 360px;
+    grid-template-columns:
+        var(--left-width)
+        minmax(300px, 1fr)
+        var(--right-width);
+}
+
+.panel-resizer {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 16px;
+    cursor: col-resize;
+    z-index: 100;
+}
+
+/* LEFT panel: resize on its RIGHT edge */
+#left-resizer {
+    right: -8px;
+}
+
+/* RIGHT panel: resize on its LEFT edge */
+#right-resizer {
+    left: -8px;
+}
+
+.panel-resizer::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 7px;
+    width: 2px;
+    background: transparent;
+    border-radius: 2px;
+}
+
+.panel-resizer:hover::after,
+body.resizing-panels .panel-resizer::after {
+    background: #aebcb1;
+}
+
+body.resizing-panels {
+    cursor: col-resize;
+    user-select: none;
+}
+
+
+/* =========================================================
+   STEP 3 — EXPANDABLE INDEX TREE
+   ========================================================= */
+
+.tree-node {
+    margin: 1px 0;
+}
+
+.tree-row {
+    min-height: 34px;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    border-radius: 7px;
+}
+
+.tree-row:hover {
+    background: #f1f4ef;
+}
+
+.tree-toggle {
+    width: 20px;
+    height: 26px;
+    flex: 0 0 20px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: #7d8780;
+    cursor: pointer;
+    font-family: Arial, sans-serif;
+    font-size: 12px;
+}
+
+.tree-label {
+    flex: 1;
+    min-width: 0;
+    padding: 7px 5px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: #26332b;
+    text-align: left;
+    cursor: pointer;
+    font-family: Arial, sans-serif;
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tree-label:hover {
+    color: #315f4c;
+}
+
+.tree-label.active {
+    background: #e4ece4;
+    color: #315f4c;
+    font-weight: 600;
+}
+
+.tree-children {
+    margin-left: 10px;
+    padding-left: 10px;
+    border-left: 1px solid #d8ddd2;
+}
+
+.tree-children[hidden] {
+    display: none;
+}
+
+
+/* =========================================================
+   STEP 4 — TOPIC CONTENT
+   ========================================================= */
+
+.topic-content-inner {
+    max-width: 820px;
+    margin: 0 auto;
+    text-align: left;
+}
+
+.topic-eyebrow {
+    margin-bottom: 8px;
+    color: var(--green);
+    font-family: Arial, sans-serif;
+    font-size: 12px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.topic-title {
+    margin: 0 0 18px;
+    color: var(--text);
+    font-size: 34px;
+    font-weight: 500;
+}
+
+.topic-block {
+    margin-top: 28px;
+}
+
+.topic-block h3 {
+    margin: 0 0 10px;
+    color: #3b4940;
+    font-size: 18px;
+    font-weight: 500;
+}
+
+.topic-block p {
+    margin: 0;
+    color: #536058;
+    font-size: 17px;
+    line-height: 1.7;
+}
+
+.key-points {
+    margin: 0;
+    padding-left: 22px;
+    color: #536058;
+    font-size: 16px;
+    line-height: 1.8;
+}
+
+#topic-content .empty-topic {
+    text-align: center;
+    padding-top: 25px;
+}
+
+
+/* =========================================================
+   STEP 5 — RESOURCES PANEL
+   ========================================================= */
+
+.resource-list {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+}
+
+.resource-card {
+    display: block;
+    padding: 11px 10px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: #fffefa;
+    color: inherit;
+    text-decoration: none;
+}
+
+.resource-card:hover {
+    background: #f3f6f0;
+    border-color: #bdcbbf;
+}
+
+.resource-type {
+    margin-bottom: 4px;
+    color: var(--green);
+    font-family: Arial, sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.resource-title {
+    color: #314035;
+    font-family: Arial, sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+.resource-description {
+    margin-top: 4px;
+    color: var(--muted);
+    font-family: Arial, sans-serif;
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+.resources-empty {
+    color: var(--muted);
+    font-family: Arial, sans-serif;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+
+
+
+
+/* =========================================================
+   MCQ LAUNCHER — opens dedicated MCQ page in a new tab
+   ========================================================= */
+
+.mcq-launch-area {
+    max-width: 820px;
+    margin: 38px auto 0;
+    padding-top: 22px;
+    border-top: 1px solid var(--line);
+    text-align: center;
+}
+
+#mcq-launch {
+    padding: 11px 18px;
+    border: 1px solid #9bb2a2;
+    border-radius: 8px;
+    background: var(--green-soft);
+    color: var(--green);
+    cursor: pointer;
+    font-family: Arial, sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: .03em;
+}
+
+#mcq-launch:hover {
+    background: #dce8de;
+}
+
+/* Dedicated MCQ page */
+.mcq-page {
+    overflow: hidden;
+}
+
+#mcq-page-root {
+    height: calc(100vh - 110px);
+    display: flex;
+    flex-direction: column;
+}
+
+#mcq-page-root .mcq-setup {
+    flex: 0 0 auto;
+}
+
+#mcq-page-root .mcq-workspace {
+    flex: 1;
+    min-height: 0;
+}
+
+/* =========================================================
+   STEP 8 — MCQ RESULT
+   ========================================================= */
+#mcq-submit {
+    width: 100%;
+    margin-top: 22px;
+    padding: 9px 10px;
+    border: 1px solid #9bb2a2;
+    border-radius: 7px;
+    background: var(--green-soft);
+    color: var(--green);
+    cursor: pointer;
+    font-family: Arial, sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.mcq-result {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    overflow: auto;
+    padding: 55px;
+    background: var(--paper);
+}
+.mcq-result[hidden] { display: none; }
+
+.result-title {
+    margin-bottom: 25px;
+    color: var(--green);
+    font-family: Arial, sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .1em;
+}
+#result-summary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(100px, 1fr));
+    gap: 12px;
+    max-width: 850px;
+}
+.result-stat {
+    padding: 18px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: #fafaf5;
+}
+.result-stat-label {
+    margin-bottom: 5px;
+    color: var(--muted);
+    font-family: Arial, sans-serif;
+    font-size: 11px;
+}
+.result-stat-value {
+    color: var(--green);
+    font-family: Arial, sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+}
+#result-details {
+    max-width: 850px;
+    margin-top: 25px;
+    border-top: 1px solid var(--line);
+}
+.result-question {
+    padding: 15px 0;
+    border-bottom: 1px solid var(--line);
+    font-family: Arial, sans-serif;
+    font-size: 13px;
+    line-height: 1.5;
+}
+.result-question.correct {
+    border-left: 3px solid #9bb2a2;
+    padding-left: 12px;
+}
+.result-question.wrong {
+    border-left: 3px solid #c9a9a9;
+    padding-left: 12px;
+}
+#mcq-retry {
+    margin-top: 25px;
+    padding: 9px 14px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: white;
+    color: var(--green);
+    cursor: pointer;
+    font-family: Arial, sans-serif;
+}
+@media (max-width: 700px) {
+    .mcq-result { padding: 30px 20px; }
+    #result-summary { grid-template-columns: repeat(2, 1fr); }
+}
+
+#download-report {
+    margin-top: 25px;
+    margin-right: 8px;
+    padding: 9px 14px;
+    border: 1px solid #9bb2a2;
+    border-radius: 7px;
+    background: var(--green-soft);
+    color: var(--green);
+    cursor: pointer;
+    font-family: Arial, sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+}
+#download-report:hover {
+    background: #dce8de;
+}
+
+/* =========================================================
+   STEP 10 — RESOURCE MODEL
+   ========================================================= */
+
+.resource-source {
+    margin-top: 6px;
+    color: var(--muted);
+    font-family: Arial, sans-serif;
+    font-size: 10px;
+}
+
+/* =========================================================
+   STEP 13 — CONTROLLED CANONICAL TREE EXTENSION
+   ========================================================= */
+
+.tree-toolbar{display:flex;align-items:center;justify-content:space-between;padding:11px 12px;border-bottom:1px solid var(--line)}
+.tree-toolbar-title{color:var(--muted);font:700 10px Arial,sans-serif;letter-spacing:.08em}
+.tree-add-button{padding:5px 9px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--green);cursor:pointer;font:700 11px Arial,sans-serif}
+.tree-add-button:disabled{opacity:.45;cursor:default}
+.tree-actions{position:absolute;z-index:30;top:72px;left:12px;right:12px;padding:10px;border:1px solid var(--line);border-radius:8px;background:#fff;box-shadow:0 8px 22px rgba(0,0,0,.08)}
+.tree-actions[hidden]{display:none}
+.tree-action-title{margin-bottom:7px;color:var(--muted);font:700 9px Arial,sans-serif;letter-spacing:.08em}
+.tree-action-option{display:block;width:100%;margin-top:5px;padding:8px 9px;border:1px solid var(--line);border-radius:6px;background:#fff;color:#354239;cursor:pointer;text-align:left;font:11px Arial,sans-serif}
+.tree-action-option:hover{background:#f3f6f0}
+.structure-dialog-backdrop{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(28,38,31,.28)}
+.structure-dialog{width:min(430px,100%);padding:22px;border:1px solid var(--line);border-radius:10px;background:#fff;box-shadow:0 18px 50px rgba(0,0,0,.16)}
+.structure-dialog h3{margin:0 0 7px;color:var(--green);font:700 14px Arial,sans-serif}
+.structure-dialog p{margin:0 0 15px;color:var(--muted);font:12px/1.5 Arial,sans-serif}
+.structure-dialog input,.structure-dialog textarea{width:100%;box-sizing:border-box;margin-bottom:10px;padding:9px 10px;border:1px solid var(--line);border-radius:7px;font:12px Arial,sans-serif}
+.structure-dialog textarea{min-height:110px;resize:vertical}
+.structure-dialog-actions{display:flex;justify-content:flex-end;gap:8px}
+.structure-dialog-actions button{padding:8px 12px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--green);cursor:pointer;font:700 11px Arial,sans-serif}
+.structure-dialog-actions .save{border-color:#9bb2a2;background:var(--green-soft)}
+
+/* STEP 12 — CONTENT LAYERS */
+.content-layer-tabs{display:flex;gap:4px;margin:0 0 22px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+.content-layer-tab{padding:7px 10px;border:0;border-radius:6px;background:transparent;color:#6a746d;cursor:pointer;font:700 10px Arial,sans-serif;letter-spacing:.06em}
+.content-layer-tab:hover{background:#f1f4ef}
+.content-layer-tab.active{background:var(--green-soft);color:var(--green)}
+.layer-heading{margin-bottom:8px;color:var(--green);font:700 11px Arial,sans-serif;letter-spacing:.08em}
+.layer-note{margin-bottom:20px;color:var(--muted);font:12px/1.5 Arial,sans-serif}
+.community-card{margin:12px 0;padding:15px;border:1px solid var(--line);border-radius:8px;background:#fafaf5}
+.community-meta{margin-bottom:7px;color:var(--muted);font:10px Arial,sans-serif;text-transform:uppercase;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.community-delete-btn{margin-left:auto;padding:3px 8px;border:1px solid #d99;border-radius:5px;background:#fff;color:#b33;cursor:pointer;font:10px Arial,sans-serif;text-transform:none}
+.community-delete-btn:hover{background:#fdeaea}
+.content-action-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+.content-action-row-top{margin-top:0;margin-bottom:14px;justify-content:flex-end}
+.content-action{padding:8px 11px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--green);cursor:pointer;font:700 11px Arial,sans-serif}
+.topic-diagrams{display:flex;flex-wrap:wrap;gap:12px;margin-top:8px}
+.topic-diagram-img{max-width:100%;width:280px;border:1px solid var(--line);border-radius:8px;cursor:zoom-in;background:#fff}
+.content-action.primary{border-color:#9bb2a2;background:var(--green-soft)}
+.my-notes-editor{width:100%;min-height:180px;box-sizing:border-box;resize:vertical;padding:12px;border:1px solid var(--line);border-radius:8px;background:#fff;color:#354239;font:13px/1.6 Arial,sans-serif}
+.drive-note{margin-top:10px;padding:10px;border-radius:7px;background:#f4f6f2;color:var(--muted);font:11px/1.5 Arial,sans-serif}
+
+/* =========================================================
+   STEP 14 — AUTHOR EDITOR
+   ========================================================= */
+
+.author-page {
+    min-height: 100vh;
+    background: var(--page);
+}
+
+.author-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 15px;
+    padding: 15px 22px;
+    border-bottom: 1px solid var(--line);
+    background: #fff;
+}
+
+.author-header-title {
+    color: var(--green);
+    font: 700 13px Arial, sans-serif;
+    letter-spacing: .08em;
+}
+
+.author-header-note {
+    color: var(--muted);
+    font: 11px Arial, sans-serif;
+}
+
+.author-layout {
+    display: grid;
+    grid-template-columns: 290px minmax(0, 1fr);
+    height: calc(100vh - 58px);
+    min-height: 0;
+}
+
+.author-editor {
+    padding: 30px;
+    overflow-y: auto;
+    min-height: 0;
+}
+
+.author-tree {
+    padding: 18px;
+    border-right: 1px solid var(--line);
+    background: #f8faf6;
+    overflow: auto;
+}
+
+.author-tree-actions {
+    display: flex;
+    gap: 7px;
+    margin-bottom: 14px;
+}
+
+.author-tree-actions button,
+.author-save-button,
+.author-add-button {
+    padding: 7px 10px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: #fff;
+    color: var(--green);
+    cursor: pointer;
+    font: 700 10px Arial, sans-serif;
+}
+
+.author-save-button,
+.author-add-button.primary {
+    border-color: #9bb2a2;
+    background: var(--green-soft);
+}
+
+.author-editor {
+    padding: 30px;
+    overflow: auto;
+}
+
+.author-editor-card {
+    max-width: 850px;
+    padding: 22px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #fff;
+}
+
+.author-editor-card h1 {
+    margin: 0 0 6px;
+    color: var(--green);
+    font: 700 18px Arial, sans-serif;
+}
+
+.author-editor-card .editor-type {
+    margin-bottom: 22px;
+    color: var(--muted);
+    font: 10px Arial, sans-serif;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+}
+
+.author-field {
+    margin-bottom: 17px;
+}
+
+.author-field label {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--green);
+    font: 700 10px Arial, sans-serif;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+}
+
+.author-field input,
+.author-field textarea {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px 11px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: #fff;
+    color: #354239;
+    font: 13px/1.55 Arial, sans-serif;
+}
+
+.author-field textarea {
+    min-height: 130px;
+    resize: vertical;
+}
+
+.author-keypoint-row {
+    display: flex;
+    gap: 7px;
+    margin-bottom: 7px;
+}
+
+.author-keypoint-row input {
+    flex: 1;
+}
+
+.author-resource-row,
+.author-mcq-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px;
+    margin-bottom: 10px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: #fafcfa;
+}
+
+.author-resource-row input,
+.author-resource-row select,
+.author-mcq-row input,
+.author-mcq-row select,
+.author-mcq-row textarea {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 9px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: #fff;
+    color: #354239;
+    font: 12px/1.5 Arial, sans-serif;
+}
+
+.author-mcq-row textarea {
+    min-height: 60px;
+    resize: vertical;
+}
+
+.author-resource-row button,
+.author-mcq-row button {
+    align-self: flex-end;
+}
+
+.author-small-button {
+    padding: 6px 8px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: #fff;
+    cursor: pointer;
+    color: var(--muted);
+}
+
+.author-status {
+    min-height: 18px;
+    margin-top: 12px;
+    color: var(--muted);
+    font: 11px Arial, sans-serif;
+}
+
+.author-help {
+    margin-top: 18px;
+    padding: 12px;
+    border-radius: 8px;
+    background: #f4f6f2;
+    color: var(--muted);
+    font: 11px/1.55 Arial, sans-serif;
+}
+
+@media (max-width: 800px) {
+    .author-layout {
+        grid-template-columns: 1fr;
+    }
+    .author-tree {
+        max-height: 280px;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+    }
+}
+
+
+/* STEP 16 — OPEN-ENDED CANONICAL TREE */
+.tree-action-option{white-space:normal}
+
+/* =========================================================
+   STEP 17 — COMMUNITY CONTRIBUTION
+   ========================================================= */
+
+.contribution-modal{
+    position:fixed;
+    inset:0;
+    z-index:200;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:20px;
+    background:rgba(28,38,31,.30);
+}
+.contribution-modal[hidden]{display:none}
+.contribution-dialog{
+    width:min(560px,100%);
+    max-height:90vh;
+    overflow:auto;
+    padding:22px;
+    border:1px solid var(--line);
+    border-radius:11px;
+    background:#fff;
+    box-shadow:0 22px 60px rgba(0,0,0,.18);
+}
+.contribution-header{
+    display:flex;
+    justify-content:space-between;
+    gap:15px;
+    margin-bottom:20px;
+}
+.contribution-kicker{
+    margin-bottom:5px;
+    color:var(--green);
+    font:700 9px Arial,sans-serif;
+    letter-spacing:.1em;
+}
+.contribution-header h3{
+    margin:0;
+    color:#354239;
+    font:700 18px Arial,sans-serif;
+}
+.contribution-close{
+    width:28px;
+    height:28px;
+    border:0;
+    border-radius:50%;
+    background:#f1f3ef;
+    color:var(--muted);
+    cursor:pointer;
+    font-size:18px;
+}
+.contribution-label{
+    display:block;
+    margin:14px 0 6px;
+    color:var(--green);
+    font:700 10px Arial,sans-serif;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+}
+.contribution-select,.contribution-input,.contribution-textarea{
+    width:100%;
+    box-sizing:border-box;
+    padding:10px 11px;
+    border:1px solid var(--line);
+    border-radius:7px;
+    background:#fff;
+    color:#354239;
+    font:12px/1.5 Arial,sans-serif;
+}
+.contribution-textarea{
+    min-height:150px;
+    resize:vertical;
+}
+.contribution-extra{
+    margin-top:5px;
+}
+.contribution-actions{
+    display:flex;
+    justify-content:flex-end;
+    gap:8px;
+    margin-top:18px;
+}
+.contribution-footnote{
+    margin-top:13px;
+    padding:10px;
+    border-radius:7px;
+    background:#f4f6f2;
+    color:var(--muted);
+    font:11px/1.5 Arial,sans-serif;
+}
+
+/* STEP 18 — MY NOTES + STRUCTURED COMMUNITY SUBMISSION */
+.my-notes-editor{width:100%;min-height:220px;box-sizing:border-box;resize:vertical;padding:12px;border:1px solid var(--line);border-radius:8px;background:#fff;color:#354239;font:13px/1.6 Arial,sans-serif}
+.ai-contribution-guide{
+    margin:12px 0 18px;
+    padding:12px 14px;
+    border-left:3px solid #9bb2a2;
+    border-radius:6px;
+    background:#f5f7f3;
+    color:var(--muted);
+    font:11px/1.6 Arial,sans-serif;
+}
+.ai-contribution-guide strong{color:#354239}
+.contribution-format-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:10px;
+}
+.contribution-format-field{
+    display:flex;
+    flex-direction:column;
+}
+.contribution-format-field.full{grid-column:1/-1}
+.contribution-format-field label{
+    margin-bottom:5px;
+    color:var(--green);
+    font:700 9px Arial,sans-serif;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+}
+.contribution-format-field input,
+.contribution-format-field textarea{
+    width:100%;
+    box-sizing:border-box;
+    padding:9px 10px;
+    border:1px solid var(--line);
+    border-radius:7px;
+    font:11px/1.5 Arial,sans-serif;
+}
+.contribution-format-field textarea{min-height:90px;resize:vertical}
+.ai-disclosure{
+    display:flex;
+    gap:8px;
+    align-items:flex-start;
+    margin-top:12px;
+    color:var(--muted);
+    font:11px/1.4 Arial,sans-serif;
+}
+.ai-disclosure input{margin-top:2px}
+.contribution-review-note{
+    margin-top:10px;
+    padding:9px;
+    border-radius:6px;
+    background:#fafaf5;
+    color:var(--muted);
+    font:10px/1.45 Arial,sans-serif;
+}
+@media(max-width:650px){
+    .contribution-format-grid{grid-template-columns:1fr}
+    .contribution-format-field.full{grid-column:auto}
+}
+
+/* STEP 19 — MARKDOWN CONTRIBUTION FORMAT */
+.markdown-contribution-note{
+    margin-top:14px;
+    padding:11px 12px;
+    border-radius:7px;
+    background:#f5f7f3;
+    color:var(--muted);
+    font:11px/1.55 Arial,sans-serif;
+}
+.markdown-contribution-note strong{color:#354239}
+.markdown-contribution-note code{
+    padding:1px 4px;
+    border-radius:4px;
+    background:#e9ede7;
+    color:#354239;
+    font-family:Consolas,monospace;
+}
+
+/* STEP 20 — SHEET-FRIENDLY STRUCTURED CONTRIBUTION FORM */
+.contribution-topic-label{
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+    margin-bottom:17px;
+    padding:10px 12px;
+    border-radius:7px;
+    background:#f4f6f2;
+}
+.contribution-topic-label span{
+    color:var(--muted);
+    font:700 8px Arial,sans-serif;
+    letter-spacing:.08em;
+}
+.contribution-topic-label strong{
+    color:#354239;
+    font:700 12px Arial,sans-serif;
+}
+.contribution-field{margin-bottom:13px}
+.contribution-small-textarea{
+    width:100%;
+    min-height:85px;
+    box-sizing:border-box;
+    padding:10px 11px;
+    border:1px solid var(--line);
+    border-radius:7px;
+    resize:vertical;
+    font:12px/1.5 Arial,sans-serif;
+}
+.contribution-small-button{
+    margin-top:6px;
+    padding:6px 9px;
+    border:1px solid var(--line);
+    border-radius:6px;
+    background:#fff;
+    color:var(--green);
+    cursor:pointer;
+    font:700 10px Arial,sans-serif;
+}
+.contribution-keypoint-row{
+    display:flex;
+    gap:6px;
+    margin-bottom:6px;
+}
+.contribution-keypoint-row input{
+    flex:1;
+    padding:8px 9px;
+    border:1px solid var(--line);
+    border-radius:6px;
+    font:11px Arial,sans-serif;
+}
+.contribution-keypoint-remove{
+    padding:5px 8px;
+    border:1px solid var(--line);
+    border-radius:6px;
+    background:#fff;
+    color:var(--muted);
+    cursor:pointer;
+}
+
+/* STEP 21 — PER-NODE HOVER ADD */
+/* The add/delete buttons are only needed on hover, so they're taken out of
+   normal flow (absolutely positioned over the row's right edge) instead of
+   permanently reserving width — that reserved gap was what stopped topic
+   titles from reaching the panel's right border. */
+.tree-row{display:flex;align-items:center;width:100%;min-width:0;position:relative}
+.tree-row .tree-label{flex:1;min-width:0}
+.tree-node-add{position:absolute;top:50%;right:28px;transform:translateY(-50%);width:24px;height:24px;border:0;border-radius:6px;background:transparent;color:var(--green);cursor:pointer;opacity:0;pointer-events:none;font:700 15px/24px Arial,sans-serif;transition:opacity .12s ease,background .12s ease;z-index:2}
+.tree-row:hover .tree-node-add,.tree-node-add:focus{opacity:1;pointer-events:auto}
+.tree-node-add:hover{background:#dfe8df}
+
+
+/* STEP 24 — SUBJECTS INSIDE THE NOTEBOOK HEADER */
+.header-subjects{
+    display:flex;
+    align-items:center;
+    gap:7px;
+    margin-left:18px;
+    min-width:0;
+    flex:1;
+}
+.subject-strip-list{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    min-width:0;
+    overflow-x:auto;
+    scrollbar-width:none;
+}
+.subject-strip-list::-webkit-scrollbar{display:none}
+.subject-chip{
+    flex:0 0 auto;
+    padding:5px 13px;
+    border:1px solid var(--line);
+    border-radius:16px;
+    background:#fff;
+    color:#354239;
+    cursor:pointer;
+    font:12px Arial,sans-serif;
+    white-space:nowrap;
+}
+.subject-chip:hover{background:#f4f6f2}
+.subject-chip.active{
+    border-color:#9bb2a2;
+    background:var(--green-soft);
+    color:var(--green);
+}
+.subject-add-button{
+    flex:0 0 auto;
+    padding:5px 11px;
+    border:1px dashed #7e9b87;
+    border-radius:16px;
+    background:#fff;
+    color:var(--green);
+    cursor:pointer;
+    font:12px Arial,sans-serif;
+    white-space:nowrap;
+}
+.subject-add-button:hover{background:var(--green-soft)}
+@media(max-width:760px){
+    .header-subjects{margin-left:8px}
+    .subject-chip{padding:4px 10px;font-size:11px}
+    .subject-add-button{padding:4px 9px;font-size:11px}
+}
+
+/* Compact top strip */
+.topbar,.header,.site-header{
+    min-height:0;
+}
+
+/* STEP 25 — REFERENCE INTERFACE / COMPACT HEADER */
+.app-header{
+    height:92px !important;
+    box-sizing:border-box;
+    padding:7px 20px 6px !important;
+    display:flex !important;
+    flex-direction:column !important;
+    align-items:flex-start !important;
+    justify-content:flex-start !important;
+}
+.app-header h1{
+    margin:0 !important;
+    padding:0 !important;
+    height:32px;
+    line-height:32px !important;
+    font-size:27px !important;
+    flex:0 0 32px;
+}
+.header-subjects{
+    width:100%;
+    height:34px;
+    min-height:34px;
+    margin:3px 0 0 !important;
+    display:flex;
+    align-items:center;
+    gap:9px;
+}
+.subject-strip-list{
+    flex:0 1 auto;
+    max-width:calc(100% - 120px);
+}
+.subject-chip{
+    padding:5px 13px !important;
+}
+.subject-add-button{
+    padding:5px 12px !important;
+}
+.workspace{
+    /* Panels fill the full viewport height below the header. The footer no
+       longer eats into that height — it sits after the workspace instead,
+       and the page scrolls the extra bit to reach it. */
+    height:calc(100vh - 92px) !important;
+}
+.tree-row{
+    display:flex;
+    align-items:center;
+    width:100%;
+    min-width:0;
+}
+.tree-row .tree-label{
+    flex:1;
+    min-width:0;
+}
+/* Overlay buttons, not flex siblings — see STEP 21 note above. This keeps
+   them from permanently reserving row width so long titles can use the
+   panel's full right edge, while still being reachable on hover. */
+.tree-node-add,.tree-node-delete{
+    position:absolute;
+    top:50%;
+    transform:translateY(-50%);
+    width:24px;
+    height:24px;
+    margin:0;
+    border:0;
+    border-radius:6px;
+    background:transparent;
+    cursor:pointer;
+    opacity:0;
+    pointer-events:none;
+    font:700 14px/24px Arial,sans-serif;
+    transition:opacity .12s ease,background .12s ease;
+    z-index:2;
+}
+.tree-node-add{color:var(--green);right:28px}
+.tree-node-delete{color:#8a6a6a;right:2px}
+.tree-row:hover .tree-node-add,
+.tree-row:hover .tree-node-delete,
+.tree-node-add:focus,
+.tree-node-delete:focus{
+    opacity:1;
+    pointer-events:auto;
+}
+.tree-node-add:hover{background:#dfe8df}
+.tree-node-delete:hover{background:#eee4e2}
+
+
+/* =========================================================
+   STEP 26 — RECOVERED RESOURCE PANEL UI
+   ========================================================= */
+.resource-group{
+    margin-bottom:12px;
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:#fff;
+    overflow:hidden;
+}
+.resource-group-summary{
+    cursor:pointer;
+    padding:10px 10px;
+    font-weight:700;
+    color:#344239;
+    background:#fafbf8;
+    user-select:none;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:7px;
+}
+.resource-group-summary:hover{background:#f1f4ee}
+.resource-count{
+    display:inline-block;
+    min-width:18px;
+    margin-left:4px;
+    padding:2px 6px;
+    border-radius:10px;
+    background:#edf1eb;
+    color:#68736b;
+    text-align:center;
+    font-size:10px;
+    font-weight:400;
+}
+.resource-group-content{padding:9px}
+.resource-empty,.preview-placeholder{
+    margin:5px 0;
+    padding:8px;
+    color:#888;
+    text-align:center;
+    font-size:11px;
+}
+.resource-card{
+    border:1px solid var(--line);
+    border-radius:7px;
+    padding:9px;
+    margin-bottom:8px;
+    background:#fff;
+}
+.resource-card:last-child{margin-bottom:0}
+.resource-card:hover{background:#fcfdfb}
+.resource-level-tag{display:inline-block;padding:2px 7px;margin-bottom:6px;border-radius:10px;background:var(--green-soft);color:var(--green);font:10px Arial,sans-serif;text-transform:uppercase;letter-spacing:.3px}
+.resource-title{font-weight:700;font-size:12px;color:#3e4942;margin-bottom:8px;line-height:1.35}
+.resource-actions{display:flex;gap:5px;align-items:center;flex-wrap:wrap}
+.resource-delete-btn{border:1px solid #d99!important;color:#b33!important}
+.resource-delete-btn:hover{background:#fdeaea!important}
+.resource-actions button,.add-resource-btn,.resource-submit-btn{
+    padding:5px 8px;
+    border:1px solid var(--line);
+    border-radius:5px;
+    background:#fff;
+    color:#46524a;
+    cursor:pointer;
+    font-size:10px;
+}
+.resource-actions button:hover,.add-resource-btn:hover,.resource-submit-btn:hover{background:#eef2ec}
+.add-resource-btn{font-weight:700;color:var(--green);white-space:nowrap}
+.resource-missing{font-size:11px;color:#777}
+#resource-preview-area{scroll-margin:60px 0}
+#resource-preview-area:empty{display:none}
+.preview-header{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;font-size:11px}
+.preview-header button{border:1px solid var(--line);background:#fff;border-radius:5px;cursor:pointer;padding:3px 7px}
+.resource-frame{width:100%;aspect-ratio:16/9;height:auto;border:1px solid var(--line);border-radius:6px;background:#fff}
+.resource-preview-overlay{position:fixed;inset:0;background:rgba(20,30,24,.5);display:flex;align-items:center;justify-content:center;z-index:1100;padding:24px}
+
+/* Inline "Side View" preview — lives inside the RESOURCES panel itself
+   instead of a full-screen overlay, so it opens where the user is. */
+.resource-preview-inline{
+    margin:4px 0 16px;
+    padding:14px;
+    background:#fff;
+    border:1px solid var(--line);
+    border-radius:11px;
+    box-shadow:0 4px 16px rgba(20,30,24,.08);
+}
+.resource-preview-inline .preview-header{font-size:13px;margin-bottom:10px}
+.resource-preview-inline .preview-header strong{font-family:Georgia,serif;font-size:15px}
+.resource-preview-body{min-height:0}
+.resource-preview-body .resource-frame{width:100%}
+.resource-preview-body .resource-preview-loading{padding:40px;text-align:center;color:var(--muted);font:13px Arial,sans-serif}
+.youtube-frame{aspect-ratio:16/9;height:auto}
+.resource-image{display:block;max-width:100%;max-height:450px;margin:auto;border-radius:6px}
+.image-preview-container{text-align:center}
+.add-resource-overlay{position:fixed;inset:0;background:rgba(20,30,24,.32);display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px}
+.add-resource-modal{position:relative;width:min(500px,92vw);max-height:90vh;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:11px;padding:22px;box-shadow:0 12px 40px rgba(0,0,0,.18)}
+.modal-close{position:absolute;right:10px;top:9px;border:0;background:transparent;color:#667169;border-radius:50%;cursor:pointer;font-size:20px}
+.add-resource-modal h2{margin:0 25px 8px 0;font-size:18px;color:#354239}
+.add-resource-scope{color:#777;font-size:11px;margin:0 0 15px}
+.resource-type-options{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:15px}
+.resource-type-options button{padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:#fff;color:#354239;cursor:pointer;font-size:11px}
+.resource-type-options button:hover{background:#eef2ec}
+#resource-form-area{border-top:1px solid var(--line);padding-top:15px}
+#resource-form-area h3{font-size:14px;margin:0 0 12px;color:#354239}
+#resource-form-area label{display:block;margin:10px 0 5px;color:#68736b;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+#resource-form-area input[type=text],#resource-form-area input[type=url],#resource-form-area input[type=file]{width:100%;box-sizing:border-box;padding:9px;border:1px solid var(--line);border-radius:6px;background:#fff;font-size:11px}
+.resource-submit-btn{margin-top:14px;background:#f1f4ef;font-weight:700;color:var(--green)}
+
+/* STEP 27 — LINK-ONLY RESOURCES + PAGE MARKER */
+.resource-page-ref{
+    margin-top:3px;
+    color:var(--green);
+    font:10px Arial,sans-serif;
+}
+.resource-description{
+    margin-top:3px;
+    color:var(--muted);
+    font:10px/1.4 Arial,sans-serif;
+}
+.add-resource-modal label{
+    display:block;
+    margin:10px 0 5px;
+    color:#506056;
+    font:700 10px Arial,sans-serif;
+}
+.add-resource-modal textarea{
+    width:100%;
+    min-height:60px;
+    box-sizing:border-box;
+    padding:9px 10px;
+    border:1px solid var(--line);
+    border-radius:7px;
+    resize:vertical;
+    font:11px/1.45 Arial,sans-serif;
+}
+.field-optional{
+    color:var(--muted);
+    font-weight:400;
+}
+
+
+
+/* STEP 30 — FINAL PANEL HEADER ALIGNMENT */
+.panel-heading{
+    position:relative;
+    padding:0;
+    margin:0 0 12px 0;
+    color:var(--muted);
+    font:700 11px/1.2 Arial,sans-serif;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    border:0;
+}
+
+/* Index already owns its heading; no second "STRUCTURE" label. */
+.tree-toolbar-title{
+    display:none !important;
+}
+
+/* Classification label = parameter: quieter/dimmer.
+   Node title = argument: darker/stronger. */
+.tree-level-label{
+    color:#829087 !important;
+    font:700 8px/1 Arial,sans-serif !important;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+    white-space:nowrap;
+}
+.tree-node-title{
+    color:#25342b !important;
+    font:13px/1.2 Arial,sans-serif;
+    font-weight:400;
+}
+
+/* Keep the panel names visually consistent with INDEX / RESOURCES. */
+.panel-heading,
+.index-heading,
+.resources-heading{
+    color:#526158;
+}
+
+/* STEP 31 — FINAL CONTENT POSITION + DYNAMIC TREE LABELS */
+#middle-panel > .panel-heading{
+    display:block;
+    margin:0 0 10px 0;
+    padding:0;
+}
+#middle-panel > .content-layer-tabs{
+    margin-top:0;
+}
+.tree-label{
+    display:flex !important;
+    align-items:baseline;
+    gap:8px !important;
+    overflow:hidden;
+}
+.tree-level-label{
+    flex:0 0 auto;
+    color:#829087 !important;
+    font:700 8px/1 Arial,sans-serif !important;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+    white-space:nowrap;
+}
+.tree-node-title{
+    flex:0 1 auto;
+    min-width:0;
+    color:#25342b !important;
+    font:13px/1.2 Arial,sans-serif !important;
+    font-weight:400 !important;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+.hierarchy-help{
+    margin:0 0 12px;
+    padding:10px 11px;
+    border-radius:7px;
+    background:#f4f6f2;
+    color:var(--muted);
+    font:11px/1.45 Arial,sans-serif;
+}
+.hierarchy-help strong{
+    display:block;
+    margin-bottom:3px;
+    color:#354239;
+    font-size:10px;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+}
+.hierarchy-help span{color:#536258}
+
+/* =========================================================
+   STEP 32 — MCQ TWO-PANEL PRACTICE INTERFACE
+   ========================================================= */
+
+.mcq-page{
+    margin:0;
+    min-height:100vh;
+    background:#f0f3ed;
+    color:#26332b;
+    font-family:Arial,sans-serif;
+}
+
+.mcq-page .app-header{
+    height:70px;
+    box-sizing:border-box;
+    padding:10px 20px;
+    display:flex;
+    align-items:flex-start;
+    background:#fff;
+    border-bottom:1px solid #d7ddd6;
+}
+
+.mcq-page .app-header h1{
+    margin:0;
+    font-family:Georgia,serif;
+    font-size:27px;
+    font-weight:400;
+    line-height:1.1;
+}
+
+#mcq-page-root{
+    min-height:calc(100vh - 70px);
+    box-sizing:border-box;
+    padding:14px 16px 20px;
+}
+
+.mcq-setup{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex-wrap:wrap;
+    padding:10px 12px;
+    background:#fff;
+    border:1px solid #d5ddd5;
+    border-radius:8px;
+    margin-bottom:12px;
+}
+
+.mcq-setup-title{
+    width:100%;
+    color:#657168;
+    font:700 10px Arial,sans-serif;
+    letter-spacing:.08em;
+}
+
+.mcq-setup label{
+    display:flex;
+    align-items:center;
+    gap:5px;
+    color:#657168;
+    font-size:11px;
+}
+
+.mcq-setup select,
+.mcq-setup input{
+    height:28px;
+    box-sizing:border-box;
+    border:1px solid #cbd4cb;
+    border-radius:5px;
+    background:#fff;
+    padding:3px 7px;
+}
+
+.mcq-setup input{width:74px}
+
+#mcq-start{
+    height:28px;
+    padding:0 12px;
+    border:1px solid #9db2a2;
+    border-radius:6px;
+    background:#e8eee8;
+    color:#244a35;
+    cursor:pointer;
+}
+
+.mcq-timer-display{
+    margin-left:auto;
+    color:#66736b;
+    font:700 12px Arial,sans-serif;
+}
+
+.mcq-workspace{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) 285px;
+    gap:12px;
+    min-height:calc(100vh - 180px);
+    align-items:stretch;
+}
+
+.mcq-question-area{
+    min-width:0;
+    background:#fff;
+    border:1px solid #d5ddd5;
+    border-radius:8px;
+    padding:0;
+    overflow:hidden;
+}
+
+.mcq-view-title{
+    padding:11px 14px;
+    border-bottom:1px solid #d8ded8;
+    color:#657168;
+    font:700 10px Arial,sans-serif;
+    letter-spacing:.08em;
+}
+
+#mcq-question{
+    padding:22px 24px 30px;
+}
+
+.mcq-card-large{
+    max-width:980px;
+    margin:0 auto;
+}
+
+.mcq-question-number{
+    margin-bottom:13px;
+    color:#7a867f;
+    font:700 10px Arial,sans-serif;
+    letter-spacing:.05em;
+    text-transform:uppercase;
+}
+
+.mcq-question-text{
+    color:#26332b;
+    font:19px/1.45 Georgia,serif;
+    margin-bottom:22px;
+}
+
+.mcq-large-options{
+    display:flex;
+    flex-direction:column;
+    gap:9px;
+}
+
+.mcq-large-option{
+    width:100%;
+    box-sizing:border-box;
+    padding:12px 14px;
+    text-align:left;
+    border:1px solid #d0d8d0;
+    border-radius:7px;
+    background:#fff;
+    color:#354239;
+    cursor:pointer;
+    font:13px/1.4 Arial,sans-serif;
+}
+
+.mcq-large-option:hover{
+    background:#f4f6f2;
+}
+
+.mcq-large-option.selected{
+    border-color:#91a999;
+    background:#e9f0e9;
+}
+
+.mcq-feedback{
+    margin-top:14px;
+    padding:10px 12px;
+    border-radius:6px;
+    background:#f4f6f2;
+    color:#536158;
+    font-size:12px;
+    line-height:1.5;
+}
+
+.mcq-navigation-buttons{
+    display:flex;
+    justify-content:space-between;
+    margin-top:24px;
+}
+
+.mcq-navigation-buttons button{
+    padding:7px 11px;
+    border:1px solid #cbd4cb;
+    border-radius:6px;
+    background:#fff;
+    color:#405047;
+    cursor:pointer;
+}
+
+/* Right question navigator */
+.mcq-navigator{
+    position:relative;
+    min-width:0;
+    background:#fff;
+    border:1px solid #d5ddd5;
+    border-radius:8px;
+    overflow:hidden;
+    transition:grid-template-columns .18s ease,width .18s ease;
+}
+
+.mcq-nav-header{
+    height:42px;
+    box-sizing:border-box;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:0 9px 0 13px;
+    border-bottom:1px solid #d8ded8;
+}
+
+.mcq-nav-title{
+    color:#657168;
+    font:700 10px Arial,sans-serif;
+    letter-spacing:.08em;
+}
+
+.mcq-nav-toggle{
+    width:25px;
+    height:25px;
+    border:0;
+    border-radius:5px;
+    background:#eef2ed;
+    color:#526158;
+    cursor:pointer;
+    font:18px/25px Arial,sans-serif;
+}
+
+.mcq-nav-body{
+    padding:12px;
+}
+
+.mcq-nav-summary{
+    display:flex;
+    flex-direction:column;
+    gap:9px;
+    padding-bottom:12px;
+    border-bottom:1px solid #e0e4df;
+    color:#66736b;
+    font:10px Arial,sans-serif;
+}
+
+.mcq-nav-summary strong{
+    color:#26332b;
+    font-size:14px;
+}
+
+.mcq-nav-legend{
+    display:flex;
+    align-items:center;
+    gap:5px;
+    flex-wrap:wrap;
+}
+
+.legend-dot{
+    display:inline-block;
+    width:9px;
+    height:9px;
+    border:1px solid #c6cec6;
+    border-radius:3px;
+    background:#fff;
+}
+
+.legend-dot.attempted{
+    margin-left:5px;
+    background:#dbe9dc;
+    border-color:#9db59f;
+}
+
+#mcq-question-grid{
+    display:grid;
+    grid-template-columns:repeat(5,1fr);
+    gap:6px;
+    padding:13px 0;
+}
+
+.mcq-number{
+    aspect-ratio:1;
+    border:1px solid #cbd4cb;
+    border-radius:6px;
+    background:#fff;
+    color:#526158;
+    cursor:pointer;
+    font:12px Arial,sans-serif;
+}
+
+.mcq-number:hover{
+    background:#f3f6f2;
+}
+
+.mcq-number.attempted{
+    background:#dbe9dc;
+    border-color:#9db59f;
+    color:#244a35;
+    font-weight:700;
+}
+
+.mcq-number.current{
+    box-shadow:inset 0 0 0 2px #6f8c76;
+}
+
+.mcq-submit{
+    width:100%;
+    padding:9px;
+    border:1px solid #9db2a2;
+    border-radius:6px;
+    background:#e8eee8;
+    color:#244a35;
+    cursor:pointer;
+    font:700 11px Arial,sans-serif;
+}
+
+.mcq-navigator.collapsed{
+    width:48px;
+}
+
+.mcq-navigator.collapsed .mcq-nav-header{
+    justify-content:center;
+    padding:0;
+    border-bottom:0;
+}
+
+.mcq-navigator.collapsed .mcq-nav-title,
+.mcq-navigator.collapsed .mcq-nav-body{
+    display:none;
+}
+
+@media(max-width:850px){
+    .mcq-workspace{
+        grid-template-columns:minmax(0,1fr) 230px;
+    }
+    .mcq-question-text{font-size:17px}
+}
+
+@media(max-width:650px){
+    .mcq-workspace{
+        grid-template-columns:1fr;
+    }
+    .mcq-navigator{
+        min-height:170px;
+    }
+    .mcq-navigator.collapsed{
+        width:100%;
+        height:48px;
+    }
+}
+
+/* =========================================================
+   STEP 33 — DISTINCT BLUISH MCQ THEME
+   ========================================================= */
+
+.mcq-page{
+    background:#edf3f8;
+    color:#25384a;
+}
+
+.mcq-page .app-header{
+    background:#f8fbfd;
+    border-bottom-color:#cbd9e4;
+}
+
+.mcq-page #mcq-page-root{
+    background:#edf3f8;
+}
+
+.mcq-setup,
+.mcq-question-area,
+.mcq-navigator{
+    background:#f8fbfd;
+    border-color:#c8d8e4;
+}
+
+.mcq-setup-title,
+.mcq-view-title,
+.mcq-nav-title{
+    color:#587084;
+}
+
+.mcq-setup select,
+.mcq-setup input{
+    border-color:#bdcfdd;
+    background:#fff;
+    color:#294052;
+}
+
+#mcq-start,
+.mcq-submit{
+    background:#e4eef6;
+    border-color:#91afc5;
+    color:#28516d;
+}
+
+#mcq-start:hover,
+.mcq-submit:hover{
+    background:#d8e8f3;
+}
+
+.mcq-timer-display{
+    color:#557087;
+}
+
+.mcq-question-number{
+    color:#668096;
+}
+
+.mcq-question-text{
+    color:#25384a;
+}
+
+.mcq-large-option{
+    background:#fff;
+    border-color:#c7d6e1;
+    color:#30495b;
+}
+
+.mcq-large-option:hover{
+    background:#f1f7fb;
+    border-color:#a9c2d3;
+}
+
+.mcq-large-option.selected{
+    background:#e2edf6;
+    border-color:#7fa5bf;
+    color:#274a63;
+}
+
+.mcq-feedback{
+    background:#eef5f9;
+    color:#496477;
+}
+
+.mcq-navigation-buttons button{
+    border-color:#c3d3df;
+    background:#fff;
+    color:#3e596b;
+}
+
+/* Question navigator */
+.mcq-nav-header{
+    border-bottom-color:#d4e0e8;
+}
+
+.mcq-nav-toggle{
+    background:#e7f0f6;
+    color:#48677c;
+}
+
+.mcq-nav-summary{
+    color:#637b8c;
+    border-bottom-color:#dbe4ea;
+}
+
+.mcq-nav-summary strong{
+    color:#294355;
+}
+
+/* Not attempted = white */
+.mcq-number{
+    background:#fff;
+    border-color:#c3d3df;
+    color:#536b7c;
+}
+
+/* Attempted/marked = green */
+.mcq-number.attempted{
+    background:#d9eadc;
+    border-color:#8eb197;
+    color:#245b35;
+    font-weight:700;
+}
+
+.mcq-number.current{
+    box-shadow:inset 0 0 0 2px #7195ad;
+}
+
+.legend-dot{
+    background:#fff;
+    border-color:#c3d3df;
+}
+
+.legend-dot.attempted{
+    background:#d9eadc;
+    border-color:#8eb197;
+}
+
+.mcq-nav-legend{
+    color:#657d8d;
+}
+
+/* =========================================================
+   STEP 34 — EXAM-STYLE MCQ REFINEMENT
+   ========================================================= */
+
+.mcq-page{
+    --mcq-font-scale:1;
+    background:#eaf3f9;
+}
+
+.mcq-page .app-header{
+    height:62px;
+    padding:10px 20px;
+    align-items:center;
+    background:#f8fbfd;
+    border-bottom:1px solid #c6d8e4;
+}
+
+.mcq-page .app-header h1{
+    font-size:28px;
+    color:#20384b;
+}
+
+#mcq-page-root{
+    padding:12px 14px 20px;
+    min-height:calc(100vh - 62px);
+}
+
+/* Settings become a compact exam toolbar. */
+.mcq-setup{
+    position:relative;
+    min-height:54px;
+    box-sizing:border-box;
+    padding:8px 12px;
+    gap:10px;
+    border-radius:5px;
+    background:#f5fafd;
+    border-color:#c4d7e3;
+}
+
+.mcq-setup-title{
+    width:auto;
+    margin-right:6px;
+    color:#4f697b;
+}
+
+.mcq-display-controls{
+    margin-left:auto;
+    display:flex;
+    align-items:center;
+    gap:5px;
+    color:#597184;
+    font:11px Arial,sans-serif;
+}
+
+.mcq-display-label{
+    margin-right:2px;
+    font-weight:700;
+}
+
+.mcq-display-controls button{
+    min-width:31px;
+    height:27px;
+    padding:0 7px;
+    border:1px solid #b8cedc;
+    border-radius:4px;
+    background:#fff;
+    color:#36566c;
+    cursor:pointer;
+    font-weight:700;
+}
+
+.mcq-display-controls button:hover{
+    background:#e6f1f7;
+}
+
+.mcq-language-label{
+    margin-left:8px;
+}
+
+#mcq-language{
+    height:27px;
+    border:1px solid #b8cedc;
+    border-radius:4px;
+    background:#fff;
+    color:#36566c;
+    padding:2px 7px;
+}
+
+/* Main exam area: much larger question text and options. */
+.mcq-workspace{
+    grid-template-columns:minmax(0,1fr) 300px;
+    gap:10px;
+    min-height:calc(100vh - 155px);
+}
+
+.mcq-question-area{
+    border-radius:5px;
+    background:#fff;
+    border-color:#c7d9e4;
+}
+
+.mcq-view-title{
+    padding:10px 14px;
+    color:#526d80;
+    background:#f5fafd;
+    border-bottom-color:#d4e1e8;
+}
+
+#mcq-question{
+    padding:24px 28px 32px;
+}
+
+.mcq-question-number{
+    font-size:12px;
+    margin-bottom:15px;
+    color:#5e7687;
+}
+
+.mcq-question-text{
+    font-size:calc(21px * var(--mcq-font-scale));
+    line-height:1.5;
+    font-family:Arial,sans-serif;
+    font-weight:400;
+    color:#1f3445;
+    margin-bottom:25px;
+}
+
+.mcq-large-options{
+    gap:12px;
+}
+
+.mcq-large-option{
+    padding:15px 17px;
+    border-radius:5px;
+    font-size:calc(15px * var(--mcq-font-scale));
+    line-height:1.5;
+    min-height:50px;
+}
+
+.mcq-navigation-buttons button{
+    padding:9px 15px;
+    font-size:13px;
+}
+
+/* Right navigator closer to the reference exam-panel feel. */
+.mcq-navigator{
+    border-radius:0;
+    background:#dcecf6;
+    border-color:#bdd4e1;
+}
+
+.mcq-nav-header{
+    height:46px;
+    background:#d3e8f4;
+    border-bottom-color:#bdd4e1;
+}
+
+.mcq-nav-title{
+    color:#31566d;
+}
+
+.mcq-nav-body{
+    padding:12px;
+}
+
+.mcq-nav-summary{
+    color:#4f6b7d;
+}
+
+#mcq-question-grid{
+    grid-template-columns:repeat(5,1fr);
+    gap:9px;
+}
+
+.mcq-number{
+    aspect-ratio:1;
+    min-height:34px;
+    background:#fff;
+    border-color:#91aebe;
+    color:#203c4f;
+    font-size:13px;
+}
+
+.mcq-number.attempted{
+    background:#35a96a;
+    border-color:#258752;
+    color:#fff;
+}
+
+.mcq-number.current{
+    box-shadow:inset 0 0 0 2px #2d627f;
+}
+
+.mcq-submit{
+    margin-top:4px;
+    background:#e7f2f8;
+    border-color:#8eafc1;
+}
+
+/* Scale the controls/options along with question text. */
+.mcq-large-option,
+.mcq-question-text{
+    transition:font-size .12s ease;
+}
+
+@media(max-width:700px){
+    .mcq-display-controls{
+        margin-left:0;
+    }
+    .mcq-setup{
+        flex-wrap:wrap;
+    }
+    .mcq-workspace{
+        grid-template-columns:1fr 245px;
+    }
+}
+
+/* STEP 35 — RIGHT NAVIGATOR COLLAPSES TO THE RIGHT EDGE */
+.mcq-workspace{
+    grid-template-columns:minmax(0,1fr) 300px;
+}
+
+.mcq-navigator{
+    justify-self:stretch;
+}
+
+.mcq-navigator.collapsed{
+    width:48px;
+    justify-self:end;
+    align-self:stretch;
+}
+
+/* Keep the collapse handle on the navigator's right-side strip,
+   rather than letting the collapsed panel fall toward the question area. */
+.mcq-navigator.collapsed .mcq-nav-header{
+    width:48px;
+    margin-left:auto;
+    justify-content:center;
+}
+
+.mcq-navigator.collapsed .mcq-nav-toggle{
+    display:block;
+}
+
+@media(max-width:700px){
+    .mcq-navigator.collapsed{
+        width:48px;
+        justify-self:end;
+    }
+}
+
+/* =========================================================
+   STEP 36 — COLLAPSE GIVES THE QUESTION AREA THE SPACE
+   ========================================================= */
+
+.mcq-workspace{
+    grid-template-columns:minmax(0,1fr) 300px;
+    transition:grid-template-columns .2s ease;
+}
+
+.mcq-workspace.navigator-collapsed{
+    grid-template-columns:minmax(0,1fr) 48px;
+}
+
+.mcq-workspace.navigator-collapsed .mcq-navigator{
+    width:48px;
+    justify-self:end;
+}
+
+/* Darker four-sided panel boundaries */
+.mcq-question-area,
+.mcq-navigator{
+    border:1px solid #8ea6b5;
+    box-shadow:0 0 0 1px rgba(71,100,119,.08);
+}
+
+.mcq-question-area{
+    outline:1px solid rgba(71,100,119,.05);
+}
+
+.mcq-navigator{
+    outline:1px solid rgba(71,100,119,.05);
+}
+
+.mcq-setup{
+    border:1px solid #8ea6b5;
+    box-shadow:0 0 0 1px rgba(71,100,119,.06);
+}
+
+.mcq-page .app-header{
+    border-bottom:1px solid #8ea6b5;
+}
+
+/* Make the collapsed right strip clearly belong to the right panel. */
+.mcq-workspace.navigator-collapsed .mcq-nav-header{
+    width:48px;
+    margin-left:auto;
+    border-left:1px solid #8ea6b5;
+}
+
+@media(max-width:700px){
+    .mcq-workspace.navigator-collapsed{
+        grid-template-columns:minmax(0,1fr) 48px;
+    }
+}
+
+/* LABEL FIX — dynamic hierarchy parameter + actual node argument */
+.tree-label{
+    display:flex !important;
+    align-items:baseline;
+    gap:10px !important;
+}
+.tree-level-label{
+    flex:0 0 auto;
+    color:#829087 !important;
+    font:700 8px/1 Arial,sans-serif !important;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+    white-space:nowrap;
+}
+.tree-node-title{
+    min-width:0;
+    color:#25342b !important;
+    font-weight:400;
+}
+
+.author-editor {
+    overflow-y: auto;
+    min-height: 0;
+}
+/* =========================================================
+   RICH CONTENT — Markdown / Mermaid mind maps / Chart.js graphs
+   Rendered from the same explanation/example/definition Sheet cells,
+   see js/richcontent.js and google-sheet-template/README.txt
+   ========================================================= */
+
+.rich-content {
+    font: 14px/1.7 Arial, sans-serif;
+    color: var(--text);
+}
+.rich-content > *:first-child { margin-top: 0; }
+.rich-content > *:last-child { margin-bottom: 0; }
+
+.rich-content h1,
+.rich-content h2,
+.rich-content h3,
+.rich-content h4 {
+    font-family: Georgia, "Times New Roman", serif;
+    color: var(--green);
+    margin: 16px 0 8px;
+    line-height: 1.3;
+}
+.rich-content h1 { font-size: 19px; }
+.rich-content h2 { font-size: 17px; }
+.rich-content h3 { font-size: 15px; }
+.rich-content h4 { font-size: 14px; }
+
+.rich-content p { margin: 0 0 10px; }
+
+.rich-content ul,
+.rich-content ol {
+    margin: 0 0 12px;
+    padding-left: 22px;
+}
+.rich-content li { margin: 4px 0; }
+
+.rich-content strong { color: #1c2a20; }
+
+.rich-content blockquote {
+    margin: 10px 0;
+    padding: 8px 14px;
+    border-left: 3px solid var(--green);
+    background: var(--green-soft);
+    color: #3a4a3f;
+    border-radius: 0 6px 6px 0;
+}
+
+.rich-content code {
+    background: #f0f2ec;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font: 12px/1.4 "Courier New", monospace;
+}
+.rich-content pre {
+    background: #f6f7f2;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px 14px;
+    overflow-x: auto;
+    margin: 10px 0;
+}
+.rich-content pre code {
+    background: none;
+    border: none;
+    padding: 0;
+}
+
+.rich-content a {
+    color: var(--green);
+    text-decoration: underline;
+}
+
+.rich-content hr {
+    border: none;
+    border-top: 1px solid var(--line);
+    margin: 14px 0;
+}
+
+/* Markdown tables */
+.rich-content table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 13px;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+}
+.rich-content th,
+.rich-content td {
+    border: 1px solid var(--line);
+    padding: 8px 10px;
+    text-align: left;
+    vertical-align: top;
+}
+.rich-content th {
+    background: var(--green-soft);
+    color: var(--green);
+    font-family: Georgia, "Times New Roman", serif;
+    font-weight: 700;
+}
+.rich-content tr:nth-child(even) td { background: #fafaf6; }
+
+/* Mermaid mind maps / diagrams */
+.rc-mermaid {
+    margin: 14px 0;
+    padding: 14px;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow-x: auto;
+    text-align: center;
+}
+.rc-mermaid svg { max-width: 100%; height: auto; }
+
+/* Chart.js graphs */
+.rc-chart {
+    margin: 14px 0;
+    padding: 14px;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    position: relative;
+    height: 280px;
+}
+
+.rc-error {
+    color: #b33;
+    font: 12px Arial, sans-serif;
+    padding: 8px 0;
+}
+.rc-empty {
+    color: var(--muted);
+    font: 13px/1.5 Arial, sans-serif;
+    font-style: italic;
+}
+
+/* Key points as cards instead of a plain bullet list */
+.key-points-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 10px;
+    margin-top: 4px;
+}
+.key-point-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px 12px;
+    background: var(--green-soft);
+    border: 1px solid #cfe0d3;
+    border-radius: 8px;
+    font: 13px/1.5 Arial, sans-serif;
+    color: #2c3b30;
+}
+.key-point-icon {
+    flex: 0 0 auto;
+    color: var(--green);
+    font-weight: 700;
+    line-height: 1.5;
+}
+.key-point-text { min-width: 0; }

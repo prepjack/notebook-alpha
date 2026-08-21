@@ -1,0 +1,4 @@
+﻿resource_id,topic_id,title,type,source,url,page_ref,description,open_mode
+r01,t01,Information Society — Reference PDF,PDF,Google Drive,https://drive.google.com/...,23–27,Reference pages for this topic.,new-tab
+r02,t01,Information Society — Video,YouTube,YouTube,https://www.youtube.com/watch?v=...,04:15–08:30,Useful explanation for this topic.,new-tab
+r03,t02,Knowledge Society — Reference,PDF,Google Drive,https://drive.google.com/...,12,Drive-hosted reference.,new-tab

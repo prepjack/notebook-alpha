@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCQ Practice — Study Notebook</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body class="mcq-page">
+
+    <header class="app-header">
+        <h1>MCQ Practice</h1>
+    </header>
+
+    <main id="mcq-page-root">
+
+        <div class="mcq-setup">
+            <div class="mcq-setup-title">ATTEMPT SETTINGS</div>
+        <div class="mcq-display-controls" aria-label="Display controls">
+            <span class="mcq-display-label">Text</span>
+            <button type="button" id="mcq-font-down" title="Decrease text size">A−</button>
+            <button type="button" id="mcq-font-up" title="Increase text size">A+</button>
+            <label class="mcq-language-label" for="mcq-language">Language</label>
+            <select id="mcq-language" title="Language">
+                <option value="en">English</option>
+                <option value="hi">Hindi</option>
+            </select>
+        </div>
+
+
+            <label>
+                Timer
+                <select id="mcq-timer-mode">
+                    <option value="none">No timer</option>
+                    <option value="10">10 minutes</option>
+                    <option value="20">20 minutes</option>
+                    <option value="30">30 minutes</option>
+                    <option value="60">60 minutes</option>
+                </select>
+            </label>
+
+            <label>
+                Correct
+                <input id="mark-correct" type="number" value="1" step="0.25">
+            </label>
+
+            <label>
+                Wrong
+                <input id="mark-wrong" type="number" value="0" step="0.25">
+            </label>
+
+            <button id="mcq-start" type="button">Start Attempt</button>
+            <div id="mcq-timer-display" class="mcq-timer-display">No timer</div>
+        </div>
+
+        <div class="mcq-workspace">
+
+            <div class="mcq-question-area">
+                <div class="mcq-view-title">MCQ PRACTICE</div>
+                <div id="mcq-question"></div>
+            </div>
+
+            <aside id="mcq-navigator" class="mcq-navigator">
+                <div class="mcq-nav-header">
+                    <span class="mcq-nav-title">QUESTIONS</span>
+                    <button id="mcq-nav-toggle" type="button"
+                            class="mcq-nav-toggle" title="Collapse question navigator">›</button>
+                </div>
+                <div class="mcq-nav-body">
+                    <div class="mcq-nav-summary">
+                        <span><strong id="mcq-nav-total">0</strong> Questions</span>
+                        <span class="mcq-nav-legend">
+                            <i class="legend-dot unanswered"></i> Not attempted
+                            <i class="legend-dot attempted"></i> Attempted
+                        </span>
+                    </div>
+                    <div id="mcq-question-grid"></div>
+                    <button id="mcq-submit" type="button" class="mcq-submit">Submit Attempt</button>
+                </div>
+            </aside>
+
+        </div>
+
+        <section id="mcq-result" class="mcq-result" hidden>
+            <div class="result-title">RESULT</div>
+            <div id="result-summary"></div>
+            <div id="result-details"></div>
+            <button id="mcq-retry" type="button">New Attempt</button>
+        </section>
+
+    </main>
+
+    <script src="js/mcq.js"></script>
+</body>
+</html>

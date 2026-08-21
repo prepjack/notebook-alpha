@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Study Notebook — Alpha</title>
+
+    <!-- Appearance lives here -->
+    <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+
+    <header class="app-header">
+        <h1>Notebook</h1>
+    <div class="header-subjects">
+        <div id="subject-strip" class="subject-strip-list"></div>
+        <button id="add-subject" type="button" class="subject-add-button">+ Subject</button>
+    </div>
+    </header>
+<main class="app-shell">
+
+        <!-- ENTIRE THREE-PANEL STUDY WORKSPACE -->
+        <section id="study-workspace" class="workspace">
+
+            <!-- LEFT: expandable knowledge index -->
+            <aside id="left-panel" class="panel">
+                <div class="panel-heading">INDEX</div>
+                <div id="left-resizer" class="panel-resizer"
+                     title="Drag this RIGHT edge left/right to resize"></div>
+                <div class="tree-toolbar">
+                    
+                </div>
+                <div id="study-tree"></div>
+                <div id="tree-actions" class="tree-actions" hidden>
+                    <div class="tree-action-title">ADD TO SELECTED</div>
+                    <div id="tree-action-options"></div>
+                </div>
+            </aside>
+
+            <!-- MIDDLE: notebook/topic content -->
+            <section id="middle-panel" class="panel">
+                <div class="panel-heading">CONTENT</div>
+
+                <div id="topic-content">
+                    <h2>Select a topic</h2>
+                    <p>Topic content will appear here.</p>
+                </div>
+
+                <div class="mcq-launch-area">
+                    <button id="mcq-launch" type="button">
+                        MCQ PRACTICE ↗
+                    </button>
+                </div>
+            </section>
+
+            <!-- RIGHT: resources -->
+            <aside id="right-panel" class="panel">
+                <div class="panel-heading">RESOURCES</div>
+                <div id="right-resizer" class="panel-resizer"
+                     title="Drag this LEFT edge left/right to resize"></div>
+                <div id="resources"></div>
+            </aside>
+
+        </section>
+
+    </main>
+
+    <footer class="app-footer">Study Notes</footer>
+
+    <!-- Behaviour lives here -->
+
+
+<div id="contribution-modal" class="contribution-modal" hidden>
+    <div class="contribution-dialog">
+        <div class="contribution-header">
+            <div>
+                <div class="contribution-kicker">COMMUNITY CONTRIBUTION</div>
+                <h3>Contribute to this topic</h3>
+            </div>
+            <button type="button" id="contribution-close" class="contribution-close">×</button>
+        </div>
+
+        <div class="contribution-topic-label">
+            <span>CONTRIBUTE TO</span>
+            <strong id="contribution-topic-name">Selected topic</strong>
+        </div>
+
+        <label class="contribution-label">Contribution type</label>
+        <select id="contribution-type" class="contribution-select">
+            <option value="explanation">Explanation</option>
+            <option value="example">Example</option>
+            <option value="note">Note / Mnemonic</option>
+            <option value="resource">Resource</option>
+            <option value="subtopic">New Subtopic</option>
+            <option value="mcq">MCQ</option>
+        </select>
+
+        <div class="contribution-field">
+            <label class="contribution-label">Title</label>
+            <input id="contribution-title" class="contribution-input"
+                   placeholder="Short, useful title">
+        </div>
+
+        <div class="contribution-field">
+            <label class="contribution-label">Explanation</label>
+            <textarea id="contribution-text" class="contribution-textarea"
+                placeholder="Write the useful explanation here..."></textarea>
+        </div>
+
+        <div class="contribution-field">
+            <label class="contribution-label">Key Points</label>
+            <div id="contribution-keypoints"></div>
+            <button type="button" id="add-contribution-keypoint"
+                    class="contribution-small-button">+ Add key point</button>
+        </div>
+
+        <div class="contribution-field">
+            <label class="contribution-label">Example / Mnemonic</label>
+            <textarea id="contribution-example" class="contribution-small-textarea"
+                placeholder="Optional example, memory trick or mnemonic"></textarea>
+        </div>
+
+        <div class="contribution-field">
+            <label class="contribution-label">Source / Reference</label>
+            <input id="contribution-source" class="contribution-input"
+                   placeholder="Google Drive, PDF, official website, YouTube, etc.">
+        </div>
+
+        <div class="contribution-field">
+            <label class="contribution-label">Contributor name / credit (optional)</label>
+            <input id="contribution-author" class="contribution-input"
+                   placeholder="Your name or nickname">
+        </div>
+
+        <label class="ai-disclosure">
+            <input type="checkbox" id="contribution-ai-used">
+            <span>Prepared with AI / AI-assisted</span>
+        </label>
+
+        <div class="markdown-contribution-note">
+            <strong>Optional:</strong> If you prepared the material with AI or
+            another tool, you may also paste a structured Markdown version into
+            the explanation field. Keeping the structure clear makes later
+            community/author review and integration easier.
+        </div>
+
+        <div class="contribution-actions">
+            <button type="button" id="contribution-cancel" class="content-action">Cancel</button>
+            <button type="button" id="contribution-submit"
+                    class="content-action primary">Submit contribution</button>
+        </div>
+
+        <div class="contribution-footnote">
+            Your contribution extends the existing topic. It does not replace
+            the author's core content. Submitted material can later be reviewed,
+            upvoted and considered for integration into the main content.
+        </div>
+    </div>
+</div>
+
+<!-- Rich content rendering: Markdown tables/lists, Mermaid mind maps, Chart.js graphs -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.5/purify.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.3/chart.umd.min.js"></script>
+
+<script src="data/study-data.js"></script>
+<script src="js/richcontent.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>

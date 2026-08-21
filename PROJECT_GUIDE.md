@@ -1,0 +1,57 @@
+# Alpha Study Notebook — Project Guide
+
+## Purpose
+This is the current frozen UI prototype before Google Sheets + Apps Script integration.
+
+## Main architecture
+- `index.html` — main Study Notebook interface.
+- `css/style.css` — main visual styling for the notebook and MCQ interface.
+- `js/app.js` — main notebook behaviour: subject/tree/index, content, resources, user additions/deletions.
+- `mcq.html` — separate MCQ practice page.
+- `js/mcq.js` — MCQ attempt/navigation/display behaviour.
+- Other HTML/JS files in the project are supporting pages/components from the current prototype.
+
+## Current hierarchy
+Subject → Course → Unit → Chapter → Topic → Subtopic → Subtopic → ...
+
+(Previously Subject → Part → Chapter → Topic → Subtopic. A "Course" level
+was inserted between Subject and the old "Part" level, and "Part" was
+renamed "Unit". Chapter/Topic/Subtopic keep their names but each now sits
+one level deeper. Existing data needed no restructuring — the label shown
+is derived purely from a node's depth in the tree, not from any stored
+field, so old nodes automatically picked up their new labels.)
+
+The labels shown before node names are classification labels; the actual node title is shown darker.
+
+## Main notebook panels
+INDEX | CONTENT | RESOURCES
+
+- INDEX: user-built hierarchy.
+- CONTENT: author/core content, community contribution and My Notes layers.
+- RESOURCES: links such as Google Drive/Web and YouTube, with page/location reference.
+
+## Resource rule
+Do not ask the user to upload a PDF. Users add a Google Drive/Web link or YouTube link. A `page_ref` field records the relevant PDF page/range or video timestamp.
+
+## MCQ interface
+The MCQ page has:
+- large question/options area on the left;
+- collapsible question navigator on the right;
+- right navigator collapse gives its freed space to the question area;
+- unattempted questions are white;
+- attempted/marked questions are green;
+- bluish theme distinct from the main notebook;
+- A− / A+ text-size controls;
+- English/Hindi selector is currently a UI placeholder; actual translation is intentionally deferred.
+
+## Important product direction
+The author publishes the initial/core structure and content. Users can extend the structure, maintain My Notes, add resources, and contribute content. The user is the actual builder of their personalized notebook while the author/community layer keeps shared content organized.
+
+## Next phase
+Freeze this UI baseline. Next implement:
+Google Sheets → Apps Script → JSON/API → Alpha website.
+
+Do not redesign the UI unless explicitly requested. Preserve the current hierarchy and resource/MCQ behaviour while connecting live data.
+
+## Canonical node labels
+`Subject → Course → Unit → Chapter → Topic → Subtopic → Subtopic → …`. The visible classification label is derived from the node's depth in the tree (see `getNodeLevelLabel` in `js/app.js`), not from its stored `type` field. Subject, Course, Unit, Chapter and Topic must never be displayed as Subtopic.
