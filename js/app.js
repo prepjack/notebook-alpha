@@ -372,6 +372,13 @@ function renderContentLayer() {
                 <div class="rich-content" id="rc-explanation"></div>
             </div>
 
+            ${hasContent ? `
+                <div class="my-reading-time-row">
+                    <button type="button" id="my-reading-time-btn" class="my-reading-time-btn">
+                        My reading time
+                    </button>
+                </div>` : ""}
+
             ${diagrams.length ? `
                 <div class="topic-section">
                     <h3>Diagrams / Graphs</h3>

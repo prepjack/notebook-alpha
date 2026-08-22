@@ -103,7 +103,7 @@ body {
 #middle-panel {
     margin-left: 10px;
     margin-right: 10px;
-    padding: 16px 34px 34px;
+    padding: 0 34px 34px;
 }
 
 #right-panel {
@@ -164,6 +164,7 @@ body {
 
     .workspace {
         height: auto;
+        overflow: visible;
         grid-template-columns: 240px minmax(0, 1fr);
     }
 
@@ -180,10 +181,12 @@ body {
 
     .panel {
         margin: 10px 12px;
+        height: auto;
+        max-height: none;
     }
 
     #middle-panel {
-        padding: 55px 20px 25px;
+        padding: 0 20px 25px;
     }
 }
 
@@ -192,15 +195,27 @@ body {
    STEP 2 — HORIZONTAL PANEL RESIZERS
    Only LEFT/RIGHT panel WIDTH can be changed by dragging.
    Panel HEIGHT is not resizable.
+
+   Desktop-only: scoped to min-width:901px so it never fights
+   the mobile/tablet layout rules above. Previously this rule
+   had no media guard at all, so it silently overrode the
+   900px and 650px mobile rules' grid-template-columns for any
+   viewport between 650px-900px (tablets, phones in landscape,
+   phablets) — forcing a 1020px-wide 3-column grid onto a
+   narrower screen. Combined with .workspace's overflow:hidden,
+   that pushed the right-panel (References/Index) off-screen
+   with no scrollbar to reach it.
    ========================================================= */
 
-.workspace {
-    --left-width: 360px;
-    --right-width: 360px;
-    grid-template-columns:
-        var(--left-width)
-        minmax(300px, 1fr)
-        var(--right-width);
+@media (min-width: 901px) {
+    .workspace {
+        --left-width: 360px;
+        --right-width: 360px;
+        grid-template-columns:
+            var(--left-width)
+            minmax(300px, 1fr)
+            var(--right-width);
+    }
 }
 
 .panel-resizer {
@@ -1493,9 +1508,28 @@ body.resizing-panels {
    panels' headings always have. Only the thin progress line
    is sticky — it starts tracking/staying visible once the
    user has scrolled it up to the top of the panel.
+
+   IMPORTANT: .reading-progress-track must be a DIRECT CHILD
+   of #middle-panel (the scrolling container), NOT nested
+   inside .content-panel-header. A sticky element can only
+   stick within the height of its own immediate parent's box —
+   if it were nested inside the short, non-sticky header, it
+   would scroll away the moment the header itself scrolled out
+   of view. As a direct child of the scroll container, it has
+   the full article height to stick within.
    ========================================================= */
 .content-panel-header{
     /* normal flow — NOT sticky, scrolls with the article */
+    padding-top:16px;
+}
+
+/* Placed AFTER the base rule above (not earlier in the file) so it
+   correctly wins the cascade on mobile — see the STEP 2 resizer bug
+   this project hit before for why source order matters here. */
+@media (max-width: 650px) {
+    .content-panel-header {
+        padding-top: 55px;
+    }
 }
 .content-panel-heading{
     position:relative;
@@ -1525,6 +1559,7 @@ body.resizing-panels {
     z-index:5;
     height:3px;
     width:100%;
+    margin-bottom:10px;
     background:var(--line);
     border-radius:2px;
     overflow:hidden;
@@ -1534,6 +1569,31 @@ body.resizing-panels {
     width:0%;
     background:var(--green);
     border-radius:2px;
+}
+
+/* =========================================================
+   "My reading time" — actual active-reading-time toggle.
+   Same visual language as .read-time-btn above, but placed
+   inline at the end of the article rather than pinned to a
+   corner. A completely separate feature from Read Time — see
+   reading-tools.js.
+   ========================================================= */
+.my-reading-time-row{
+    margin:22px 0 4px;
+    text-align:left;
+}
+.my-reading-time-btn{
+    padding:5px 12px;
+    border:1px solid var(--line);
+    border-radius:6px;
+    background:#fff;
+    color:var(--green);
+    cursor:pointer;
+    font:700 11px Arial,sans-serif;
+    letter-spacing:.04em;
+}
+.my-reading-time-btn:hover{
+    background:var(--green-soft);
 }
 .tree-label{
     display:flex !important;
