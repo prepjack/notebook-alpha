@@ -126,23 +126,31 @@ body {
 #topic-content {
     max-width: 820px;
     margin: 0 auto;
-    text-align: center;
 }
 
-#topic-content h2 {
+#topic-content > h2 {
     margin: 0 0 8px;
     font-size: 20px;
-    font-weight: 400;
-    font-style: italic;
-    color: var(--muted);
+    font-weight: 700;
+    font-style: normal;
+    color: var(--text);
+    text-align: left;
 }
 
-#topic-content p {
+#topic-content > p {
     margin: 0;
     color: var(--muted);
     font-size: 17px;
     line-height: 1.6;
     font-style: italic;
+    text-align: center;
+}
+
+/* Uploaded/authored content (Definition, Explanation, Example) reads
+   as plain, left-aligned book content — not centered/italic like the
+   "select a topic" placeholder above. */
+.topic-section {
+    text-align: left;
 }
 
 /* =========================================================
@@ -1469,13 +1477,63 @@ body.resizing-panels {
 }
 
 /* STEP 31 — FINAL CONTENT POSITION + DYNAMIC TREE LABELS */
-#middle-panel > .panel-heading{
+#middle-panel .panel-heading{
     display:block;
     margin:0 0 10px 0;
     padding:0;
 }
 #middle-panel > .content-layer-tabs{
     margin-top:0;
+}
+
+/* =========================================================
+   STEP 32 — READ TIME BUTTON + READING PROGRESS LINE
+   The heading row (with the button pinned to its top-right
+   corner) scrolls away with the article like the other two
+   panels' headings always have. Only the thin progress line
+   is sticky — it starts tracking/staying visible once the
+   user has scrolled it up to the top of the panel.
+   ========================================================= */
+.content-panel-header{
+    /* normal flow — NOT sticky, scrolls with the article */
+}
+.content-panel-heading{
+    position:relative;
+    margin:0 0 8px 0;
+    padding-right:78px; /* keeps "CONTENT" clear of the corner button */
+}
+.read-time-btn{
+    position:absolute;
+    top:0;
+    right:0;
+    padding:3px 9px;
+    border:1px solid var(--line);
+    border-radius:6px;
+    background:#fff;
+    color:var(--green);
+    cursor:pointer;
+    font:700 10px Arial,sans-serif;
+    letter-spacing:.04em;
+    white-space:nowrap;
+}
+.read-time-btn:hover{
+    background:var(--green-soft);
+}
+.reading-progress-track{
+    position:sticky;
+    top:0;
+    z-index:5;
+    height:3px;
+    width:100%;
+    background:var(--line);
+    border-radius:2px;
+    overflow:hidden;
+}
+.reading-progress-fill{
+    height:100%;
+    width:0%;
+    background:var(--green);
+    border-radius:2px;
 }
 .tree-label{
     display:flex !important;
@@ -2477,6 +2535,43 @@ body.resizing-panels {
     color: var(--muted);
     font: 13px/1.5 Arial, sans-serif;
     font-style: italic;
+}
+.rc-loading {
+    color: var(--muted);
+    font: 12px Arial, sans-serif;
+    padding: 8px 0;
+}
+
+/* ALPHA-PLUS — Add Content Link modal (Drive .md link) */
+.content-link-guide {
+    margin-top: 14px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fafaf6;
+    padding: 8px 12px;
+}
+.content-link-guide summary {
+    cursor: pointer;
+    font: 700 11px Arial, sans-serif;
+    color: var(--green);
+    padding: 4px 0;
+}
+.content-link-guide-body {
+    margin: 8px 0 4px;
+    white-space: pre-wrap;
+    font: 11px/1.5 "Courier New", monospace;
+    color: #3a463d;
+}
+#suggested-filename-box {
+    flex: 1 1 200px;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: #f5f6f3;
+    color: #3a463d;
+    font: 11px "Courier New", monospace;
 }
 
 /* Key points as cards instead of a plain bullet list */

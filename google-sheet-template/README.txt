@@ -77,19 +77,48 @@ node.content[content_type] = row.content for any type that isn't
 already an index entry automatically; index_terms only adds ALIASES
 that should resolve to the same node/topic without duplicating content.
 
-6. ALPHA-PLUS — MARKDOWN UPLOAD
+6. ALPHA-PLUS — MARKDOWN UPLOAD (removed from the UI, data still supported)
 --------------------------------------------------------------------
-"Upload Markdown" in the middle panel reads the chosen .md file as plain
-text in the browser and saves it as this node's "explanation" content_type
-through the existing save_core action — the very same call "Add / Edit
-Content" already makes. No Google Drive file, file ID, or new Apps Script
-endpoint is used for this, because the content is plain text and a single
-Google Sheets cell already holds far more than a typical topic's worth of
-Markdown (tens of thousands of characters). Drive remains the right choice
-later only for large binary attachments (e.g. scanned PDFs, big images),
-which is a separate concern from topic prose.
+An earlier version of this feature had an "Upload Markdown" button in
+the middle panel that read a chosen .md file as plain text in the
+browser and saved it as this node's "explanation" content_type through
+the existing save_core action. That button has since been REMOVED from
+the UI in favor of "Add Content Link" (section 7) — but any topic that
+already has text saved this way keeps rendering exactly as before; no
+data migration was needed or performed. New content should be added
+only via "Add Content Link" going forward.
 
-7. RICH CONTENT SYNTAX (definition / explanation / example columns)
+7. ALPHA-PLUS — CONTENT LINK (Google Drive .md, fetched live)
+--------------------------------------------------------------------
+The only way to add rich content through the website UI now. No new
+sheet, no file upload:
+
+    content_type = "md_file"
+    content      = the Google Drive share link (or a bare Drive file
+                   ID, or a filename inside a designated "study
+                   content" Drive folder, for manual entry)
+
+This is written by the SAME "save_core" action as every other
+content_type (definition/explanation/example/index_terms/md_file) —
+"Add Content Link" in the website UI just calls it with
+content_type = "md_file" and the pasted link as content. Nothing is
+ever uploaded through the browser; the .md file stays in the user's
+own Drive, shared as "Anyone with the link can view".
+
+You can also skip the website entirely and paste a Drive .md link (or
+bare file ID, or filename) straight into this row/cell yourself —
+reload the site and it renders exactly the same way.
+
+At render time, if a node has a `md_file` link, the website calls the
+Apps Script `get_markdown` GET action with that link and renders the
+returned Markdown text live (through the same renderRichContent() as
+everything else). If a node has no `md_file` link but does have
+`explanation` text saved directly (from the older, now-removed
+Upload Markdown flow), that keeps rendering exactly as before — the
+two are not mutually exclusive in the data model, but `md_file`
+takes priority when both are present. "Remove Content" clears both.
+
+8. RICH CONTENT SYNTAX (definition / explanation / example columns)
 --------------------------------------------------------------------
 No new columns needed. Type into the SAME cells as before — the website
 now renders Markdown instead of plain text. Fill fast in one cell using

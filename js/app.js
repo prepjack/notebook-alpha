@@ -309,10 +309,31 @@ function renderTopic(node) {
 let activeContentLayer = "core";
 let selectedTopicNode = null;
 
+/* =========================================================
+   ALPHA-PLUS — CONTENT LINK (Google Drive .md, fetched live)
+   Session cache keyed by "<node_id>::<link>" so re-visiting the
+   same topic with the same link doesn't re-fetch, but editing the
+   link (or the node) always fetches fresh content.
+   ========================================================= */
+const markdownCache = new Map();
+
+// Bumped on every renderContentLayer() call; any in-flight fetch
+// whose token no longer matches the latest one is stale and its
+// result is discarded (guards against rapid topic switching).
+let contentRequestToken = 0;
+
 function renderContentLayer() {
     const node = selectedTopicNode;
     const el = document.getElementById("topic-content");
     if (!node || !el) return;
+
+    contentRequestToken += 1;
+    const myToken = contentRequestToken;
+
+    // Reset the Read Time button / reading-progress line for the
+    // (possibly new) topic before its content is even in the DOM, so
+    // the previous topic's numbers never briefly carry over.
+    if (window.ReadingTools) window.ReadingTools.onNewArticle();
 
     if (activeContentLayer === "core") {
         const c = node.content || {};
@@ -321,23 +342,17 @@ function renderContentLayer() {
             .map(x => x.trim())
             .filter(Boolean);
 
-        const hasContent = !!(
-            (c.definition && c.definition.trim()) ||
-            (c.explanation && c.explanation.trim()) ||
-            (c.example && c.example.trim()) ||
-            (c.keyPoints && c.keyPoints.length)
-        );
+        const mdLink = String(c.md_file || "").trim();
+        const legacyText = String(c.explanation || "").trim();
+        const hasContent = !!(mdLink || legacyText);
 
         el.innerHTML = `
             <h2>${escapeHtml(node.title || "")}</h2>
 
             <div class="content-action-row content-action-row-top">
                 <span class="content-status-tag">${hasContent ? "Content added" : "No content yet"}</span>
-                <button class="content-action" data-action="edit-content">
-                    ✎ Add / Edit Content
-                </button>
-                <button class="content-action" data-action="upload-markdown">
-                    ⬆ ${hasContent ? "Replace with Markdown" : "Upload Markdown"}
+                <button class="content-action" data-action="add-content-link">
+                    🔗 ${mdLink ? "Replace Content Link" : "Add Content Link"}
                 </button>
                 ${hasContent ? `
                 <button class="content-action resource-delete-btn" data-action="remove-content">
@@ -347,38 +362,14 @@ function renderContentLayer() {
 
             ${!hasContent ? `
                 <div class="empty-content-block">
-                    <p>This topic has no content yet. Upload a <strong>.md</strong> file to add
-                       rich, formatted content immediately, or use "Add / Edit Content" to type it
-                       in directly. Both support Markdown, tables, mermaid diagrams and charts.</p>
-                    <button class="content-action" data-action="upload-markdown">⬆ Upload Markdown</button>
+                    <p>No content available for this topic. Link a <strong>.md</strong> file
+                       already saved in Google Drive to add rich, formatted content —
+                       Markdown, tables, mermaid diagrams and charts are all supported.</p>
+                    <button class="content-action" data-action="add-content-link">🔗 Add Content Link</button>
                 </div>` : ""}
 
             <div class="topic-section">
-                <h3>Definition</h3>
-                <div class="rich-content" id="rc-definition"></div>
-            </div>
-
-            <div class="topic-section">
-                <h3>Explanation</h3>
                 <div class="rich-content" id="rc-explanation"></div>
-            </div>
-
-            <div class="topic-section">
-                <h3>Example</h3>
-                <div class="rich-content" id="rc-example"></div>
-            </div>
-
-            <div class="topic-section">
-                <h3>Key Points</h3>
-                <div class="key-points-grid">
-                    ${(c.keyPoints || []).length
-                        ? c.keyPoints.map(x => `
-                            <div class="key-point-card">
-                                <span class="key-point-icon">✓</span>
-                                <span class="key-point-text">${escapeHtml(x)}</span>
-                            </div>`).join("")
-                        : `<p class="rc-empty">No key points added yet.</p>`}
-                </div>
             </div>
 
             ${diagrams.length ? `
@@ -393,15 +384,71 @@ function renderContentLayer() {
                     </div>
                 </div>` : ""}`;
 
-        // Definition / Explanation / Example support Markdown (headings,
-        // bold, bullet lists, tables) plus ```mermaid mind-map blocks and
-        // ```chart graph blocks — see google-sheet-template/README.txt.
-        renderRichContent(c.definition || "*No definition added yet.*",
-            document.getElementById("rc-definition"));
-        renderRichContent(c.explanation || "*No core explanation added yet.*",
-            document.getElementById("rc-explanation"));
-        renderRichContent(c.example || "*No example added yet.*",
-            document.getElementById("rc-example"));
+        const container = document.getElementById("rc-explanation");
+
+        if (mdLink) {
+            // New path: content lives in the user's own Google Drive as
+            // a .md file; only the link is stored in the Sheet. Fetched
+            // live (through Apps Script) and rendered with the exact
+            // same renderRichContent() used everywhere else.
+            loadAndRenderMdFileContent(node, mdLink, container, myToken);
+        } else {
+            // Legacy path: full Markdown text saved directly into the
+            // Sheet's "explanation" cell by the older Upload Markdown
+            // flow. Keeps rendering exactly as before.
+            renderRichContent(legacyText, container);
+            if (window.ReadingTools) window.ReadingTools.onContentRendered();
+        }
+    }
+}
+
+async function loadAndRenderMdFileContent(node, mdLink, container, token) {
+    if (!container) return;
+
+    const cacheKey = node.id + "::" + mdLink;
+
+    if (markdownCache.has(cacheKey)) {
+        renderRichContent(markdownCache.get(cacheKey), container);
+        if (window.ReadingTools) window.ReadingTools.onContentRendered();
+        return;
+    }
+
+    container.innerHTML = `<p class="rc-loading">Loading content…</p>`;
+
+    try {
+        const url = `${GOOGLE_SHEET_API}?action=get_markdown&ref=${encodeURIComponent(mdLink)}`;
+        // A normal (non no-cors) fetch, since the JSON response must
+        // actually be readable here — unlike the fire-and-forget
+        // save_core/save_resource POSTs elsewhere in this file.
+        const response = await fetch(url);
+
+        // Discard if the user has since switched to another topic.
+        if (token !== contentRequestToken) return;
+
+        const data = await response.json();
+
+        if (token !== contentRequestToken) return;
+
+        if (data && data.ok) {
+            const text = String(data.content || "");
+            markdownCache.set(cacheKey, text);
+
+            if (!text.trim()) {
+                container.innerHTML = `<p class="rc-error">This file is empty.</p>`;
+            } else {
+                renderRichContent(text, container);
+            }
+            if (window.ReadingTools) window.ReadingTools.onContentRendered();
+        } else {
+            const reason = (data && data.error) || "Could not read this file.";
+            container.innerHTML = `<p class="rc-error">⚠ ${escapeHtml(reason)}</p>`;
+        }
+    } catch (error) {
+        if (token !== contentRequestToken) return;
+        console.error("Fetching Drive markdown failed:", error);
+        container.innerHTML = `
+            <p class="rc-error">⚠ Could not reach the content source. Check your
+            connection, then reopen this topic to retry.</p>`;
     }
 }
 
@@ -413,13 +460,8 @@ document.addEventListener("click", e => {
             return;
         }
 
-        if (action.dataset.action === "edit-content") {
-            openEditContentModal();
-            return;
-        }
-
-        if (action.dataset.action === "upload-markdown") {
-            triggerMarkdownUpload();
+        if (action.dataset.action === "add-content-link") {
+            openAddContentLink();
             return;
         }
 
@@ -430,89 +472,13 @@ document.addEventListener("click", e => {
     }
 });
 
-/* =========================================================
-   ALPHA-PLUS — MARKDOWN UPLOAD
-   A topic's Explanation is the main rich-content area (already
-   rendered through renderRichContent: Markdown, tables, mermaid,
-   charts). Uploading a .md file simply reads it as text in the
-   browser and saves it through the SAME save_core endpoint the
-   "Add / Edit Content" form already uses — no Google Drive file
-   storage, file IDs or extra Apps Script endpoint are needed for
-   plain-text Markdown, since a Google Sheets cell already holds
-   this much text comfortably. See the implementation report for
-   why this is simpler than routing the file through Drive.
-   ========================================================= */
-
-function triggerMarkdownUpload() {
-    if (!selectedTopicNode) return;
-
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".md,text/markdown,text/plain";
-    input.style.display = "none";
-
-    input.addEventListener("change", async () => {
-        const file = input.files && input.files[0];
-        input.remove();
-        if (!file) return;
-
-        if (file.size > 45000) {
-            alert(
-                "This file is quite large for a single topic's content " +
-                "(Google Sheets cells hold roughly 50,000 characters). " +
-                "Consider splitting it across subtopics."
-            );
-        }
-
-        try {
-            const text = await file.text();
-            await saveMarkdownAsExplanation(text);
-        } catch (error) {
-            console.error("Could not read the Markdown file:", error);
-            alert("Could not read that file. Please choose a .md text file and try again.");
-        }
-    });
-
-    document.body.appendChild(input);
-    input.click();
-}
-
-async function saveMarkdownAsExplanation(markdownText) {
-    if (!selectedTopicNode) return;
-    const c = selectedTopicNode.content || {};
-
-    try {
-        await fetch(GOOGLE_SHEET_API, {
-            method: "POST",
-            mode: "no-cors",
-            body: JSON.stringify({
-                action: "save_core",
-                node_id: selectedTopicNode.id,
-                content_type: "explanation",
-                title: selectedTopicNode.title,
-                content: markdownText,
-                status: "published",
-                author_id: "author",
-                version: 1
-            })
-        });
-
-        selectedTopicNode.content = { ...c, explanation: markdownText };
-        invalidateIndexCache();
-        renderContentLayer();
-        document.getElementById("middle-panel").scrollTop = 0;
-
-    } catch (error) {
-        console.error("Markdown upload failed:", error);
-        alert("Could not save the uploaded Markdown. Please check your connection and try again.");
-    }
-}
-
 async function removeTopicContent() {
     if (!selectedTopicNode) return;
     if (!confirm("Remove all content for this topic? This cannot be undone.")) return;
 
-    const clearedFields = ["definition", "explanation", "example", "key_points", "diagram"];
+    // Clearing "md_file" only unlinks the reference from the Sheet — it
+    // never touches or deletes anything in the user's actual Google Drive.
+    const clearedFields = ["definition", "explanation", "example", "key_points", "diagram", "md_file"];
 
     try {
         for (const content_type of clearedFields) {
@@ -532,9 +498,11 @@ async function removeTopicContent() {
             });
         }
 
+        clearMarkdownCacheForNode(selectedTopicNode.id);
+
         const c = selectedTopicNode.content || {};
         selectedTopicNode.content = {
-            definition: "", explanation: "", example: "", keyPoints: [], diagram: "",
+            definition: "", explanation: "", example: "", keyPoints: [], diagram: "", md_file: "",
             index_terms: c.index_terms || ""
         };
         invalidateIndexCache();
@@ -546,119 +514,276 @@ async function removeTopicContent() {
     }
 }
 
-function openEditContentModal() {
-    if (!selectedTopicNode) return;
-    const c = selectedTopicNode.content || {};
+function clearMarkdownCacheForNode(nodeId) {
+    const prefix = nodeId + "::";
+    [...markdownCache.keys()]
+        .filter(key => key.startsWith(prefix))
+        .forEach(key => markdownCache.delete(key));
+}
 
-    document.getElementById("edit-content-modal")?.remove();
+/* =========================================================
+   ALPHA-PLUS — ADD CONTENT LINK MODAL
+   Same visual pattern as the "Add Reference" modal (same overlay/
+   modal/close CSS classes). Saves a Google Drive .md link as plain
+   text through the existing generic save_core action, exactly like
+   definition/explanation/example already work — content_type is
+   just "md_file" instead. No file ever leaves the user's own Drive
+   and no file is uploaded through the browser here.
+   ========================================================= */
+
+const CONTENT_LINK_AI_PROMPT = `You are helping me write study notes as a single Markdown (.md) file
+for a Library & Information Science exam-prep website. The file will
+be rendered on the web using marked.js (GitHub-flavored Markdown),
+so please use ONLY the following elements, and nothing else that
+needs special setup:
+
+- ## / ### headings for structure
+- **bold** and *italic* for emphasis
+- - bullet lists and 1. numbered lists
+- Tables using standard Markdown pipe syntax
+- > blockquotes for "important for exam" callouts
+- Optionally, a mermaid diagram using a \`\`\`mermaid fenced code block
+  (flowchart/graph/mindmap syntax) if a concept has a visual structure
+- Optionally, a chart using a \`\`\`chart fenced code block containing
+  JSON like: {"type":"bar","labels":[...],"data":[...]}
+
+Full hierarchy path of this topic on the website:
+<PUT HIERARCHY PATH HERE>
+
+Topic: <PUT TOPIC NAME HERE>
+
+Using the hierarchy path above, calibrate the depth and scope of the
+notes to where this topic sits in the syllabus — a broad Unit-level
+topic needs wider coverage, while a narrow Subtopic needs sharper,
+more specific detail. Write clear, exam-oriented notes on this exact
+topic: a definition, a clear explanation, one worked example if
+relevant, and a short list of key points to remember at the end.
+Keep headings consistent (## for major sections, ### for
+sub-sections) and stay strictly within the scope of this one topic —
+do not repeat content that belongs to sibling or parent topics named
+in the hierarchy above. Do not use any HTML tags, only Markdown.
+
+---
+FILE NAMING INSTRUCTION (for you, the human — not for the AI tool):
+Once the AI above has generated the notes, save the file to your
+Google Drive using EXACTLY this file name. This keeps every topic's
+file uniquely and predictably named, matching this exact spot in the
+website's hierarchy, so nothing ever gets mixed up or overwritten:
+
+<PUT SUGGESTED FILENAME HERE>
+
+Then set that file's sharing to "Anyone with the link can view",
+copy its share link, and paste that link into the "Add Content Link"
+box on the website for this topic.`;
+
+// Maps each node_type to the short label used inside the generated
+// Google-Drive file name (Sub / Course / Unit / Chapter / Topic / Subtopic).
+const NODE_TYPE_FILE_LABELS = {
+    subject: "Sub",
+    course: "Course",
+    unit: "Unit",
+    chapter: "Chapter",
+    topic: "Topic",
+    subtopic: "Subtopic"
+};
+
+// Full ancestor chain (Subject -> ... -> this node), reusing the same
+// tree-walk already used elsewhere (selectNodeById, Index search).
+function getTopicAncestorPath(node) {
+    return findPathToNode(window.__studyData?.subjects || [], node.id) || [node];
+}
+
+// Human-readable breadcrumb for the prompt's context section, e.g.
+// "LIS → ePG → P-01 Knowledge Society(17) → M-02 Data, Information, and Knowledge → Information"
+function buildTopicBreadcrumb(node) {
+    return getTopicAncestorPath(node).map(n => n.title).join(" → ");
+}
+
+// Deterministic, hierarchy-based Drive file name, e.g.
+// "Sub_LIS_Course_ePG_Unit_P-01-Knowledge-Society(17)_Chapter_M-02-Data,-Information,-and-Knowledge_Topic_Information.md"
+// Spaces inside each title become hyphens; everything else (commas,
+// parentheses, numbers) is kept exactly as it is in the Nodes sheet.
+function buildTopicFileName(node) {
+    const parts = getTopicAncestorPath(node).map(n => {
+        const label = NODE_TYPE_FILE_LABELS[n.type] ||
+            (n.type ? n.type.charAt(0).toUpperCase() + n.type.slice(1) : "Node");
+        const safeTitle = String(n.title || "").trim().replace(/\s+/g, "-");
+        return `${label}_${safeTitle}`;
+    });
+    return parts.join("_") + ".md";
+}
+
+function openAddContentLink() {
+    if (!selectedTopicNode) return;
+    document.getElementById("add-content-link-modal")?.remove();
+
+    const existingLink = String((selectedTopicNode.content || {}).md_file || "");
+    const suggestedFileName = buildTopicFileName(selectedTopicNode);
 
     const modal = document.createElement("div");
-    modal.id = "edit-content-modal";
+    modal.id = "add-content-link-modal";
     modal.innerHTML = `
-        <div class="resource-preview-overlay">
+        <div class="add-resource-overlay">
             <div class="add-resource-modal">
-                <button type="button" class="modal-close" onclick="closeEditContentModal()">×</button>
-                <h2>✎ Add / Edit Content</h2>
-                <p class="add-resource-scope">Topic: <strong>${escapeHtml(selectedTopicNode.title)}</strong></p>
+                <button type="button" class="modal-close" onclick="closeAddContentLink()">×</button>
+                <h2>🔗 Add Content Link</h2>
+                <p class="add-resource-scope">Adding to: <strong>${escapeHtml(selectedTopicNode.title)}</strong></p>
 
-                <label>Definition <span class="field-optional">(Markdown supported)</span></label>
-                <textarea id="edit-content-definition" placeholder="Short, precise definition... (Markdown: **bold**, lists, tables)">${escapeHtml(c.definition || "")}</textarea>
+                <label>Google Drive link to the .md file</label>
+                <input id="content-link-url" type="url" value="${escapeHtml(existingLink)}"
+                       placeholder="https://drive.google.com/file/d/.../view">
+                <p class="drive-note">The file must be shared as <strong>"Anyone with the link
+                    can view"</strong>, or the website won't be able to read it.</p>
 
-                <label>Explanation <span class="field-optional">(Markdown, tables, mermaid/chart blocks)</span></label>
-                <textarea id="edit-content-explanation" placeholder="Full explanation... Use Markdown for formatting/tables, a &#96;&#96;&#96;mermaid block for mind maps, or a &#96;&#96;&#96;chart block for graphs.">${escapeHtml(c.explanation || "")}</textarea>
+                <details class="content-link-guide">
+                    <summary>Formatting guide</summary>
+                    <pre class="content-link-guide-body">## Heading                -&gt; section heading
+**bold**  *italic*        -&gt; bold / italic text
+- point one               -&gt; bullet list
+- point two
+1. step one                -&gt; numbered list
+2. step two
 
-                <label>Example <span class="field-optional">(Markdown supported)</span></label>
-                <textarea id="edit-content-example" placeholder="Example... (Markdown supported)">${escapeHtml(c.example || "")}</textarea>
+| Term | Meaning |         -&gt; a real HTML table
+|------|---------|
+| RAM  | Volatile memory |
+| ROM  | Non-volatile    |
 
-                <label>Key Points <span class="field-optional">(one per line)</span></label>
-                <textarea id="edit-content-keypoints" placeholder="One key point per line...">${escapeHtml((c.keyPoints || []).join("\n"))}</textarea>
+&gt; Important exam note      -&gt; highlighted quote/callout box
 
-                <label>Diagram / Graph image URLs <span class="field-optional">(one per line, optional)</span></label>
-                <textarea id="edit-content-diagram" placeholder="https://... (one image URL per line)">${escapeHtml(c.diagram || "")}</textarea>
+\`\`\`mermaid
+graph TD
+A[Information Society] --&gt; B[Digital Divide]
+\`\`\`
+-&gt; mind maps / flowcharts (mermaid.js syntax)
 
-                <label>Also known as <span class="field-optional">(comma-separated — helps this topic show up in the Index under other names, e.g. RFID, Radio Frequency Identification)</span></label>
-                <textarea id="edit-content-index-terms" placeholder="Alternate names or terms, separated by commas...">${escapeHtml(c.index_terms || "")}</textarea>
+\`\`\`chart
+{"type":"bar","labels":["Primary","Secondary"],"data":[40,35]}
+\`\`\`
+-&gt; bar / line / pie / doughnut charts (Chart.js JSON spec)</pre>
+                </details>
 
-                <button class="resource-submit-btn" type="button" onclick="submitEditContent()">Save Content</button>
+                <div class="content-action-row">
+                    <button type="button" class="content-action" onclick="copyContentLinkAiPrompt()">📋 Copy AI Prompt</button>
+                </div>
+
+                <label>Suggested file name (save your Drive file with this exact name)</label>
+                <div class="content-action-row">
+                    <input id="suggested-filename-box" type="text" readonly
+                           value="${escapeHtml(suggestedFileName)}"
+                           onclick="this.select()">
+                    <button type="button" class="content-action" onclick="copySuggestedFileName()">📋 Copy Name</button>
+                </div>
+                <p class="drive-note">This name is unique to this topic's exact place in the
+                    hierarchy (Subject/Course/Unit/Chapter/Topic), so it never clashes with
+                    another topic's file.</p>
+
+                <button class="resource-submit-btn" type="button" onclick="submitContentLink()">Save Link</button>
             </div>
-        </div>
-    `;
+        </div>`;
     document.body.appendChild(modal);
-
-    modal.querySelector(".resource-preview-overlay").addEventListener("click", (e) => {
-        if (e.target.classList.contains("resource-preview-overlay")) closeEditContentModal();
-    });
 }
 
-function closeEditContentModal() {
-    document.getElementById("edit-content-modal")?.remove();
+function copySuggestedFileName() {
+    const box = document.getElementById("suggested-filename-box");
+    if (!box) return;
+
+    const fileName = box.value;
+    const done = () => alert("File name copied! Use this exact name when saving the .md file to Google Drive.");
+    const manual = () => {
+        box.select();
+        alert("Could not copy automatically — the name is now selected, press Ctrl+C / Cmd+C to copy it.");
+    };
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(fileName).then(done).catch(manual);
+    } else {
+        manual();
+    }
 }
 
-async function submitEditContent() {
+function closeAddContentLink() {
+    document.getElementById("add-content-link-modal")?.remove();
+}
+
+function copyContentLinkAiPrompt() {
     if (!selectedTopicNode) return;
 
-    const definition = document.getElementById("edit-content-definition").value.trim();
-    const explanation = document.getElementById("edit-content-explanation").value.trim();
-    const example = document.getElementById("edit-content-example").value.trim();
-    const keyPointsRaw = document.getElementById("edit-content-keypoints").value.trim();
-    const diagram = document.getElementById("edit-content-diagram").value.trim();
-    const indexTerms = document.getElementById("edit-content-index-terms").value.trim();
+    const topicTitle = selectedTopicNode.title || "<PUT TOPIC NAME HERE>";
+    const breadcrumb = buildTopicBreadcrumb(selectedTopicNode);
+    const fileName = buildTopicFileName(selectedTopicNode);
 
-    const keyPoints = keyPointsRaw
-        .split(/\r?\n/)
-        .map(x => x.trim())
-        .filter(Boolean);
+    const prompt = CONTENT_LINK_AI_PROMPT
+        .replace("<PUT HIERARCHY PATH HERE>", breadcrumb)
+        .replace("<PUT TOPIC NAME HERE>", topicTitle)
+        .replace("<PUT SUGGESTED FILENAME HERE>", fileName);
 
-    const submitBtn = document.querySelector("#edit-content-modal .resource-submit-btn");
+    const done = () => alert("Prompt copied! Paste it into ChatGPT, Claude, Gemini, or any AI tool. along with the content material you want to convert into a Markdown file.");
+    const manual = () => alert("Could not copy automatically — please copy this prompt manually:\n\n" + prompt);
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(prompt).then(done).catch(() => fallbackCopyText(prompt, done, manual));
+    } else {
+        fallbackCopyText(prompt, done, manual);
+    }
+}
+
+function fallbackCopyText(text, onSuccess, onFailure) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+        document.execCommand("copy");
+        onSuccess();
+    } catch (error) {
+        onFailure();
+    }
+    ta.remove();
+}
+
+async function submitContentLink() {
+    const url = document.getElementById("content-link-url")?.value.trim();
+    if (!url) { alert("Please paste a Google Drive link to the .md file."); return; }
+    if (!selectedTopicNode) return;
+
+    const submitBtn = document.querySelector("#add-content-link-modal .resource-submit-btn");
     if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = "Saving..."; }
 
-    const fields = [
-        { content_type: "definition", content: definition },
-        { content_type: "explanation", content: explanation },
-        { content_type: "example", content: example },
-        { content_type: "key_points", content: keyPointsRaw },
-        { content_type: "diagram", content: diagram },
-        { content_type: "index_terms", content: indexTerms }
-    ];
-
     try {
-        for (const field of fields) {
-            await fetch(GOOGLE_SHEET_API, {
-                method: "POST",
-                mode: "no-cors",
-                body: JSON.stringify({
-                    action: "save_core",
-                    node_id: selectedTopicNode.id,
-                    content_type: field.content_type,
-                    title: selectedTopicNode.title,
-                    content: field.content,
-                    status: "published",
-                    author_id: "author",
-                    version: 1
-                })
-            });
-        }
+        await fetch(GOOGLE_SHEET_API, {
+            method: "POST",
+            mode: "no-cors",
+            body: JSON.stringify({
+                action: "save_core",
+                node_id: selectedTopicNode.id,
+                content_type: "md_file",
+                title: selectedTopicNode.title,
+                content: url,
+                status: "published",
+                author_id: "author",
+                version: 1
+            })
+        });
 
-        selectedTopicNode.content = {
-            definition,
-            explanation,
-            example,
-            keyPoints,
-            diagram,
-            index_terms: indexTerms
-        };
+        clearMarkdownCacheForNode(selectedTopicNode.id);
 
+        selectedTopicNode.content = { ...(selectedTopicNode.content || {}), md_file: url };
         invalidateIndexCache();
-        closeEditContentModal();
+        closeAddContentLink();
         renderContentLayer();
         document.getElementById("middle-panel").scrollTop = 0;
 
     } catch (error) {
-        console.error("Content save failed:", error);
-        alert("Could not save content. Please check your connection and try again.");
-        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "Save Content"; }
+        console.error("Content link save failed:", error);
+        alert("Could not save this link. Please check your connection and try again.");
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "Save Link"; }
     }
 }
+
+
 
 
 /* =========================================================
@@ -723,9 +848,9 @@ function renderResources(node) {
     container.innerHTML = `
         <div class="resource-group">
             <div class="resource-group-summary">
-                <span>Resources <span class="resource-count">${list.length}</span></span>
+                <span>References <span class="resource-count">${list.length}</span></span>
                 <button class="add-resource-btn" type="button" onclick="openAddResource()">
-                    + Add Resource
+                    + Add Reference
                 </button>
             </div>
             <div id="resource-preview-area"></div>
@@ -747,7 +872,7 @@ function renderResources(node) {
                                 <button type="button" class="resource-delete-btn" onclick="deleteResource('${escapeHtml(resource.id)}')">Delete</button>
                             </div>
                         </div>`;
-                }).join("") : `<p class="resource-empty">No resources added yet.</p>`}
+                }).join("") : `<p class="resource-empty">No references added yet.</p>`}
             </div>
         </div>
     `;
@@ -768,7 +893,7 @@ function openAddResource() {
         <div class="add-resource-overlay">
             <div class="add-resource-modal">
                 <button type="button" class="modal-close" onclick="closeAddResource()">×</button>
-                <h2>➕ Add Resource</h2>
+                <h2>➕ Add Reference</h2>
                 <p class="add-resource-scope">Adding to: <strong>${escapeHtml(selectedTopicNode.title)}</strong></p>
                 <div class="resource-type-options">
                     <button type="button" onclick="selectResourceType('youtube')">▶️ YouTube</button>
@@ -807,7 +932,7 @@ function selectResourceType(type){
         <textarea id="resource-description"
                   placeholder="Short note about what this resource covers..."></textarea>
 
-        <button class="resource-submit-btn" type="button" onclick="submitResource()">Add Resource</button>
+        <button class="resource-submit-btn" type="button" onclick="submitResource()">Add Reference</button>
     `;
 
     if(type==="youtube"){
@@ -868,7 +993,7 @@ async function submitResource(){
     } catch (error) {
         console.error("Resource save failed:", error);
         alert("Could not save this resource. Please check your connection and try again.");
-        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "Add Resource"; }
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "Add Reference"; }
     }
 }
 

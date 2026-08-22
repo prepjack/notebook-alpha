@@ -32,9 +32,13 @@ TABLE OF CONTENTS | CONTENT | REFERENCES / INDEX
   navigation tree" is what it actually is, and the word "Index" is now
   used for the alphabetical panel below.
 - CONTENT (middle): author/core content, community contribution and
-  My Notes layers, plus a "Upload Markdown" path for adding a topic's
-  explanation from a .md file in one step (see js/app.js,
-  triggerMarkdownUpload / saveMarkdownAsExplanation).
+  My Notes layers, plus an "Add Content Link" path for linking a
+  topic's content to a .md file already saved in the user's own
+  Google Drive, fetched and rendered live (see js/app.js,
+  openAddContentLink / loadAndRenderMdFileContent, and
+  google-sheet-template/README.txt section 7). The older "Upload
+  Markdown" button has been removed from the UI; any topic with
+  legacy explanation text saved that way still renders as before.
 - RIGHT PANEL now has two tabs:
   - REFERENCES (was "Resources"): unchanged — links such as Google
     Drive/Web and YouTube, with a page/location reference.
