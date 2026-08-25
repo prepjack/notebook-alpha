@@ -2938,6 +2938,25 @@ body.index-directory-resizing .index-directory-workspace {
 /* PHASE 8a — multi-language generator dropdown row */
 .mcq-lang-select-row { display:flex; flex-wrap:wrap; gap:6px; margin:5px 0 7px; }
 .mcq-lang-select-row .mcq-lang-select { flex:1 1 160px; }
+
+/* PHASE 8b — numbered field markers, guide icon/panel */
+.mcq-field-num { font-weight:700; margin-right:2px; }
+.mcq-field-label { display:block; }
+/* red = absolutely necessary, yellow = worth checking/adjusting, green = fine to leave as-is */
+.mcq-num-red { color: #b23b3b; }
+.mcq-num-yellow { color: #9a7d1f; }
+.mcq-num-green { color: var(--green); }
+.mcq-guide-icon {
+    right: 40px;
+    width: 22px; height: 22px; line-height: 20px;
+    text-align: center; font-size: 13px; font-weight: 700;
+    border: 1px solid var(--line); border-radius: 50%;
+    color: var(--green); background: var(--green-soft);
+}
+.mcq-guide-modal { width: min(480px, 92vw); }
+.mcq-guide-list { margin: 10px 0 0; padding-left: 18px; list-style: none; }
+.mcq-guide-list li { margin: 0 0 12px; font: 11px/1.55 Arial, sans-serif; color: #354239; }
+.mcq-guide-list li strong { /* color now comes from the required .mcq-num-red/yellow/green class */ }
 .mcq-tag-chip {
     display:inline-flex; align-items:center; gap:5px; padding:4px 7px;
     border:1px solid var(--line); border-radius:999px; background:#f4f6f2;

@@ -1223,6 +1223,126 @@ function refreshSitewideMcqTagSuggestions() {
         .catch(error => console.warn("Tag suggestion refresh failed:", error));
 }
 
+// PHASE 8b — bilingual (English/हिन्दी) field guide shown in the
+// popup's top-right "?" panel. Numbers/colors below match the
+// numbered markers rendered next to each field in openAddMcqModal().
+// "Include math" and "Tag format reference" have no field number of
+// their own (math is part of point 8's row; the reference has
+// nothing for the user to fill in), so they're folded into the
+// neighbouring point's text instead of getting their own entry.
+let mcqGuideActiveTab = "english"; // persists for the session only
+
+// red = absolutely necessary, yellow = worth checking/adjusting,
+// green = fine to leave as-is / fully optional. Point 2 (Collection
+// name) is dynamic — its color is computed from the live field in
+// mcqGuideColorClass() below, not from this static list.
+const MCQ_GUIDE_COLORS = ["yellow", "red", "red", "green", "green", "green", "yellow", "red", "yellow", "green", "yellow", "red"];
+
+const MCQ_GUIDE_POINTS = [
+    { en: "Import mode — choose Full Set/Paper for a whole paper/collection, or Individual MCQ for a single question. This decides whether Collection name is required.",
+      hi: "Import mode — पूरे paper/collection के लिए Full Set/Paper चुनें, या सिर्फ़ एक question के लिए Individual MCQ चुनें। इसी से तय होता है कि Collection name ज़रूरी है या नहीं।" },
+    { en: "Collection name — required only in Full Set/Paper mode. Name the paper/set (e.g. 'SSC CGL 2023 Tier 1'). Leave blank in Individual MCQ mode.",
+      hi: "Collection name — सिर्फ़ Full Set/Paper mode में ज़रूरी है। Paper या set का नाम डालें (जैसे 'SSC CGL 2023 Tier 1')। Individual MCQ mode में इसे खाली छोड़ सकते हैं।" },
+    { en: "Google Drive .md link — required. Paste the share link of your Markdown file; it must be set to 'Anyone with the link can view'.",
+      hi: "Google Drive .md link — ज़रूरी है। अपनी Markdown file का share link paste करें; उसे 'Anyone with the link can view' पर set होना चाहिए।" },
+    { en: "Description — optional. A short note about this collection or MCQ, used only as extra context.",
+      hi: "Description — optional है। इस collection या MCQ के बारे में एक छोटा सा note, सिर्फ़ extra context के लिए इस्तेमाल होता है।" },
+    { en: "Tags — optional. Search and select existing terms from the Index; new tags can't be created from here.",
+      hi: "Tags — optional हैं। Index में मौजूद terms को search करके select करें; यहाँ से नया tag नहीं बनाया जा सकता।" },
+    { en: "Study Topic — optional. Pick the tree node these MCQs belong to; used to build the suggested file name.",
+      hi: "Study Topic — optional है। उस tree node को चुनें जिससे ये MCQs related हैं; इसी से suggested file name बनता है।" },
+    { en: "How many languages? — choose 1–23. Selecting more than one adds a Language dropdown for each, used to generate the same questions in every selected language.",
+      hi: "How many languages? — 1 से 23 तक चुन सकते हैं। एक से ज़्यादा चुनने पर हर एक के लिए एक Language dropdown आ जाता है, जिससे same questions हर selected language में generate होते हैं।" },
+    { en: "Question type(s) — select which types (Simple, Assertion–Reasoning, Comprehension, Table/DI) the AI prompt should ask for; at least one is required. The same row has an optional 'Include math' checkbox for calculation-heavy questions.",
+      hi: "Question type(s) — तय करें कि AI prompt किस type (Simple, Assertion–Reasoning, Comprehension, Table/DI) के questions माँगे; कम से कम एक type चुनना ज़रूरी है। इसी row में एक optional 'Include math' checkbox भी है, calculation-heavy questions के लिए।" },
+    { en: "How many questions? — sets the approximate question count the AI prompt asks for.",
+      hi: "How many questions? — इससे AI prompt में लगभग कितने questions चाहिए, वो number set होता है।" },
+    { en: "Copy AI Prompt — builds the full prompt from everything above and copies it, ready to paste into an AI tool.",
+      hi: "Copy AI Prompt — ऊपर की सारी settings से पूरा prompt बनाकर copy कर देता है, जिसे किसी AI tool में paste किया जा सकता है।" },
+    { en: "Suggested file name — auto-generated from the selected Study Topic; copy it and use it exactly when saving the .md file to Drive. (Below it is a collapsible 'Tag format reference' — nothing to fill in, just a cheat-sheet of the @tag grammar.)",
+      hi: "Suggested file name — selected Study Topic से auto-generate होता है; .md file को Drive पर save करते समय इसी नाम का इस्तेमाल करें। (इसके ठीक ऊपर एक collapsible 'Tag format reference' है — उसमें कुछ भरना नहीं है, बस @tag grammar की cheat-sheet है।)" },
+    { en: "Fetch & Preview — required. Fetches the Drive file, parses it, and opens a preview before anything is saved to the sheet.",
+      hi: "Fetch & Preview — ज़रूरी step है। Drive file को fetch करके parse करता है, और sheet में save होने से पहले एक preview खोलता है।" }
+];
+
+// Point 2 (index 1, "Collection name") is dynamic — it mirrors
+// whatever the popup's Full Set/Individual toggle currently has set,
+// so the guide never disagrees with the actual field.
+function mcqGuideColorClass(i) {
+    if (i === 1) {
+        const required = document.getElementById("mcq-collection")?.required;
+        return required ? "red" : "green";
+    }
+    return MCQ_GUIDE_COLORS[i] || "green";
+}
+
+function renderMcqGuideList() {
+    const list = document.getElementById("mcq-guide-list");
+    if (!list) return;
+    list.innerHTML = MCQ_GUIDE_POINTS.map((p, i) =>
+        `<li><strong class="mcq-num-${mcqGuideColorClass(i)}">${i + 1}.</strong> ${mcqEscapeHtml(mcqGuideActiveTab === "hindi" ? p.hi : p.en)}</li>`
+    ).join("");
+    document.getElementById("mcq-guide-tab-en")?.classList.toggle("primary", mcqGuideActiveTab === "english");
+    document.getElementById("mcq-guide-tab-hi")?.classList.toggle("primary", mcqGuideActiveTab === "hindi");
+}
+
+// Opens on top of the still-open Add MCQ popup without closing it;
+// closes via its own × or an outside (overlay) click, returning
+// focus to the guide icon in the popup underneath.
+function openMcqGuideModal() {
+    document.getElementById("mcq-guide-modal")?.remove();
+
+    const modal = document.createElement("div");
+    modal.id = "mcq-guide-modal";
+    modal.innerHTML = `
+        <div class="add-resource-overlay" id="mcq-guide-overlay">
+            <div class="add-resource-modal mcq-guide-modal">
+                <button type="button" class="modal-close" id="mcq-guide-close">×</button>
+                <h2>Field Guide</h2>
+                <div class="resource-type-options" role="tablist" aria-label="Guide language">
+                    <button type="button" id="mcq-guide-tab-en">English</button>
+                    <button type="button" id="mcq-guide-tab-hi">हिन्दी</button>
+                </div>
+                <ol id="mcq-guide-list" class="mcq-guide-list"></ol>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+    renderMcqGuideList();
+
+    const closeGuide = () => {
+        modal.remove();
+        document.getElementById("mcq-guide-open")?.focus();
+    };
+
+    document.getElementById("mcq-guide-close").addEventListener("click", closeGuide);
+    document.getElementById("mcq-guide-tab-en").addEventListener("click", () => {
+        mcqGuideActiveTab = "english";
+        renderMcqGuideList();
+    });
+    document.getElementById("mcq-guide-tab-hi").addEventListener("click", () => {
+        mcqGuideActiveTab = "hindi";
+        renderMcqGuideList();
+    });
+    document.getElementById("mcq-guide-overlay").addEventListener("click", e => {
+        if (e.target.id === "mcq-guide-overlay") closeGuide();
+    });
+}
+
+// PHASE 8b — makes the Full Set/Individual toggle's real effect
+// visible: reactive label text + required attribute on Collection name.
+function updateMcqCollectionRequirement(mode) {
+    const label = document.getElementById("mcq-collection-label");
+    const input = document.getElementById("mcq-collection");
+    if (!label || !input) return;
+    if (mode === "full") {
+        label.innerHTML = `<span class="mcq-field-num mcq-num-red" id="mcq-field-num-2">2.</span> Collection name *`;
+        input.required = true;
+    } else {
+        label.innerHTML = `<span class="mcq-field-num mcq-num-green" id="mcq-field-num-2">2.</span> Collection name (optional)`;
+        input.required = false;
+    }
+}
+
 function openAddMcqModal() {
     document.getElementById("add-mcq-modal")?.remove();
     refreshSitewideMcqTagSuggestions();
@@ -1241,61 +1361,62 @@ function openAddMcqModal() {
     modal.innerHTML = `
         <div class="add-resource-overlay">
             <div class="add-resource-modal mcq-add-modal">
+                <button type="button" class="modal-close mcq-guide-icon" id="mcq-guide-open" title="Guide" aria-label="Open field guide">?</button>
                 <button type="button" class="modal-close" id="mcq-add-close">×</button>
                 <h2>➕ Add MCQs</h2>
                 <p class="add-resource-scope">Current topic: <strong>${mcqEscapeHtml(topic?.title || "Not selected")}</strong></p>
 
+                <label class="mcq-field-label"><span class="mcq-field-num mcq-num-yellow">1.</span> Import mode</label>
                 <div class="resource-type-options" role="group" aria-label="Import mode">
                     <button type="button" id="mcq-mode-full" class="primary">Full Set / Paper</button>
                     <button type="button" id="mcq-mode-individual">Individual MCQ</button>
                 </div>
                 <p class="drive-note">Mode is a view-only switch for now. Both modes use the same import pipeline.</p>
 
-                <label for="mcq-collection">Collection name</label>
-                <input id="mcq-collection" type="text" placeholder="e.g. UGC NET 2025 Paper II">
+                <label for="mcq-collection" id="mcq-collection-label"><span class="mcq-field-num mcq-num-red" id="mcq-field-num-2">2.</span> Collection name *</label>
+                <input id="mcq-collection" type="text" placeholder="e.g. UGC NET 2025 Paper II" required>
 
-                <label for="mcq-drive-link">Google Drive .md link *</label>
+                <label for="mcq-drive-link"><span class="mcq-field-num mcq-num-red">3.</span> Google Drive .md link *</label>
                 <input id="mcq-drive-link" type="url" placeholder="https://drive.google.com/file/d/.../view">
                 <p class="drive-note">The file must be shared as <strong>"Anyone with the link can view"</strong>.</p>
 
-                <label for="mcq-description">Description</label>
+                <label for="mcq-description"><span class="mcq-field-num mcq-num-green">4.</span> Description</label>
                 <textarea id="mcq-description" rows="2" placeholder="Optional description"></textarea>
 
-                <label>Tags <small>(optional — select from the Index)</small></label>
+                <label><span class="mcq-field-num mcq-num-green">5.</span> Tags <small>(optional — select from the Index)</small></label>
                 <div id="mcq-tag-chips" class="mcq-tag-chip-wrap"></div>
                 <div style="position:relative">
                     <input id="mcq-tag-input" type="text" placeholder="Search existing index terms...">
                     <div id="mcq-tag-suggestions" class="drive-note" hidden></div>
                 </div>
 
-                <label for="mcq-study-topic">Study Topic</label>
+                <label for="mcq-study-topic"><span class="mcq-field-num mcq-num-green">6.</span> Study Topic</label>
                 <select id="mcq-study-topic">
                     <option value="">— Optional —</option>
                     ${topicOptions}
                 </select>
 
-                <label for="mcq-lang-count">How many languages?</label>
+                <label for="mcq-lang-count"><span class="mcq-field-num mcq-num-yellow">7.</span> How many languages?</label>
                 <select id="mcq-lang-count">
                     ${Array.from({ length: 23 }, (_, i) => i + 1).map(n =>
                         `<option value="${n}" ${n === 1 ? "selected" : ""}>${n}</option>`).join("")}
                 </select>
                 <div id="mcq-lang-select-row" class="mcq-lang-select-row"></div>
 
-                <label>Question type(s) to include in the prompt</label>
+                <label><span class="mcq-field-num mcq-num-red">8.</span> Question type(s) to include in the prompt</label>
                 <div id="mcq-type-options" class="resource-type-options">
                     <label><input type="checkbox" value="simple" checked> Simple</label>
                     <label><input type="checkbox" value="assertion_reason"> Assertion–Reasoning</label>
                     <label><input type="checkbox" value="comprehension"> Comprehension</label>
                     <label><input type="checkbox" value="table"> Table/DI</label>
+                    <label><input id="mcq-include-math" type="checkbox"> Include math</label>
                 </div>
 
-                <label><input id="mcq-include-math" type="checkbox"> Include math / numeric-heavy questions</label>
-
-                <label for="mcq-question-count">How many questions?</label>
+                <label for="mcq-question-count"><span class="mcq-field-num mcq-num-yellow">9.</span> How many questions?</label>
                 <input id="mcq-question-count" type="number" min="1" value="10">
 
                 <div class="content-action-row">
-                    <button type="button" id="mcq-copy-prompt" class="content-action">📋 Copy AI Prompt</button>
+                    <button type="button" id="mcq-copy-prompt" class="content-action"><span class="mcq-field-num mcq-num-green">10.</span> 📋 Copy AI Prompt</button>
                 </div>
 
                 <details class="content-link-guide">
@@ -1327,19 +1448,20 @@ D) Option D
 @end`)}</pre>
                 </details>
 
-                <label for="mcq-suggested-filename">Suggested file name</label>
+                <label for="mcq-suggested-filename"><span class="mcq-field-num mcq-num-yellow">11.</span> Suggested file name</label>
                 <div class="content-action-row">
                     <input id="mcq-suggested-filename" type="text" readonly value="${mcqEscapeHtml(suggestedName)}">
                     <button type="button" id="mcq-copy-name" class="content-action">📋 Copy Name</button>
                 </div>
 
-                <button class="resource-submit-btn" type="button" id="mcq-fetch-preview">Fetch & Preview</button>
+                <button class="resource-submit-btn" type="button" id="mcq-fetch-preview"><span class="mcq-field-num mcq-num-red">12.</span> Fetch &amp; Preview</button>
             </div>
         </div>`;
 
     document.body.appendChild(modal);
 
     document.getElementById("mcq-add-close").addEventListener("click", closeAddMcqModal);
+    document.getElementById("mcq-guide-open").addEventListener("click", openMcqGuideModal);
     document.getElementById("mcq-copy-prompt").addEventListener("click", copyMcqAiPrompt);
     document.getElementById("mcq-copy-name").addEventListener("click", copyMcqSuggestedName);
     document.getElementById("mcq-fetch-preview").addEventListener("click", submitAddMcq);
@@ -1378,15 +1500,23 @@ D) Option D
         }
     });
 
+    // PHASE 8b — fix: the tag suggestions dropdown previously never
+    // closed on outside click. Bind once per modal-open, unbind on
+    // close so repeated opens don't stack duplicate listeners.
+    bindMcqTagOutsideClick();
+
     const modeFull = document.getElementById("mcq-mode-full");
     const modeIndividual = document.getElementById("mcq-mode-individual");
+    updateMcqCollectionRequirement("full"); // "Full Set / Paper" is the default active mode
     modeFull.addEventListener("click", () => {
         modeFull.classList.add("primary");
         modeIndividual.classList.remove("primary");
+        updateMcqCollectionRequirement("full");
     });
     modeIndividual.addEventListener("click", () => {
         modeIndividual.classList.add("primary");
         modeFull.classList.remove("primary");
+        updateMcqCollectionRequirement("individual");
     });
 }
 
@@ -1405,8 +1535,34 @@ function copyMcqSuggestedName() {
     }
 }
 
+// PHASE 8b — outside-click handler for the tag suggestions dropdown.
+// Kept as a module-level reference so it can be removed cleanly
+// (bindMcqTagOutsideClick re-binds on every modal open; closeAddMcqModal
+// unbinds it) instead of piling up a new document listener each time.
+let mcqTagOutsideClickHandler_ = null;
+
+function bindMcqTagOutsideClick() {
+    if (mcqTagOutsideClickHandler_) {
+        document.removeEventListener("click", mcqTagOutsideClickHandler_);
+    }
+    mcqTagOutsideClickHandler_ = function (e) {
+        const box = document.getElementById("mcq-tag-suggestions");
+        const input = document.getElementById("mcq-tag-input");
+        if (!box || !input) return;
+        if (box.hidden) return;
+        if (!box.contains(e.target) && !input.contains(e.target)) {
+            box.hidden = true;
+        }
+    };
+    document.addEventListener("click", mcqTagOutsideClickHandler_);
+}
+
 function closeAddMcqModal() {
     document.getElementById("add-mcq-modal")?.remove();
+    if (mcqTagOutsideClickHandler_) {
+        document.removeEventListener("click", mcqTagOutsideClickHandler_);
+        mcqTagOutsideClickHandler_ = null;
+    }
 }
 
 async function fetchMcqMarkdown(ref) {
@@ -1550,6 +1706,16 @@ function renderMcqPreviewModal(parsed) {
 }
 
 async function submitAddMcq() {
+    // PHASE 8b — Collection name's required-ness is reactive to the
+    // Full Set/Individual toggle (updateMcqCollectionRequirement());
+    // this button isn't a real <form> submit, so enforce it manually.
+    const collectionInput = document.getElementById("mcq-collection");
+    if (collectionInput && collectionInput.required && !collectionInput.value.trim()) {
+        alert("Please enter a Collection name (required in Full Set / Paper mode).");
+        collectionInput.focus();
+        return;
+    }
+
     const ref = document.getElementById("mcq-drive-link")?.value.trim();
     if (!ref) {
         alert("Please paste a Google Drive link to the .md file.");
