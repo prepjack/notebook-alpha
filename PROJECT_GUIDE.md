@@ -5,10 +5,14 @@ This is the current frozen UI prototype before Google Sheets + Apps Script integ
 
 ## Main architecture
 - `index.html` — main Study Notebook interface.
-- `css/style.css` — main visual styling for the notebook and MCQ interface.
+- `css/style.css` — main visual styling for the notebook, MCQ interface and the Index directory page.
 - `js/app.js` — main notebook behaviour: subject/tree/index, content, resources, user additions/deletions.
+- `js/index-data.js` — shared Index registry module (term building/dedup/lookup), used by both `js/app.js` and `js/index-directory.js` so the logic exists in exactly one place. See "Index registry" below.
 - `mcq.html` — separate MCQ practice page.
 - `js/mcq.js` — MCQ attempt/navigation/display behaviour.
+- `index-directory.html` — separate, dedicated full A–Z index page (see "INDEX (right panel tab)" below).
+- `js/index-directory.js` — self-contained page behaviour (own data loader, same pattern as js/mcq.js); the actual index term logic comes from js/index-data.js.
+- `google-sheet-template/Code.gs` — Apps Script backend, including the new Index Registry sheets/actions (see "Index registry" below and `google-sheet-template/README.txt` section 9).
 - Other HTML/JS files in the project are supporting pages/components from the current prototype.
 
 ## Current hierarchy
@@ -39,20 +43,67 @@ TABLE OF CONTENTS | CONTENT | REFERENCES / INDEX
   google-sheet-template/README.txt section 7). The older "Upload
   Markdown" button has been removed from the UI; any topic with
   legacy explanation text saved that way still renders as before.
-- RIGHT PANEL now has two tabs:
+- RIGHT PANEL now has three tabs:
   - REFERENCES (was "Resources"): unchanged — links such as Google
     Drive/Web and YouTube, with a page/location reference.
-  - INDEX (new): a book-style A–Z index with a search box and
-    suggestions. Every entry (a node's own title, or an optional
-    "Also known as" alias saved via content_type "index_terms")
-    resolves back to the SAME node id the Table of Contents already
-    uses — clicking an entry calls the same selectNodeById() function
-    that expands/highlights the Table of Contents and loads the topic
-    into CONTENT. There is only one place topic content lives; the
-    Index is an alternate way to find it, not a second copy of it.
+  - MCQ (new): embeds the dedicated mcq.html page (see below) inside
+    the right panel via an iframe, scoped to whichever topic is
+    currently selected; "Open in new tab ↗" opens that same mcq.html
+    full-page instead. No MCQ logic is duplicated — js/mcq.js still
+    owns all of it.
+  - INDEX: a book-style A–Z index with a search box and suggestions,
+    still rendered in-panel exactly as before. Every entry (a node's
+    own title, or an optional "Also known as" alias saved via
+    content_type "index_terms") resolves back to the SAME node id the
+    Table of Contents already uses — clicking an entry calls the same
+    selectNodeById() function that expands/highlights the Table of
+    Contents and loads the topic into CONTENT. There is only one
+    place topic content lives; the Index is an alternate way to find
+    it, not a second copy of it. Its "Open in new tab ↗" button opens
+    index-directory.html — a separate, dedicated two-panel page: a
+    collapsible/draggable left panel (search box, plus reserved space
+    for future index tools) and a right panel showing every index
+    entry across the whole notebook at once, laid out in up to 3
+    scrollable CSS columns with no rule between them. Clicking a term
+    there navigates back to index.html?openNode=<id>, which opens (or
+    focuses) the main notebook at that exact topic.
 
 ## Resource rule
 Do not ask the user to upload a PDF. Users add a Google Drive/Web link or YouTube link. A `page_ref` field records the relevant PDF page/range or video timestamp.
+
+## Index registry (index_id, separate from node_id)
+The Index is now backed by a canonical term registry, not just a
+live derivation from the tree — see the redesign spec "Alpha
+Website — Redesign and Strengthen the Index System" for the full
+rationale. Summary:
+
+- `node_id` = where something lives in the syllabus tree.
+  `index_id` = which concept/term it's associated with. These stay
+  separate on purpose — a term does not have to be a tree node
+  (e.g. a person's name mentioned inside a topic's content), and one
+  term can legitimately belong to several different tree nodes
+  (many-to-many).
+- `js/index-data.js` (`getIndexRegistry()` / `filterIndexRegistry()`)
+  is the single place this is built, shared by `js/app.js` and
+  `js/index-directory.js`. It prefers a canonical server registry
+  (`data.indexTerms` + `data.indexLinks`, from the Apps Script
+  `Index_Terms` / `Index_Node` sheets) when present, and transparently
+  falls back to deriving entries straight from the tree + `index_terms`
+  aliases (the original behaviour) when it isn't — so nothing breaks
+  for a site that hasn't run the migration yet.
+- Dedup key is `normalizeTerm()` (trim + collapse whitespace +
+  lowercase), not a raw string compare, so "DDC" / "ddc" / " DDC "
+  resolve to one entry.
+- IDs (`index_id` / `node_id`) are never shown in the UI — only the
+  term text and node titles are.
+- Turning the server registry on, and future MCQ/tag/resource
+  compatibility, is documented in `google-sheet-template/README.txt`
+  section 9 and in the comments at the top of
+  `google-sheet-template/Code.gs`. Content-derived term suggestion
+  (parsing Markdown for candidate terms) and a manual add/merge UI are
+  intentionally NOT built yet — the data model (`save_index_term` /
+  `link_index_term` actions) is ready for them, per the spec's phased
+  approach.
 
 ## MCQ interface
 The MCQ page has:

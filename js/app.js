@@ -26,6 +26,10 @@
 
     function start(side, event) {
         if (window.innerWidth <= 900) return;
+        // A collapsed panel's resizer is hidden via CSS, but guard here
+        // too in case start() is ever triggered another way.
+        if (side === "left" && leftPanel.classList.contains("panel-collapsed")) return;
+        if (side === "right" && rightPanel.classList.contains("panel-collapsed")) return;
         activeSide = side;
         document.body.classList.add("resizing-panels");
         event.preventDefault();
@@ -76,6 +80,76 @@
 
     window.addEventListener("mousemove", move);
     window.addEventListener("mouseup", stop);
+
+    /* -----------------------------------------------------
+       STEP 4 — Collapse / expand toggle
+       Collapsing a side panel shrinks it to a slim strip; the
+       freed width goes to the middle CONTENT panel automatically
+       because it is the grid's minmax(300px, 1fr) track. Drag-
+       resize (above) is untouched — it keeps working normally
+       whenever a panel is expanded, and simply gets disabled/
+       hidden while that panel is collapsed.
+       ----------------------------------------------------- */
+    const leftToggle = document.getElementById("left-panel-toggle");
+    const rightToggle = document.getElementById("right-panel-toggle");
+    const COLLAPSED_WIDTH = 52;
+    const DEFAULT_LEFT_WIDTH = 360;
+    const DEFAULT_RIGHT_WIDTH = 360;
+
+    let lastLeftWidth = DEFAULT_LEFT_WIDTH;
+    let lastRightWidth = DEFAULT_RIGHT_WIDTH;
+
+    function currentColumnWidths() {
+        const styles = getComputedStyle(workspace);
+        const columns = styles.gridTemplateColumns
+            .split(" ")
+            .map(value => parseFloat(value));
+        return { left: columns[0], right: columns[columns.length - 1] };
+    }
+
+    function setLeftCollapsed(collapsed) {
+        if (collapsed) {
+            const widths = currentColumnWidths();
+            if (widths.left) lastLeftWidth = widths.left;
+            workspace.style.setProperty("--left-width", `${COLLAPSED_WIDTH}px`);
+        } else {
+            workspace.style.setProperty("--left-width", `${lastLeftWidth}px`);
+        }
+        leftPanel.classList.toggle("panel-collapsed", collapsed);
+        if (leftToggle) {
+            leftToggle.setAttribute("aria-expanded", String(!collapsed));
+            leftToggle.title = collapsed
+                ? "Expand Table of Contents"
+                : "Collapse Table of Contents";
+        }
+    }
+
+    function setRightCollapsed(collapsed) {
+        if (collapsed) {
+            const widths = currentColumnWidths();
+            if (widths.right) lastRightWidth = widths.right;
+            workspace.style.setProperty("--right-width", `${COLLAPSED_WIDTH}px`);
+        } else {
+            workspace.style.setProperty("--right-width", `${lastRightWidth}px`);
+        }
+        rightPanel.classList.toggle("panel-collapsed", collapsed);
+        if (rightToggle) {
+            rightToggle.setAttribute("aria-expanded", String(!collapsed));
+            rightToggle.title = collapsed
+                ? "Expand References / Index"
+                : "Collapse References / Index";
+        }
+    }
+
+    leftToggle?.addEventListener("click", () => {
+        if (window.innerWidth <= 900) return;
+        setLeftCollapsed(!leftPanel.classList.contains("panel-collapsed"));
+    });
+
+    rightToggle?.addEventListener("click", () => {
+        if (window.innerWidth <= 900) return;
+        setRightCollapsed(!rightPanel.classList.contains("panel-collapsed"));
+    });
 })();
 
 
@@ -151,7 +225,6 @@ function convertApiDataToStudyData(apiData) {
     const nodes = apiData.nodes || [];
     const contentRows = apiData.content || [];
     const resourceRows = apiData.resources || [];
-    const mcqRows = apiData.mcqs || [];
     const communityRows = apiData.community || [];
 
     // Create a node map using stable IDs
@@ -165,8 +238,7 @@ function convertApiDataToStudyData(apiData) {
             parentId: row.parent_id || null,
             children: [],
             community: [],
-            resources: [],
-            mcqs: []
+            resources: []
         };
     });
 
@@ -235,27 +307,6 @@ function convertApiDataToStudyData(apiData) {
 });
     });
 
-    // Attach MCQs
-    mcqRows.forEach(row => {
-
-        const node = nodeMap[row.node_id];
-
-        if (!node) return;
-
-        node.mcqs.push({
-            id: row.mcq_id,
-            question: row.question,
-            options: [
-                row.option_a,
-                row.option_b,
-                row.option_c,
-                row.option_d
-            ],
-            answer: Number(row.correct_option) || 0,
-            explanation: row.explanation || ""
-        });
-    });
-
     // Attach Community contributions
     communityRows.forEach(row => {
 
@@ -286,7 +337,14 @@ function convertApiDataToStudyData(apiData) {
         .map(row => nodeMap[row.node_id]);
 
     return {
-        subjects: subjects
+        subjects: subjects,
+        // ALPHA-PLUS — INDEX REGISTRY: present only once the Apps Script
+        // has the new "Index_Terms" / "Index_Node" sheets and returns
+        // them (see google-sheet-template/Code.gs). Until then these
+        // are simply absent and js/index-data.js transparently falls
+        // back to deriving the Index from the tree, exactly as before.
+        indexTerms: apiData.index_terms || [],
+        indexLinks: apiData.index_links || []
     };
 }
 
@@ -1351,28 +1409,75 @@ function renderStudyTree(data) {
 function renderMcqs(node) { /* MCQ practice is handled by mcq.html. */ }
 
 /* =========================================================
-   ALPHA-PLUS — RIGHT PANEL: REFERENCES | INDEX TABS
+   ALPHA-PLUS — RIGHT PANEL: REFERENCES | MCQ | INDEX TABS
+   MCQ practice opens INSIDE the right panel (embedded via the
+   existing dedicated mcq.html page in an iframe, so none of its
+   logic is duplicated) with its own "Open in new tab" action.
+   The Index tab keeps its existing in-panel behaviour and also
+   gets an "Open in new tab" action, which reopens this same
+   notebook page with the Index tab pre-selected (Index has no
+   separate page of its own — it's just an alternate way into
+   the SAME tree/content the Table of Contents already renders).
    ========================================================= */
+
+function getMcqUrl() {
+    const topicId = selectedTopicId ||
+        findFirstTopic(window.__studyData?.subjects)?.id;
+
+    return topicId
+        ? `mcq.html?topic=${encodeURIComponent(topicId)}`
+        : "mcq.html";
+}
+
+let mcqFrameLoadedFor = null;
+
+function loadMcqFrame() {
+    const frame = document.getElementById("mcq-panel-frame");
+    if (!frame) return;
+
+    const url = getMcqUrl();
+    // Refresh the embedded MCQ only when the relevant topic actually
+    // changed since it was last loaded — switching tabs back and forth
+    // shouldn't reset an attempt already in progress.
+    if (mcqFrameLoadedFor === url) return;
+
+    frame.src = url;
+    mcqFrameLoadedFor = url;
+}
 
 function initRightPanelTabs() {
     const tabs = document.querySelectorAll(".right-panel-tab");
     if (!tabs.length) return;
 
     tabs.forEach(btn => {
-        btn.addEventListener("click", () => {
-            tabs.forEach(b => b.classList.remove("active"));
-            btn.classList.add("active");
-
-            const tab = btn.dataset.rightTab;
-            document.getElementById("right-tab-references").hidden = tab !== "references";
-            document.getElementById("right-tab-index").hidden = tab !== "index";
-
-            if (tab === "index") {
-                renderIndexAZList(document.getElementById("index-search-input")?.value.trim().toLowerCase() || "");
-            }
-        });
+        btn.addEventListener("click", () => selectRightPanelTab(btn.dataset.rightTab));
     });
 }
+
+function selectRightPanelTab(tab) {
+    const tabs = document.querySelectorAll(".right-panel-tab");
+    tabs.forEach(b => b.classList.toggle("active", b.dataset.rightTab === tab));
+
+    document.getElementById("right-tab-references").hidden = tab !== "references";
+    document.getElementById("right-tab-mcq").hidden = tab !== "mcq";
+    document.getElementById("right-tab-index").hidden = tab !== "index";
+
+    if (tab === "mcq") {
+        loadMcqFrame();
+    }
+
+    if (tab === "index") {
+        renderIndexAZList(document.getElementById("index-search-input")?.value.trim().toLowerCase() || "");
+    }
+}
+
+document.getElementById("mcq-open-newtab")?.addEventListener("click", () => {
+    window.open(getMcqUrl(), "_blank", "noopener");
+});
+
+document.getElementById("index-open-newtab")?.addEventListener("click", () => {
+    window.open("index-directory.html", "_blank", "noopener");
+});
 
 /* =========================================================
    ALPHA-PLUS — INDEX
@@ -1393,81 +1498,24 @@ function initRightPanelTabs() {
    Several different terms (RFID / Radio Frequency Identification /
    RFID tag) can therefore resolve to the very same node id without
    duplicating any content.
+
+   Term-building/dedup itself lives in js/index-data.js (shared with
+   js/index-directory.js) — getIndexRegistry() / filterIndexRegistry()
+   there return the SAME { indexId, term, normalizedTerm, matches }
+   shape the old local groupIndexEntries()/getIndexEntries() returned,
+   so nothing below needed restructuring. invalidateIndexCache() is
+   kept as the name every existing call site already uses.
    ========================================================= */
 
-let indexEntriesCache = null;
-
 function invalidateIndexCache() {
-    indexEntriesCache = null;
-}
-
-function buildIndexEntries(data) {
-    const entries = [];
-
-    function walk(nodes) {
-        (nodes || []).forEach(node => {
-            const title = (node.title || "").trim();
-            if (title) {
-                entries.push({ term: title, nodeId: node.id, nodeTitle: node.title, isAlias: false });
-            }
-
-            const aliasRaw = node.content && node.content.index_terms;
-            if (aliasRaw) {
-                String(aliasRaw)
-                    .split(/[,\n]/)
-                    .map(x => x.trim())
-                    .filter(Boolean)
-                    .forEach(alias => {
-                        if (alias.toLowerCase() !== title.toLowerCase()) {
-                            entries.push({ term: alias, nodeId: node.id, nodeTitle: node.title, isAlias: true });
-                        }
-                    });
-            }
-
-            walk(node.children);
-        });
-    }
-
-    walk(data.subjects);
-    return entries;
-}
-
-function getIndexEntries() {
-    if (!indexEntriesCache) {
-        indexEntriesCache = buildIndexEntries(window.__studyData || {});
-    }
-    return indexEntriesCache;
-}
-
-// Groups entries that share the exact same term text (case-insensitive),
-// since two different topics could legitimately use the same alias.
-function groupIndexEntries(entries) {
-    const map = new Map();
-
-    entries.forEach(e => {
-        const key = e.term.toLowerCase();
-        if (!map.has(key)) map.set(key, { term: e.term, matches: [] });
-
-        const group = map.get(key);
-        if (!group.matches.some(m => m.nodeId === e.nodeId)) {
-            group.matches.push({ nodeId: e.nodeId, nodeTitle: e.nodeTitle, isAlias: e.isAlias });
-        }
-    });
-
-    return [...map.values()].sort((a, b) =>
-        a.term.localeCompare(b.term, undefined, { sensitivity: "base" })
-    );
+    invalidateIndexRegistry();
 }
 
 function renderIndexAZList(filterText = "") {
     const container = document.getElementById("index-az-list");
     if (!container) return;
 
-    let groups = groupIndexEntries(getIndexEntries());
-
-    if (filterText) {
-        groups = groups.filter(g => g.term.toLowerCase().includes(filterText));
-    }
+    const groups = filterIndexRegistry(filterText);
 
     container.innerHTML = "";
 
@@ -1656,7 +1704,7 @@ function renderIndexSuggestions(query) {
         return;
     }
 
-    const groups = groupIndexEntries(getIndexEntries());
+    const groups = getIndexRegistry();
 
     const startsWith = groups.filter(g => g.term.toLowerCase().startsWith(query));
     const contains = groups.filter(g =>
@@ -1727,6 +1775,24 @@ async function startApp() {
         renderResources(firstTopicNode);
         renderMcqs(firstTopicNode);
     }
+
+    const params = new URLSearchParams(window.location.search);
+
+    // Supports the Index tab's "Open in new tab" action, which reopens
+    // this page with ?rightTab=index so the new tab lands straight on
+    // the Index view instead of the default References tab.
+    const requestedTab = params.get("rightTab");
+    if (requestedTab === "index" || requestedTab === "mcq") {
+        selectRightPanelTab(requestedTab);
+    }
+
+    // Supports clicking a term on the standalone Index directory page
+    // (index-directory.html?openNode=<id>) — jumps straight to that
+    // topic here, the same way a Table of Contents click would.
+    const requestedNode = params.get("openNode");
+    if (requestedNode) {
+        selectNodeById(requestedNode);
+    }
 }
 
 
@@ -1735,8 +1801,9 @@ async function startApp() {
 
 
 /* =========================================================
-   MCQ LAUNCHER
-   Opens a separate MCQ page/tab for the currently selected topic.
+   SELECTED TOPIC TRACKING
+   Used by getMcqUrl() (right panel MCQ tab) to scope MCQ
+   practice to whichever topic is currently open.
    ========================================================= */
 
 let selectedTopicId = null;
@@ -1773,22 +1840,6 @@ function findTopicIdByTitle(title) {
 
     return walk(window.__studyData?.subjects);
 }
-
-const mcqLaunch = document.getElementById("mcq-launch");
-
-if (mcqLaunch) {
-    mcqLaunch.addEventListener("click", () => {
-        const topicId = selectedTopicId ||
-            findFirstTopic(window.__studyData?.subjects)?.id;
-
-        const url = topicId
-            ? `mcq.html?topic=${encodeURIComponent(topicId)}`
-            : "mcq.html";
-
-        window.open(url, "_blank", "noopener");
-    });
-}
-
 
 function findFirstTopic(nodes) {
     for (const node of nodes || []) {

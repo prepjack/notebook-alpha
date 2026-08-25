@@ -25,7 +25,18 @@
 
             <!-- LEFT: expandable knowledge index -->
             <aside id="left-panel" class="panel">
-                <div class="panel-heading">TABLE OF CONTENTS</div>
+                <div class="panel-heading-row">
+                    <div class="panel-heading">TABLE OF CONTENTS</div>
+                    <button type="button" id="left-panel-toggle" class="panel-collapse-btn"
+                            title="Collapse Table of Contents" aria-label="Collapse Table of Contents"
+                            aria-expanded="true">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"
+                             xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                            <rect x="1.5" y="2.5" width="13" height="11" rx="2" stroke="currentColor" stroke-width="1.3"/>
+                            <line x1="6" y1="2.5" x2="6" y2="13.5" stroke="currentColor" stroke-width="1.3"/>
+                        </svg>
+                    </button>
+                </div>
                 <div id="left-resizer" class="panel-resizer"
                      title="Drag this RIGHT edge left/right to resize"></div>
                 <div class="tree-toolbar">
@@ -54,12 +65,6 @@
                     <h2>Select a topic</h2>
                     <p>Topic content will appear here.</p>
                 </div>
-
-                <div class="mcq-launch-area">
-                    <button id="mcq-launch" type="button">
-                        MCQ PRACTICE ↗
-                    </button>
-                </div>
             </section>
 
             <!-- RIGHT: references / index -->
@@ -67,16 +72,43 @@
                 <div id="right-resizer" class="panel-resizer"
                      title="Drag this LEFT edge left/right to resize"></div>
 
-                <div class="right-panel-tabs">
-                    <button type="button" class="right-panel-tab active" data-right-tab="references">References</button>
-                    <button type="button" class="right-panel-tab" data-right-tab="index">Index</button>
+                <div class="right-panel-header">
+                    <button type="button" id="right-panel-toggle" class="panel-collapse-btn"
+                            title="Collapse References / Index" aria-label="Collapse right panel"
+                            aria-expanded="true">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"
+                             xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                            <rect x="1.5" y="2.5" width="13" height="11" rx="2" stroke="currentColor" stroke-width="1.3"/>
+                            <line x1="10" y1="2.5" x2="10" y2="13.5" stroke="currentColor" stroke-width="1.3"/>
+                        </svg>
+                    </button>
+                    <div class="right-panel-tabs">
+                        <button type="button" class="right-panel-tab active" data-right-tab="references">References</button>
+                        <button type="button" class="right-panel-tab" data-right-tab="mcq">MCQ</button>
+                        <button type="button" class="right-panel-tab" data-right-tab="index">Index</button>
+                    </div>
                 </div>
 
                 <div id="right-tab-references" class="right-tab-view">
                     <div id="resources"></div>
                 </div>
 
+                <div id="right-tab-mcq" class="right-tab-view" hidden>
+                    <div class="right-tab-action-row">
+                        <button type="button" id="mcq-open-newtab" class="right-tab-newtab-btn">
+                            Open in new tab ↗
+                        </button>
+                    </div>
+                    <iframe id="mcq-panel-frame" class="right-tab-iframe"
+                            title="MCQ Practice" loading="lazy"></iframe>
+                </div>
+
                 <div id="right-tab-index" class="right-tab-view" hidden>
+                    <div class="right-tab-action-row">
+                        <button type="button" id="index-open-newtab" class="right-tab-newtab-btn">
+                            Open in new tab ↗
+                        </button>
+                    </div>
                     <div class="index-search-wrap">
                         <input type="text" id="index-search-input" class="index-search-input"
                                placeholder="Search the index... e.g. bibli" autocomplete="off">
@@ -192,6 +224,7 @@
 <script src="data/study-data.js"></script>
 <script src="js/richcontent.js"></script>
 <script src="js/reading-tools.js"></script>
+<script src="js/index-data.js"></script>
 <script src="js/app.js"></script>
 
 </body>

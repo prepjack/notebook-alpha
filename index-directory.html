@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Index — Study Notebook</title>
+
+    <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body class="index-directory-page">
+
+    <header class="app-header">
+        <h1>Index</h1>
+    </header>
+
+    <main class="index-directory-shell">
+        <section id="index-directory-workspace" class="index-directory-workspace">
+
+            <!-- LEFT: search + room for future index tools -->
+            <aside id="index-left-panel" class="panel index-directory-left">
+                <div class="panel-heading-row">
+                    <div class="panel-heading">SEARCH INDEX</div>
+                    <button type="button" id="index-directory-toggle" class="panel-collapse-btn"
+                            title="Collapse search panel" aria-label="Collapse search panel"
+                            aria-expanded="true">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"
+                             xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                            <rect x="1.5" y="2.5" width="13" height="11" rx="2" stroke="currentColor" stroke-width="1.3"/>
+                            <line x1="6" y1="2.5" x2="6" y2="13.5" stroke="currentColor" stroke-width="1.3"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <div id="index-directory-resizer" class="panel-resizer"
+                     title="Drag this RIGHT edge left/right to resize"></div>
+
+                <div class="index-search-wrap">
+                    <input type="text" id="index-directory-search" class="index-search-input"
+                           placeholder="Search the index... e.g. bibli" autocomplete="off">
+                </div>
+
+                <div id="index-directory-count" class="index-directory-count"></div>
+
+                <!-- Reserved space for future index tools (filters,
+                     bookmarks, recently viewed terms, etc). -->
+                <div class="index-directory-more">
+                    <div class="index-directory-more-title">MORE TOOLS</div>
+                    <p class="index-directory-more-note">
+                        Additional index tools (filters, bookmarks and similar)
+                        will appear here.
+                    </p>
+                </div>
+            </aside>
+
+            <!-- RIGHT: every index term, multi-column, scrollable -->
+            <section id="index-directory-right-panel" class="panel index-directory-right">
+                <div class="panel-heading">ALL INDEX TERMS</div>
+                <div id="index-directory-columns" class="index-directory-columns"></div>
+            </section>
+
+        </section>
+    </main>
+
+    <footer class="app-footer">Study Notes</footer>
+
+    <script src="data/study-data.js"></script>
+    <script src="js/index-data.js"></script>
+    <script src="js/index-directory.js"></script>
+</body>
+</html>

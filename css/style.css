@@ -215,6 +215,111 @@ body {
             var(--left-width)
             minmax(300px, 1fr)
             var(--right-width);
+        /* Progressive enhancement: smooth column resize when a panel
+           is collapsed/expanded via the toggle button. Dragging (STEP 2)
+           still updates the same custom properties directly, so this
+           transition only visibly plays on the collapse/expand action
+           (JS briefly disables it during drag — see enablePanelResizing). */
+        transition: grid-template-columns 220ms ease;
+    }
+}
+
+/* =========================================================
+   STEP 4 — SIDEBAR COLLAPSE (in addition to drag-to-resize)
+   Left/right panels can be collapsed to a slim strip via a
+   toggle button. Collapsing does not remove the drag-resizer
+   from the DOM — it is just disabled/hidden while collapsed —
+   so expanding restores the previous drag-resize behaviour
+   unchanged. The freed width is absorbed by the middle CONTENT
+   panel automatically, since it is the grid's 1fr track.
+   ========================================================= */
+
+.panel-heading-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.panel-heading-row .panel-heading {
+    margin-bottom: 0;
+}
+
+.right-panel-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 14px;
+}
+
+.right-panel-header .right-panel-tabs {
+    margin: 0;
+    padding-bottom: 0;
+    border-bottom: 0;
+    flex: 1;
+    min-width: 0;
+}
+
+.panel-collapse-btn {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    color: var(--muted);
+    cursor: pointer;
+}
+
+.panel-collapse-btn:hover {
+    background: #f1f4ee;
+    color: var(--green);
+    border-color: #aebcb1;
+}
+
+/* Collapsed state: hide everything in the panel except its
+   heading row/toggle button, and shrink to a slim strip. */
+#left-panel.panel-collapsed,
+#right-panel.panel-collapsed {
+    padding-left: 8px;
+    padding-right: 8px;
+    overflow: hidden;
+}
+
+#left-panel.panel-collapsed .panel-heading-row,
+#right-panel.panel-collapsed .right-panel-header {
+    justify-content: center;
+}
+
+#left-panel.panel-collapsed .panel-heading,
+#left-panel.panel-collapsed .tree-toolbar,
+#left-panel.panel-collapsed #study-tree,
+#left-panel.panel-collapsed #tree-actions {
+    display: none;
+}
+
+#right-panel.panel-collapsed .right-panel-tabs,
+#right-panel.panel-collapsed #right-tab-references,
+#right-panel.panel-collapsed #right-tab-mcq,
+#right-panel.panel-collapsed #right-tab-index {
+    display: none;
+}
+
+/* The drag-resizer is only meaningful while its panel is expanded. */
+#left-panel.panel-collapsed #left-resizer,
+#right-panel.panel-collapsed #right-resizer {
+    display: none;
+}
+
+@media (max-width: 900px) {
+    /* Collapse is a desktop feature, same scope as drag-resize (STEP 2). */
+    .panel-collapse-btn {
+        display: none;
     }
 }
 
@@ -256,6 +361,10 @@ body.resizing-panels .panel-resizer::after {
 body.resizing-panels {
     cursor: col-resize;
     user-select: none;
+}
+
+body.resizing-panels .workspace {
+    transition: none;
 }
 
 
@@ -450,35 +559,6 @@ body.resizing-panels {
 
 
 
-/* =========================================================
-   MCQ LAUNCHER — opens dedicated MCQ page in a new tab
-   ========================================================= */
-
-.mcq-launch-area {
-    max-width: 820px;
-    margin: 38px auto 0;
-    padding-top: 22px;
-    border-top: 1px solid var(--line);
-    text-align: center;
-}
-
-#mcq-launch {
-    padding: 11px 18px;
-    border: 1px solid #9bb2a2;
-    border-radius: 8px;
-    background: var(--green-soft);
-    color: var(--green);
-    cursor: pointer;
-    font-family: Arial, sans-serif;
-    font-size: 13px;
-    font-weight: 700;
-    letter-spacing: .03em;
-}
-
-#mcq-launch:hover {
-    background: #dce8de;
-}
-
 /* Dedicated MCQ page */
 .mcq-page {
     overflow: hidden;
@@ -625,7 +705,7 @@ body.resizing-panels {
    STEP 13 — CONTROLLED CANONICAL TREE EXTENSION
    ========================================================= */
 
-.tree-toolbar{display:flex;align-items:center;justify-content:space-between;padding:11px 12px;border-bottom:1px solid var(--line)}
+.tree-toolbar{display:flex;align-items:center;justify-content:space-between;padding:4px 12px;border-bottom:1px solid var(--line)}
 .tree-toolbar-title{color:var(--muted);font:700 10px Arial,sans-serif;letter-spacing:.08em}
 .tree-add-button{padding:5px 9px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--green);cursor:pointer;font:700 11px Arial,sans-serif}
 .tree-add-button:disabled{opacity:.45;cursor:default}
@@ -650,6 +730,189 @@ body.resizing-panels {
 .right-panel-tab:hover{background:#f1f4ee}
 .right-panel-tab.active{background:var(--green-soft);color:var(--green)}
 .right-tab-view{}
+
+/* =========================================================
+   RIGHT PANEL — MCQ TAB (embedded) + "open in new tab" action
+   available on both the MCQ tab and the Index tab.
+   ========================================================= */
+
+.right-tab-action-row {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 10px;
+}
+
+.right-tab-newtab-btn {
+    padding: 6px 12px;
+    border: 1px solid #9bb2a2;
+    border-radius: 7px;
+    background: var(--green-soft);
+    color: var(--green);
+    cursor: pointer;
+    font-family: Arial, sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .03em;
+}
+
+.right-tab-newtab-btn:hover {
+    background: #dce8de;
+}
+
+.right-tab-iframe {
+    display: block;
+    width: 100%;
+    height: calc(100vh - 260px);
+    min-height: 420px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--paper);
+}
+
+/* =========================================================
+   INDEX DIRECTORY PAGE (index-directory.html)
+   Dedicated two-panel Index reference, opened via the main
+   notebook's Index tab "Open in new tab" action:
+     LEFT  = search box + reserved space for future index
+             tools. Draggable + collapsible, same mechanism
+             as the main notebook's side panels.
+     RIGHT = every index term across the whole notebook, laid
+             out in up to 3 CSS columns with no rule between
+             them, scrollable to see the entire list.
+   ========================================================= */
+
+.index-directory-shell {
+    padding: 0 18px 18px;
+}
+
+.index-directory-workspace {
+    height: calc(100vh - 110px);
+    display: grid;
+    grid-template-columns: var(--idx-left-width, 320px) minmax(300px, 1fr);
+    gap: 0;
+    overflow: hidden;
+}
+
+@media (min-width: 901px) {
+    .index-directory-workspace {
+        --idx-left-width: 320px;
+        transition: grid-template-columns 220ms ease;
+    }
+}
+
+body.index-directory-resizing .index-directory-workspace {
+    transition: none;
+}
+
+.index-directory-left {
+    position: relative;
+    margin-left: 0;
+    margin-right: 8px;
+    padding: 16px 14px;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+#index-directory-resizer {
+    right: -8px;
+}
+
+.index-directory-right {
+    margin-left: 8px;
+    margin-right: 0;
+    padding: 16px 22px;
+}
+
+.index-directory-count {
+    margin: 10px 2px 0;
+    color: var(--muted);
+    font: 700 11px Arial, sans-serif;
+    letter-spacing: .04em;
+}
+
+.index-directory-more {
+    margin-top: auto;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+}
+
+.index-directory-more-title {
+    margin-bottom: 6px;
+    color: var(--muted);
+    font: 700 10px Arial, sans-serif;
+    letter-spacing: .08em;
+}
+
+.index-directory-more-note {
+    margin: 0;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+/* Up to 3 columns, sized responsively, with NO vertical rule
+   between them. */
+.index-directory-columns {
+    columns: 3 240px;
+    column-gap: 32px;
+    column-rule: none;
+}
+
+.index-directory-columns .index-letter-group {
+    break-inside: avoid-column;
+    margin-bottom: 14px;
+}
+
+/* Sticky letter headings only make sense in a single-column
+   list — inside CSS columns every column would try to stick
+   its own heading to the same spot, so pin them in place here. */
+.index-directory-columns .index-letter-heading {
+    position: static;
+}
+
+.index-directory-left.panel-collapsed {
+    padding-left: 8px;
+    padding-right: 8px;
+    overflow: hidden;
+}
+
+.index-directory-left.panel-collapsed .panel-heading-row {
+    justify-content: center;
+}
+
+.index-directory-left.panel-collapsed .panel-heading,
+.index-directory-left.panel-collapsed .index-search-wrap,
+.index-directory-left.panel-collapsed .index-directory-count,
+.index-directory-left.panel-collapsed .index-directory-more {
+    display: none;
+}
+
+.index-directory-left.panel-collapsed #index-directory-resizer {
+    display: none;
+}
+
+@media (max-width: 900px) {
+    .index-directory-workspace {
+        height: auto;
+        overflow: visible;
+        display: block;
+    }
+
+    .index-directory-left,
+    .index-directory-right {
+        margin: 10px 0;
+    }
+
+    #index-directory-resizer,
+    #index-directory-toggle {
+        display: none;
+    }
+
+    .index-directory-columns {
+        columns: 1;
+    }
+}
 
 /* ALPHA-PLUS — INDEX (A–Z, book-style) */
 .index-search-wrap{position:relative;margin-bottom:14px}
@@ -2659,3 +2922,57 @@ body.resizing-panels {
     line-height: 1.5;
 }
 .key-point-text { min-width: 0; }
+
+
+/* PHASE 4 — MCQ BANK UI details; base modal/action styling is reused above. */
+.mcq-add-modal { width:min(720px,94vw); }
+.mcq-preview-modal { width:min(1100px,96vw); }
+.mcq-add-modal input, .mcq-add-modal textarea, .mcq-add-modal select {
+    width:100%; box-sizing:border-box; padding:8px 10px; margin-bottom:4px;
+    border:1px solid var(--line); border-radius:7px; background:#fff;
+    color:#354239; font:12px Arial,sans-serif;
+}
+.mcq-add-modal textarea { resize:vertical; }
+.mcq-tag-chip-wrap { display:flex; flex-wrap:wrap; gap:6px; margin:5px 0 7px; }
+.mcq-tag-chip {
+    display:inline-flex; align-items:center; gap:5px; padding:4px 7px;
+    border:1px solid var(--line); border-radius:999px; background:#f4f6f2;
+    color:#354239; font:11px Arial,sans-serif;
+}
+.mcq-tag-chip button { border:0; background:transparent; cursor:pointer; padding:0; color:#667169; }
+#mcq-tag-suggestions { position:absolute; left:0; right:0; top:100%; z-index:5; margin:2px 0 0;
+    background:#fff; border:1px solid var(--line); max-height:160px; overflow:auto; }
+#mcq-tag-suggestions button { display:block; width:100%; text-align:left; border:0; background:#fff;
+    padding:7px 9px; cursor:pointer; color:#354239; font:11px Arial,sans-serif; }
+#mcq-tag-suggestions button:hover { background:#eef2ec; }
+.mcq-preview-table-wrap { overflow:auto; max-height:65vh; border:1px solid var(--line); border-radius:7px; }
+.mcq-preview-table { width:100%; border-collapse:collapse; font:11px/1.4 Arial,sans-serif; }
+.mcq-preview-table th, .mcq-preview-table td { padding:7px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+.mcq-preview-table th { position:sticky; top:0; background:#f4f6f2; color:#354239; z-index:1; }
+.mcq-preview-unknown, .mcq-preview-fatal { color:#a33; }
+.mcq-preview-warning { color:#8a6500; }
+.mcq-preview-table td:nth-child(5) { min-width:260px; max-width:460px; }
+
+/* PHASE 6 — single MCQ metadata editor */
+.mcq-question-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.mcq-edit-meta{border:1px solid var(--line);background:var(--panel,#fff);border-radius:7px;padding:4px 8px;cursor:pointer;font-size:14px;line-height:1}
+.mcq-edit-meta:hover{filter:brightness(.97)}
+.mcq-meta-modal{width:min(560px,92vw)}
+.mcq-meta-modal .add-resource-scope{margin:0 0 12px;color:#5d685f;font-size:13px}
+.mcq-meta-modal .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+#mcq-meta-tag-suggestions{margin-top:4px;padding:6px;border:1px solid var(--line);border-radius:7px;background:#fff;display:flex;flex-wrap:wrap;gap:5px}
+#mcq-meta-tag-suggestions[hidden]{display:none}
+#mcq-meta-tag-suggestions button{border:1px solid var(--line);background:#f7f8f6;border-radius:999px;padding:4px 8px;cursor:pointer}
+
+
+/* =========================================================
+   PHASE 7 — MCQ practice filters / collection view
+   ========================================================= */
+.mcq-language-control { display:inline-flex; align-items:center; gap:6px; }
+.mcq-tag-filter-row { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 12px; align-items:center; }
+.mcq-filter-chip { border:1px solid #cfd7cf; background:#fff; border-radius:999px; padding:4px 9px; cursor:pointer; font:inherit; font-size:12px; }
+.mcq-filter-chip.active { font-weight:600; box-shadow:inset 0 0 0 1px currentColor; }
+.mcq-filter-empty { font-size:12px; opacity:.65; }
+.mcq-collection-notes { margin:0 0 12px; }
+.mcq-collection-note { display:flex; flex-wrap:wrap; align-items:center; gap:7px; padding:7px 10px; margin-bottom:6px; border:1px solid #d8dfd8; border-radius:7px; font-size:12px; }
+.mcq-collection-link { border:0; background:transparent; padding:0; cursor:pointer; text-decoration:underline; font:inherit; }

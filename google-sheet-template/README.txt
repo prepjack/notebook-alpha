@@ -163,3 +163,66 @@ exactly like everything else, and render automatically on the website via
 js/richcontent.js (Markdown -> marked.js + DOMPurify, mermaid -> mermaid.js,
 chart -> Chart.js). If a cell has no fences, it just renders as formatted
 Markdown text — nothing breaks for topics that don't use diagrams/charts.
+
+9. ALPHA-PLUS — INDEX REGISTRY (Code.gs, TWO NEW OPTIONAL SHEETS)
+--------------------------------------------------------------------
+This is the redesign described in "Alpha Website — Redesign and
+Strengthen the Index System": the Index moves from being derived
+fresh from the tree every time (the old buildIndexEntries() behaviour,
+still the fallback below) to a canonical term registry with stable
+IDs that other features (MCQs, tags, resources...) can reference
+later without duplicating text.
+
+Two new sheets, both OPTIONAL — the site works exactly as it always
+has if they don't exist yet:
+
+  Index_Terms
+    index_id | term | normalized_term | created_at | updated_at
+
+  Index_Node   (many-to-many: one term can link to 0, 1, or many nodes)
+    index_id | node_id | source_type | created_at
+
+  source_type is one of: tree | content | alias | manual
+
+TO TURN THIS ON:
+  1. Replace your Apps Script project's Code.gs with the version in
+     this folder (google-sheet-template/Code.gs). Every existing
+     function is byte-for-byte unchanged except doGet (now also
+     returns index_terms / index_links — [] if the sheets don't
+     exist) and doPost (two new, additive actions — see below).
+  2. In the Apps Script editor, pick migrateIndexTerms from the
+     function dropdown and click Run, once. It creates both sheets
+     if missing, then walks every Nodes row (title -> term,
+     source_type "tree") and every Content_Core row with
+     content_type = "index_terms" (each alias -> term, source_type
+     "alias"), reusing an existing term (by normalized_term) instead
+     of duplicating it. Safe to re-run any time you add nodes/aliases
+     — it only adds what's missing.
+  3. Re-deploy the web app (or it picks up automatically depending on
+     your deployment settings) and reload the website. js/index-data.js
+     (shared by index.html and index-directory.html) automatically
+     prefers this registry once index_terms is non-empty; until then
+     it keeps deriving the Index from the tree exactly as before.
+
+NEW doPost ACTIONS (additive — nothing currently calls these yet,
+they exist for future manual-add / content-term-review UI):
+
+  save_index_term  { term }
+    -> finds-or-creates the Index_Terms row for that term (by
+       normalized_term, so re-sending the same term never duplicates
+       it) and returns { index_id, term }.
+
+  link_index_term  { index_id, node_id, source_type }
+    -> adds an Index_Node row for that pair if it doesn't already
+       exist (safe to call repeatedly).
+
+WHY node_id AND index_id STAY SEPARATE: node_id says where something
+lives in the syllabus tree; index_id says which concept/term it's
+associated with. A term does not have to be a tree node (e.g. "Melvil
+Dewey" mentioned inside a topic's Markdown), and one term can
+legitimately belong to several different tree nodes — that's exactly
+what the Index_Node many-to-many table is for. A future MCQ (or tag,
+or resource) that wants to reference concepts should store index_ids,
+never the literal term text, so a display-name change never needs to
+ripple through every place that referenced it.
+
