@@ -18,6 +18,40 @@ let mcqStudyData = { subjects: [] };
 let currentMcqTopic = null;
 let mcqTagSuggestions = [];
 
+// PHASE 8a — Index_Terms loaded once via loadStudyTree()'s full dump
+// (doGet already returns index_terms; no new endpoint needed).
+let mcqIndexTerms = [];
+
+// PHASE 8a — fixed, ordered language list: English + India's 22
+// Eighth Schedule languages. `value` is what's stored / written into
+// @language: tags (and what the practice-UI filter matches on);
+// `label` is the native-script display text shown in the dropdown.
+const MCQ_LANGUAGES = [
+    { value: "English",   label: "English" },
+    { value: "Assamese",  label: "Assamese (অসমীয়া)" },
+    { value: "Bengali",   label: "Bengali (বাংলা)" },
+    { value: "Bodo",      label: "Bodo (बड़ो)" },
+    { value: "Dogri",     label: "Dogri (डोगरी)" },
+    { value: "Gujarati",  label: "Gujarati (ગુજરાતી)" },
+    { value: "Hindi",     label: "Hindi (हिंदी)" },
+    { value: "Kannada",   label: "Kannada (ಕನ್ನಡ)" },
+    { value: "Kashmiri",  label: "Kashmiri (کٲشُر)" },
+    { value: "Konkani",   label: "Konkani (कोंकणी)" },
+    { value: "Maithili",  label: "Maithili (मैथिली)" },
+    { value: "Malayalam", label: "Malayalam (മലയാളം)" },
+    { value: "Manipuri",  label: "Manipuri (মৈতৈলোন্)" },
+    { value: "Marathi",   label: "Marathi (मराठी)" },
+    { value: "Nepali",    label: "Nepali (नेपाली)" },
+    { value: "Odia",      label: "Odia (ଓଡ଼ିଆ)" },
+    { value: "Punjabi",   label: "Punjabi (ਪੰਜਾਬੀ)" },
+    { value: "Sanskrit",  label: "Sanskrit (संस्कृतम्)" },
+    { value: "Santali",   label: "Santali (ᱥᱟᱱᱛᱟᱲᱤ)" },
+    { value: "Sindhi",    label: "Sindhi (سنڌي)" },
+    { value: "Tamil",     label: "Tamil (தமிழ்)" },
+    { value: "Telugu",    label: "Telugu (తెలుగు)" },
+    { value: "Urdu",      label: "Urdu (اردو)" }
+];
+
 // Phase 7 — practice filters over the currently fetched question set.
 let allLoadedMcqs = [];
 let selectedMcqTags = new Set();
@@ -53,6 +87,11 @@ async function loadStudyTree() {
     const apiData = await response.json();
 
     console.log("MCQ: Google Sheets data loaded:", apiData);
+
+    // PHASE 8a — Index_Terms is already part of this same full dump
+    // (doGet's default response); reuse it directly for the MCQ
+    // popup's tag autocomplete instead of adding a new endpoint.
+    mcqIndexTerms = apiData.index_terms || [];
 
     return convertApiDataToMcqData(apiData);
 }
@@ -945,6 +984,62 @@ function getMcqSelectedTypes() {
         .map(input => input.value);
 }
 
+/* =========================================================
+   PHASE 8a — multi-language generator for the Add MCQ popup.
+   Replaces the old single free-typeable "Language" text input.
+   ========================================================= */
+
+function mcqLanguageOptionsHtml(selectedValue) {
+    return `<option value="">Select...</option>` + MCQ_LANGUAGES.map(lang =>
+        `<option value="${mcqEscapeHtml(lang.value)}" ${lang.value === selectedValue ? "selected" : ""}>${mcqEscapeHtml(lang.label)}</option>`
+    ).join("");
+}
+
+// Renders exactly `count` <select> rows into #mcq-lang-select-row.
+// Preserves existing selections where possible: 2->3 keeps the first
+// two and adds an empty third; 3->2 drops the third.
+function renderMcqLanguageSelects(count) {
+    const wrap = document.getElementById("mcq-lang-select-row");
+    if (!wrap) return;
+
+    const existingValues = Array.from(wrap.querySelectorAll(".mcq-lang-select")).map(s => s.value);
+    const n = Math.max(1, Math.min(23, Number(count) || 1));
+
+    wrap.innerHTML = "";
+    for (let i = 0; i < n; i++) {
+        const select = document.createElement("select");
+        select.className = "mcq-lang-select";
+        select.innerHTML = mcqLanguageOptionsHtml(existingValues[i] || (i === 0 ? "English" : ""));
+        select.addEventListener("change", refreshLanguageDropdownOptions);
+        wrap.appendChild(select);
+    }
+
+    refreshLanguageDropdownOptions();
+}
+
+// No-duplicate rule: after any dropdown's selection changes, disable
+// that value's <option> in every OTHER dropdown (never in the
+// dropdown that currently holds it).
+function refreshLanguageDropdownOptions() {
+    const selects = Array.from(document.querySelectorAll(".mcq-lang-select"));
+    const chosen = selects.map(s => s.value).filter(Boolean);
+    selects.forEach(select => {
+        Array.from(select.options).forEach(opt => {
+            if (!opt.value) return; // skip placeholder "Select..." option
+            const chosenElsewhere = chosen.includes(opt.value) && select.value !== opt.value;
+            opt.disabled = chosenElsewhere;
+        });
+    });
+}
+
+// Ordered list of selected language values (skips empty/placeholder
+// dropdowns), in the order the dropdowns appear on screen.
+function getMcqSelectedLanguages() {
+    return Array.from(document.querySelectorAll(".mcq-lang-select"))
+        .map(s => s.value)
+        .filter(Boolean);
+}
+
 function getMcqTagChips() {
     return Array.from(document.querySelectorAll("#mcq-tag-chips .mcq-tag-chip"))
         .map(chip => chip.dataset.tag || "")
@@ -967,13 +1062,27 @@ function addMcqTagChip(value) {
     wrap.appendChild(chip);
 }
 
+// PHASE 8a — tag suggestions now come only from the canonical
+// Index_Terms list (term / normalized_term), not from MCQs' own
+// free-typed `tags` column. No "create new tag" path exists here
+// any more — if a match isn't in the Index yet, the user adds it via
+// the Index system's own UI first, or uses the Description field.
+function getMcqIndexTermSuggestions(query) {
+    const q = String(query || "").trim().toLowerCase();
+    return (mcqIndexTerms || [])
+        .map(row => String(row.term || "").trim())
+        .filter(Boolean)
+        .filter(term => !q || term.toLowerCase().includes(q) ||
+            String(mcqIndexTerms.find(r => r.term === term)?.normalized_term || "").includes(q))
+        .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+}
+
 function renderMcqTagSuggestions(value) {
     const box = document.getElementById("mcq-tag-suggestions");
     if (!box) return;
     const q = String(value || "").trim().toLowerCase();
-    const matches = mcqTagSuggestions
+    const matches = getMcqIndexTermSuggestions(q)
         .filter(tag => !getMcqTagChips().some(x => x.toLowerCase() === tag.toLowerCase()))
-        .filter(tag => !q || tag.toLowerCase().includes(q))
         .slice(0, 8);
 
     box.innerHTML = matches.map(tag =>
@@ -996,7 +1105,7 @@ function renderMcqTagSuggestions(value) {
 function buildMcqAiPrompt() {
     const collection = document.getElementById("mcq-collection")?.value.trim() || "";
     const description = document.getElementById("mcq-description")?.value.trim() || "";
-    const language = document.getElementById("mcq-language-input")?.value.trim() || "English";
+    const languages = getMcqSelectedLanguages(); // PHASE 8a — ordered list of selected language values
     const topic = currentMcqTopic;
     const topicId = topic?.id || "<PUT TOPIC ID HERE>";
     const breadcrumb = buildMcqTopicBreadcrumb(topic) || "<PUT HIERARCHY PATH HERE>";
@@ -1029,13 +1138,31 @@ function buildMcqAiPrompt() {
             "Include math or numeric-heavy questions where relevant. Preserve equations, calculations, units, percentages, ratios, tables, and numerical data accurately. Do not replace a required calculation with a vague conceptual question.");
     }
 
-    if (collection) {
+    // PHASE 8a — N=1 keeps the old single-@collection instruction;
+    // N>=2 replaces it with a per-language-block instruction so the
+    // AI generates the same question set once per selected language.
+    if (languages.length >= 2) {
+        const countWord = languages.length === 2 ? "TWICE" : (languages.length + " TIMES");
+        const blockCollectionName = lang => collection ? `${collection} (${lang})` : `(${lang})`;
+        const blockText = languages.map((lang, i) => {
+            const intro = i === 0 ? `Start the ${lang} block with:` : `Then start the ${lang} block with:`;
+            const closing = i === 0
+                ? `...then all ${lang} questions...`
+                : `...then all ${lang} questions in the same order and meaning as the ${languages[i - 1]} block.`;
+            return `${intro}\n@collection: ${blockCollectionName(lang)}\n${closing}`;
+        }).join("\n");
+
+        lines.push("", "MULTI-LANGUAGE INSTRUCTION",
+            `Generate this exact set of questions ${countWord}, once fully in each of the following languages, in this exact order, so that question N in one block corresponds exactly to question N in every other block: ${languages.join(", then ")}.`,
+            blockText,
+            "Each new @collection line above starts a fresh sequential question_no count for that block only (do not repeat it mid-block).");
+    } else if (collection) {
         lines.push("", `@collection: ${collection}`,
             "Put this @collection line on the FIRST question of this collection only. It carries forward to subsequent questions; do not repeat it on every question.");
     }
 
-    if (language && language.toLowerCase() !== "english") {
-        lines.push("", `Add @language: ${language} to EACH question.`);
+    if (languages.length === 1 && languages[0] && languages[0].toLowerCase() !== "english") {
+        lines.push("", `Add @language: ${languages[0]} to EACH question.`);
     }
 
     if (tags.length) {
@@ -1134,10 +1261,10 @@ function openAddMcqModal() {
                 <label for="mcq-description">Description</label>
                 <textarea id="mcq-description" rows="2" placeholder="Optional description"></textarea>
 
-                <label>Tags <small>(optional)</small></label>
+                <label>Tags <small>(optional — select from the Index)</small></label>
                 <div id="mcq-tag-chips" class="mcq-tag-chip-wrap"></div>
                 <div style="position:relative">
-                    <input id="mcq-tag-input" type="text" placeholder="Type a tag, then Enter">
+                    <input id="mcq-tag-input" type="text" placeholder="Search existing index terms...">
                     <div id="mcq-tag-suggestions" class="drive-note" hidden></div>
                 </div>
 
@@ -1147,12 +1274,12 @@ function openAddMcqModal() {
                     ${topicOptions}
                 </select>
 
-                <label for="mcq-language-input">Language</label>
-                <input id="mcq-language-input" list="mcq-language-list" value="English" placeholder="English / Hindi / Hinglish / Mixed / Other">
-                <datalist id="mcq-language-list">
-                    <option value="English"></option><option value="Hindi"></option>
-                    <option value="Hinglish"></option><option value="Mixed"></option><option value="Other"></option>
-                </datalist>
+                <label for="mcq-lang-count">How many languages?</label>
+                <select id="mcq-lang-count">
+                    ${Array.from({ length: 23 }, (_, i) => i + 1).map(n =>
+                        `<option value="${n}" ${n === 1 ? "selected" : ""}>${n}</option>`).join("")}
+                </select>
+                <div id="mcq-lang-select-row" class="mcq-lang-select-row"></div>
 
                 <label>Question type(s) to include in the prompt</label>
                 <div id="mcq-type-options" class="resource-type-options">
@@ -1227,13 +1354,25 @@ D) Option D
         }
     });
 
+    // PHASE 8a — renders exactly 1 language dropdown by default; the
+    // "How many languages?" select adds/removes dropdowns from there.
+    renderMcqLanguageSelects(1);
+    document.getElementById("mcq-lang-count").addEventListener("change", e => {
+        renderMcqLanguageSelects(e.target.value);
+    });
+
+    // PHASE 8a — selection-only: Enter/comma no longer creates a
+    // free-typed tag. It only confirms the top matching Index_Terms
+    // suggestion, if one is showing; typing with no match does nothing.
     const tagInput = document.getElementById("mcq-tag-input");
     tagInput.addEventListener("input", () => renderMcqTagSuggestions(tagInput.value));
     tagInput.addEventListener("focus", () => renderMcqTagSuggestions(tagInput.value));
     tagInput.addEventListener("keydown", e => {
         if (e.key === "Enter" || e.key === ",") {
             e.preventDefault();
-            addMcqTagChip(tagInput.value);
+            const topMatch = getMcqIndexTermSuggestions(tagInput.value)
+                .find(tag => !getMcqTagChips().some(x => x.toLowerCase() === tag.toLowerCase()));
+            if (topMatch) addMcqTagChip(topMatch);
             tagInput.value = "";
             renderMcqTagSuggestions("");
         }
@@ -1297,7 +1436,13 @@ function resolveMcqTopicTitle(nodeId) {
 function applyMcqPopupDefaults(parsed) {
     const collection = document.getElementById("mcq-collection")?.value.trim() || "";
     const description = document.getElementById("mcq-description")?.value.trim() || "";
-    const language = document.getElementById("mcq-language-input")?.value.trim() || "";
+    // PHASE 8a — only fall back to a default @language when exactly
+    // one non-English language was selected; with N>=2 the AI prompt
+    // already instructs an explicit @language per block, so guessing
+    // a single default here would be wrong.
+    const selectedLanguages = getMcqSelectedLanguages();
+    const language = (selectedLanguages.length === 1 && selectedLanguages[0].toLowerCase() !== "english")
+        ? selectedLanguages[0] : "";
     const topic = document.getElementById("mcq-study-topic")?.value.trim() || "";
     const tags = getMcqTagChips().join(", ");
 

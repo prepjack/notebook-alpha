@@ -239,8 +239,17 @@
         }
         const collectionRef = state.currentCollectionRef;
 
-        const type = getField_(fields, "type") || "simple";
+        const rawType = getField_(fields, "type");
+        const type = rawType || "simple";
         const isAssertionReason = type.toLowerCase() === "assertion_reason";
+
+        // PHASE 8a — flag missing/unrecognized @type as a warning
+        // (surfaces as ⚠ in the Phase 4 preview table, does not
+        // block the row from parser output).
+        const KNOWN_TYPES_ = ["simple", "assertion_reason", "comprehension", "table"];
+        if (!rawType || KNOWN_TYPES_.indexOf(rawType.toLowerCase()) === -1) {
+            warnings.push("missing or unrecognized @type — this question's type could not be determined");
+        }
 
         const topic = getField_(fields, "topic");
         if (!topic) {

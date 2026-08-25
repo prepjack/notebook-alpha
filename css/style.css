@@ -2934,6 +2934,10 @@ body.index-directory-resizing .index-directory-workspace {
 }
 .mcq-add-modal textarea { resize:vertical; }
 .mcq-tag-chip-wrap { display:flex; flex-wrap:wrap; gap:6px; margin:5px 0 7px; }
+
+/* PHASE 8a — multi-language generator dropdown row */
+.mcq-lang-select-row { display:flex; flex-wrap:wrap; gap:6px; margin:5px 0 7px; }
+.mcq-lang-select-row .mcq-lang-select { flex:1 1 160px; }
 .mcq-tag-chip {
     display:inline-flex; align-items:center; gap:5px; padding:4px 7px;
     border:1px solid var(--line); border-radius:999px; background:#f4f6f2;
