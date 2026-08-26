@@ -457,12 +457,16 @@ function renderContentLayer() {
             // live (through Apps Script) and rendered with the exact
             // same renderRichContent() used everywhere else.
             loadAndRenderMdFileContent(node, mdLink, container, myToken);
-        } else {
+        } else if (legacyText) {
             // Legacy path: full Markdown text saved directly into the
             // Sheet's "explanation" cell by the older Upload Markdown
-            // flow. Keeps rendering exactly as before.
-            renderRichContent(legacyText, container);
-            if (window.ReadingTools) window.ReadingTools.onContentRendered();
+            // flow. Routed through the same language-split entry point
+            // as the Drive path — a legacy cell with no LANG markers
+            // behaves exactly as before (single EN block, toggle row
+            // stays hidden).
+            applyMdTextToContentPanel(legacyText, container);
+        } else {
+            hideLanguageToggleRow();
         }
     }
 }
@@ -473,12 +477,12 @@ async function loadAndRenderMdFileContent(node, mdLink, container, token) {
     const cacheKey = node.id + "::" + mdLink;
 
     if (markdownCache.has(cacheKey)) {
-        renderRichContent(markdownCache.get(cacheKey), container);
-        if (window.ReadingTools) window.ReadingTools.onContentRendered();
+        applyMdTextToContentPanel(markdownCache.get(cacheKey), container);
         return;
     }
 
     container.innerHTML = `<p class="rc-loading">Loading content…</p>`;
+    hideLanguageToggleRow();
 
     try {
         const url = `${GOOGLE_SHEET_API}?action=get_markdown&ref=${encodeURIComponent(mdLink)}`;
@@ -500,13 +504,14 @@ async function loadAndRenderMdFileContent(node, mdLink, container, token) {
 
             if (!text.trim()) {
                 container.innerHTML = `<p class="rc-error">This file is empty.</p>`;
+                hideLanguageToggleRow();
             } else {
-                renderRichContent(text, container);
+                applyMdTextToContentPanel(text, container);
             }
-            if (window.ReadingTools) window.ReadingTools.onContentRendered();
         } else {
             const reason = (data && data.error) || "Could not read this file.";
             container.innerHTML = `<p class="rc-error">⚠ ${escapeHtml(reason)}</p>`;
+            hideLanguageToggleRow();
         }
     } catch (error) {
         if (token !== contentRequestToken) return;
@@ -514,7 +519,130 @@ async function loadAndRenderMdFileContent(node, mdLink, container, token) {
         container.innerHTML = `
             <p class="rc-error">⚠ Could not reach the content source. Check your
             connection, then reopen this topic to retry.</p>`;
+        hideLanguageToggleRow();
     }
+}
+
+/* =========================================================
+   CONTENT-LANGUAGE TOGGLE (EN / HI / HINGLISH) — content panel
+   only. Splits raw markdown on top-level
+     <!-- ===LANG:EN=== -->  <!-- ===LANG:HI=== -->  <!-- ===LANG:HINGLISH=== -->
+   marker lines (each must sit alone on its own line). A file
+   with none of these markers is treated as a single EN block —
+   today's behavior, completely unchanged. Nothing here touches
+   renderRichContent()/richcontent.js, the References panel, or
+   fires any extra network request: the split runs on text
+   that's already fetched/cached.
+   ========================================================= */
+
+const LANG_MARKER_RE = /^[ \t]*<!--\s*===LANG:(EN|HI|HINGLISH)===\s*-->[ \t]*$/gm;
+
+function splitContentByLanguage(rawMarkdown) {
+    const text = String(rawMarkdown || "");
+    const matches = [...text.matchAll(LANG_MARKER_RE)];
+
+    if (!matches.length) {
+        return { en: text, hi: null, hinglish: null, hasLanguageMarkers: false };
+    }
+
+    const result = { en: null, hi: null, hinglish: null, hasLanguageMarkers: true };
+    const keyByTag = { EN: "en", HI: "hi", HINGLISH: "hinglish" };
+
+    matches.forEach((match, i) => {
+        const tag = keyByTag[match[1]];
+        const start = match.index + match[0].length;
+        const end = i + 1 < matches.length ? matches[i + 1].index : text.length;
+        const chunk = text.slice(start, end).trim();
+        result[tag] = chunk || null; // an authored-but-empty block still counts as null (nothing to show)
+    });
+
+    return result;
+}
+
+// The split currently backing the content panel, plus which
+// language is active — kept in memory only, nothing persisted to
+// the Sheet. Re-rendering on toggle-click reuses this directly, no
+// re-fetch and no re-parse of the raw text needed.
+let currentLanguageSplit = null;
+let currentContentLanguage = "EN";
+
+// Remembers the last language actually shown per topic node id, so
+// revisiting a topic keeps whatever the user was reading; falls back
+// to EN for topics that don't have that language authored.
+const lastLanguagePerTopic = new Map();
+
+function applyMdTextToContentPanel(rawText, container) {
+    currentLanguageSplit = splitContentByLanguage(rawText);
+
+    const preferred = (selectedTopicNode && lastLanguagePerTopic.get(selectedTopicNode.id)) || "EN";
+    currentContentLanguage = languageBlockFor(preferred, currentLanguageSplit) ? preferred : "EN";
+
+    renderCurrentLanguageBlock(container);
+    updateLanguageToggleUI();
+}
+
+function languageBlockFor(lang, split) {
+    if (!split) return null;
+    if (lang === "HI") return split.hi;
+    if (lang === "HINGLISH") return split.hinglish;
+    return split.en;
+}
+
+function renderCurrentLanguageBlock(container) {
+    if (!container || !currentLanguageSplit) return;
+    const text = languageBlockFor(currentContentLanguage, currentLanguageSplit) || currentLanguageSplit.en || "";
+    renderRichContent(text, container);
+    if (window.ReadingTools) window.ReadingTools.onContentRendered();
+}
+
+function switchContentLanguage(lang) {
+    if (!currentLanguageSplit) return;
+    if (!languageBlockFor(lang, currentLanguageSplit)) return; // not authored for this topic — button should be disabled anyway
+    if (lang === currentContentLanguage) return;
+
+    currentContentLanguage = lang;
+    if (selectedTopicNode) lastLanguagePerTopic.set(selectedTopicNode.id, lang);
+
+    const container = document.getElementById("rc-explanation");
+    if (!container) return;
+
+    // Same reset/recompute lifecycle app.js already uses for topic
+    // switches, so "Read time" / "My reading time" correctly reflect
+    // whichever language is now on screen.
+    if (window.ReadingTools) window.ReadingTools.onNewArticle();
+    renderCurrentLanguageBlock(container);
+    updateLanguageToggleUI();
+}
+
+function updateLanguageToggleUI() {
+    const row = document.getElementById("content-toggle-row");
+    if (!row) return;
+
+    if (!currentLanguageSplit) {
+        row.hidden = true;
+        return;
+    }
+
+    row.hidden = false;
+
+    const buttons = {
+        EN: document.getElementById("lang-toggle-en"),
+        HI: document.getElementById("lang-toggle-hi"),
+        HINGLISH: document.getElementById("lang-toggle-hinglish")
+    };
+
+    Object.keys(buttons).forEach(lang => {
+        const btn = buttons[lang];
+        if (!btn) return;
+        btn.disabled = !languageBlockFor(lang, currentLanguageSplit);
+        btn.classList.toggle("active", lang === currentContentLanguage);
+    });
+}
+
+function hideLanguageToggleRow() {
+    currentLanguageSplit = null;
+    const row = document.getElementById("content-toggle-row");
+    if (row) row.hidden = true;
 }
 
 document.addEventListener("click", e => {
@@ -627,6 +755,38 @@ Keep headings consistent (## for major sections, ### for
 sub-sections) and stay strictly within the scope of this one topic —
 do not repeat content that belongs to sibling or parent topics named
 in the hierarchy above. Do not use any HTML tags, only Markdown.
+
+IMPORTANT — generate the SAME notes THREE times, once per language,
+inside this ONE file, separated by these exact marker lines (copy
+them exactly, each on its own line, nothing else on that line):
+
+<!-- ===LANG:EN=== -->
+... complete English notes here, following every instruction above ...
+
+<!-- ===LANG:HI=== -->
+... the SAME notes, fully translated into Hindi (Devanagari script),
+same heading order, same depth, same examples ...
+
+<!-- ===LANG:HINGLISH=== -->
+... the SAME notes again, in natural spoken Hinglish. Specifically:
+write ALL sentence grammar, connectors, and explanations in Hindi
+(Devanagari script) — but keep subject-specific / technical / English
+terms in English (Roman script) exactly as they are, the way a
+Hindi-medium teacher would explain it out loud. Do NOT translate
+technical terms into Hindi, and do NOT write the whole thing in
+Roman-script Hindi.
+
+Example of the exact expected style:
+"Mental Processes का मतलब है कि हमारा दिमाग कैसे काम करता है — जैसे
+Thinking, Learning और Remembering जैसी चीज़ें इसमें आती हैं।"
+
+Match this style throughout the Hinglish block: Devanagari sentence
+structure + English technical nouns kept as-is, in every heading,
+definition, explanation, and key point.
+
+Each of the three language blocks must independently and completely
+follow the same heading structure, and must stay strictly within the
+scope of this one topic.
 
 ---
 FILE NAMING INSTRUCTION (for you, the human — not for the AI tool):

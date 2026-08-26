@@ -56,6 +56,16 @@
                         <span>CONTENT</span>
                         <button type="button" id="read-time-btn" class="read-time-btn">Read time</button>
                     </div>
+                    <div id="content-toggle-row" class="content-toggle-row" hidden>
+                        <div class="toggle-group" role="group" aria-label="Content language">
+                            <button type="button" id="lang-toggle-en" class="toggle-btn active"
+                                    onclick="switchContentLanguage('EN')">EN</button>
+                            <button type="button" id="lang-toggle-hi" class="toggle-btn"
+                                    onclick="switchContentLanguage('HI')">HI</button>
+                            <button type="button" id="lang-toggle-hinglish" class="toggle-btn"
+                                    onclick="switchContentLanguage('HINGLISH')">HINGLISH</button>
+                        </div>
+                    </div>
                 </div>
                 <div class="reading-progress-track">
                     <div id="reading-progress-fill" class="reading-progress-fill"></div>

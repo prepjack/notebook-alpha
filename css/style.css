@@ -1816,6 +1816,49 @@ body.index-directory-resizing .index-directory-workspace {
 .read-time-btn:hover{
     background:var(--green-soft);
 }
+/* =========================================================
+   Content-language toggle (EN / HI / HINGLISH) — content panel
+   only. Hidden by default (id="content-toggle-row" hidden in
+   index.html); app.js unhides it once a topic's .md content is
+   found to contain language markers, and disables whichever
+   button has no matching block for the current topic.
+   ========================================================= */
+.content-toggle-row{
+    display:flex;
+    gap:8px;
+    margin:0 0 12px 0;
+}
+.toggle-group{
+    display:inline-flex;
+    border:1px solid var(--line);
+    border-radius:7px;
+    overflow:hidden;
+}
+.toggle-btn{
+    padding:4px 10px;
+    border:none;
+    border-right:1px solid var(--line);
+    background:#fff;
+    color:var(--green);
+    cursor:pointer;
+    font:700 10px Arial,sans-serif;
+    letter-spacing:.04em;
+}
+.toggle-group .toggle-btn:last-child{
+    border-right:none;
+}
+.toggle-btn:hover:not(:disabled){
+    background:var(--green-soft);
+}
+.toggle-btn.active{
+    background:var(--green);
+    color:#fff;
+}
+.toggle-btn:disabled{
+    color:#b7c2bb;
+    cursor:not-allowed;
+    background:#f5f7f5;
+}
 .reading-progress-track{
     position:sticky;
     top:0;
