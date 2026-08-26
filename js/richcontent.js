@@ -33,7 +33,14 @@
         return colors[i % colors.length];
     }
 
+    // Returns a promise that resolves once every mermaid block in
+    // `container` has finished rendering (or failed). Diagram SVGs don't
+    // have a known height until mermaid.render() resolves, so anything
+    // that measures layout (like scroll-position restoration) before
+    // this settles is measuring against a page that's about to change
+    // height under it.
     function renderMermaidBlocks(container) {
+        const jobs = [];
         container.querySelectorAll("code.language-mermaid").forEach(codeEl => {
             const pre = codeEl.closest("pre");
             if (!pre) return;
@@ -49,12 +56,15 @@
             }
             mermaidCounter += 1;
             const id = `rc-mermaid-${mermaidCounter}-${Date.now()}`;
-            mermaid.render(id, source)
-                .then(({ svg }) => { holder.innerHTML = svg; })
-                .catch(() => {
-                    holder.innerHTML = '<p class="rc-error">Could not render this diagram. Check the mermaid syntax.</p>';
-                });
+            jobs.push(
+                mermaid.render(id, source)
+                    .then(({ svg }) => { holder.innerHTML = svg; })
+                    .catch(() => {
+                        holder.innerHTML = '<p class="rc-error">Could not render this diagram. Check the mermaid syntax.</p>';
+                    })
+            );
         });
+        return Promise.all(jobs);
     }
 
     function renderChartBlocks(container) {
@@ -114,19 +124,25 @@
     /**
      * Renders `raw` markdown text (optionally with ```mermaid / ```chart
      * fences) into `container`, a DOM element.
+     *
+     * Returns a promise that resolves once all async pieces (mermaid
+     * diagrams) have finished rendering and the container's layout has
+     * stopped changing height because of them. Callers that need to
+     * measure layout (e.g. scroll-position restoration) can await this
+     * to avoid measuring against a not-yet-settled page.
      */
     function renderRichContent(raw, container) {
-        if (!container) return;
+        if (!container) return Promise.resolve();
         const text = String(raw || "").trim();
 
         if (!text) {
             container.innerHTML = "";
-            return;
+            return Promise.resolve();
         }
 
         if (typeof marked === "undefined" || typeof DOMPurify === "undefined") {
             container.textContent = text; // safe fallback if a CDN script failed to load
-            return;
+            return Promise.resolve();
         }
 
         const html = marked.parse(text);
@@ -137,8 +153,9 @@
             a.setAttribute("rel", "noopener noreferrer");
         });
 
-        renderMermaidBlocks(container);
+        const mermaidDone = renderMermaidBlocks(container);
         renderChartBlocks(container);
+        return mermaidDone;
     }
 
     window.renderRichContent = renderRichContent;
