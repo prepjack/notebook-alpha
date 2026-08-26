@@ -357,9 +357,118 @@ function escapeHtml(value) {
         .replaceAll("'", "&#039;");
 }
 
+/* =========================================================
+   ALPHA-PLUS — SCROLL POSITION MEMORY
+   Keeps reading position per topic/language/depth in memory only.
+   Same combination restores exact scrollTop; language/depth switches
+   restore the same heading index so translated/shorter content does
+   not jump to an unrelated pixel offset.
+   ========================================================= */
+const contentScrollMemory = new Map();
+let pendingScrollRestore = null;
+
+function contentScrollKey(topicId, language, depth) {
+    return `${topicId}::${language}::${depth}`;
+}
+
+function captureContentScrollPosition() {
+    const host = document.getElementById("middle-panel");
+    if (!host || !selectedTopicNode) return null;
+
+    const headings = [...document.querySelectorAll("#rc-explanation h1, #rc-explanation h2, #rc-explanation h3, #rc-explanation h4, #rc-explanation h5, #rc-explanation h6")];
+    let headingIndex = -1;
+    let bestTop = -Infinity;
+
+    for (let i = 0; i < headings.length; i++) {
+        const top = headings[i].getBoundingClientRect().top;
+        if (top <= host.getBoundingClientRect().top + 24 && top > bestTop) {
+            bestTop = top;
+            headingIndex = i;
+        }
+    }
+
+    const state = {
+        scrollTop: host.scrollTop,
+        headingIndex
+    };
+
+    contentScrollMemory.set(
+        contentScrollKey(selectedTopicNode.id, currentContentLanguage, currentContentDepth),
+        state
+    );
+    return state;
+}
+
+function rememberBeforeContentVariantSwitch() {
+    captureContentScrollPosition();
+    const host = document.getElementById("middle-panel");
+    if (!host || !selectedTopicNode) return;
+    pendingScrollRestore = {
+        mode: "semantic",
+        headingIndex: (() => {
+            const headings = [...document.querySelectorAll("#rc-explanation h1, #rc-explanation h2, #rc-explanation h3, #rc-explanation h4, #rc-explanation h5, #rc-explanation h6")];
+            let index = -1;
+            let bestTop = -Infinity;
+            const hostTop = host.getBoundingClientRect().top;
+            headings.forEach((heading, i) => {
+                const top = heading.getBoundingClientRect().top;
+                if (top <= hostTop + 24 && top > bestTop) {
+                    bestTop = top;
+                    index = i;
+                }
+            });
+            return index;
+        })(),
+        fallbackScrollTop: host.scrollTop
+    };
+}
+
+function prepareTopicScrollRestore(node) {
+    const state = node ? contentScrollMemory.get(contentScrollKey(node.id, "EN", "FULL")) : null;
+    // The exact topic/language/depth key is resolved once the new .md file
+    // has been parsed. Until then, a new topic starts at the top.
+    pendingScrollRestore = { mode: "topic", topicId: node ? node.id : null };
+}
+
+function restoreContentScrollPosition() {
+    const host = document.getElementById("middle-panel");
+    if (!host || !selectedTopicNode || !pendingScrollRestore) return;
+
+    const pending = pendingScrollRestore;
+    pendingScrollRestore = null;
+
+    let target = null;
+    if (pending.mode === "topic") {
+        target = contentScrollMemory.get(
+            contentScrollKey(selectedTopicNode.id, currentContentLanguage, currentContentDepth)
+        );
+        host.scrollTop = target ? target.scrollTop : 0;
+        return;
+    }
+
+    const headings = [...document.querySelectorAll("#rc-explanation h1, #rc-explanation h2, #rc-explanation h3, #rc-explanation h4, #rc-explanation h5, #rc-explanation h6")];
+    if (pending.headingIndex >= 0 && headings[pending.headingIndex]) {
+        const hostRect = host.getBoundingClientRect();
+        const headingRect = headings[pending.headingIndex].getBoundingClientRect();
+        host.scrollTop += headingRect.top - hostRect.top - 24;
+    } else {
+        host.scrollTop = Math.min(pending.fallbackScrollTop || 0, Math.max(0, host.scrollHeight - host.clientHeight));
+    }
+}
+
+function scheduleContentScrollRestore() {
+    requestAnimationFrame(() => {
+        restoreContentScrollPosition();
+    });
+}
+
 function renderTopic(node) {
+    if (selectedTopicNode && selectedTopicNode.id !== node.id) {
+        captureContentScrollPosition();
+    }
     selectedTopicNode = node;
     selectedTopicId = node.id;
+    prepareTopicScrollRestore(node);
     renderContentLayer();
 }
 
@@ -633,6 +742,7 @@ function renderCurrentLanguageBlock(container) {
     const text = depthBlockFor(currentContentDepth, currentDepthSplit) || currentDepthSplit.full || "";
     renderRichContent(text, container);
     if (window.ReadingTools) window.ReadingTools.onContentRendered();
+    scheduleContentScrollRestore();
 }
 
 function switchContentLanguage(lang) {
@@ -640,6 +750,7 @@ function switchContentLanguage(lang) {
     if (!languageBlockFor(lang, currentLanguageSplit)) return; // not authored for this topic — button should be disabled anyway
     if (lang === currentContentLanguage) return;
 
+    rememberBeforeContentVariantSwitch();
     currentContentLanguage = lang;
     if (selectedTopicNode) lastLanguagePerTopic.set(selectedTopicNode.id, lang);
 
@@ -668,6 +779,7 @@ function switchContentDepth(depth) {
     if (!depthBlockFor(depth, depthSplit)) return;
     if (depth === currentContentDepth) return;
 
+    rememberBeforeContentVariantSwitch();
     currentDepthSplit = depthSplit;
     currentContentDepth = depth;
     if (selectedTopicNode) {
@@ -1181,7 +1293,6 @@ async function submitContentLink() {
         invalidateIndexCache();
         closeAddContentLink();
         renderContentLayer();
-        document.getElementById("middle-panel").scrollTop = 0;
 
     } catch (error) {
         console.error("Content link save failed:", error);
@@ -1704,7 +1815,6 @@ function createTreeNode(node, depth = 0) {
         renderResources(node);
         renderMcqs(node);
         label.scrollIntoView({ block: "nearest" });
-        document.getElementById("middle-panel").scrollTop = 0;
     });
 
     return wrapper;
