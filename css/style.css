@@ -1766,24 +1766,18 @@ body.index-directory-resizing .index-directory-workspace {
 
 /* =========================================================
    STEP 32 — READ TIME BUTTON + READING PROGRESS LINE
-   The heading row (with the button pinned to its top-right
-   corner) scrolls away with the article like the other two
-   panels' headings always have. Only the thin progress line
-   is sticky — it starts tracking/staying visible once the
-   user has scrolled it up to the top of the panel.
+   PHASE 2 — STICKY / FROZEN CONTENT CONTROLS
 
-   IMPORTANT: .reading-progress-track must be a DIRECT CHILD
-   of #middle-panel (the scrolling container), NOT nested
-   inside .content-panel-header. A sticky element can only
-   stick within the height of its own immediate parent's box —
-   if it were nested inside the short, non-sticky header, it
-   would scroll away the moment the header itself scrolled out
-   of view. As a direct child of the scroll container, it has
-   the full article height to stick within.
+   The complete CONTENT controls row + progress line stay pinned
+   to the top of the middle-panel's own scroll viewport.
    ========================================================= */
 .content-panel-header{
-    /* normal flow — NOT sticky, scrolls with the article */
+    position:sticky;
+    top:0;
+    z-index:30;
     padding-top:16px;
+    padding-bottom:0;
+    background:var(--paper);
 }
 
 /* Placed AFTER the base rule above (not earlier in the file) so it
@@ -1794,15 +1788,22 @@ body.index-directory-resizing .index-directory-workspace {
         padding-top: 55px;
     }
 }
-.content-panel-heading{
-    position:relative;
+#middle-panel .content-panel-heading{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    min-width:0;
     margin:0 0 8px 0;
-    padding-right:78px; /* keeps "CONTENT" clear of the corner button */
+    padding-right:0;
+    white-space:nowrap;
+}
+.content-heading-label{
+    flex:0 0 auto;
 }
 .read-time-btn{
-    position:absolute;
-    top:0;
-    right:0;
+    position:static;
+    margin-left:auto;
+    flex:0 0 auto;
     padding:3px 9px;
     border:1px solid var(--line);
     border-radius:6px;
@@ -1825,9 +1826,12 @@ body.index-directory-resizing .index-directory-workspace {
    ========================================================= */
 .content-toggle-row{
     display:flex;
-    gap:8px;
-    flex-wrap:wrap;
-    margin:0 0 12px 0;
+    align-items:center;
+    gap:10px;
+    flex:0 1 auto;
+    min-width:0;
+    margin:0;
+    flex-wrap:nowrap;
 }
 .toggle-group{
     display:inline-flex;
@@ -1861,12 +1865,10 @@ body.index-directory-resizing .index-directory-workspace {
     background:#f5f7f5;
 }
 .reading-progress-track{
-    position:sticky;
-    top:0;
-    z-index:5;
+    position:relative;
     height:3px;
     width:100%;
-    margin-bottom:10px;
+    margin:0 0 10px 0;
     background:var(--line);
     border-radius:2px;
     overflow:hidden;

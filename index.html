@@ -53,30 +53,30 @@
             <section id="middle-panel" class="panel">
                 <div class="content-panel-header">
                     <div class="panel-heading content-panel-heading">
-                        <span>CONTENT</span>
+                        <span class="content-heading-label">CONTENT</span>
+                        <div id="content-toggle-row" class="content-toggle-row" hidden>
+                            <div class="toggle-group" role="group" aria-label="Content language">
+                                <button type="button" id="lang-toggle-en" class="toggle-btn active"
+                                        onclick="switchContentLanguage('EN')">EN</button>
+                                <button type="button" id="lang-toggle-hi" class="toggle-btn"
+                                        onclick="switchContentLanguage('HI')">HI</button>
+                                <button type="button" id="lang-toggle-hinglish" class="toggle-btn"
+                                        onclick="switchContentLanguage('HINGLISH')">HINGLISH</button>
+                            </div>
+                            <div class="toggle-group" role="group" aria-label="Content depth">
+                                <button type="button" id="depth-toggle-full" class="toggle-btn active"
+                                        onclick="switchContentDepth('FULL')">Full Read</button>
+                                <button type="button" id="depth-toggle-half" class="toggle-btn"
+                                        onclick="switchContentDepth('HALF')">Half Read</button>
+                                <button type="button" id="depth-toggle-mini" class="toggle-btn"
+                                        onclick="switchContentDepth('MINI')">Mini Read</button>
+                            </div>
+                        </div>
                         <button type="button" id="read-time-btn" class="read-time-btn">Read time</button>
                     </div>
-                    <div id="content-toggle-row" class="content-toggle-row" hidden>
-                        <div class="toggle-group" role="group" aria-label="Content language">
-                            <button type="button" id="lang-toggle-en" class="toggle-btn active"
-                                    onclick="switchContentLanguage('EN')">EN</button>
-                            <button type="button" id="lang-toggle-hi" class="toggle-btn"
-                                    onclick="switchContentLanguage('HI')">HI</button>
-                            <button type="button" id="lang-toggle-hinglish" class="toggle-btn"
-                                    onclick="switchContentLanguage('HINGLISH')">HINGLISH</button>
-                        </div>
-                        <div class="toggle-group" role="group" aria-label="Content depth">
-                            <button type="button" id="depth-toggle-full" class="toggle-btn active"
-                                    onclick="switchContentDepth('FULL')">Full Read</button>
-                            <button type="button" id="depth-toggle-half" class="toggle-btn"
-                                    onclick="switchContentDepth('HALF')">Half Read</button>
-                            <button type="button" id="depth-toggle-mini" class="toggle-btn"
-                                    onclick="switchContentDepth('MINI')">Mini Read</button>
-                        </div>
+                    <div class="reading-progress-track">
+                        <div id="reading-progress-fill" class="reading-progress-fill"></div>
                     </div>
-                </div>
-                <div class="reading-progress-track">
-                    <div id="reading-progress-fill" class="reading-progress-fill"></div>
                 </div>
 
                 <div id="topic-content">
