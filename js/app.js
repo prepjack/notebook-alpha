@@ -536,6 +536,7 @@ async function loadAndRenderMdFileContent(node, mdLink, container, token) {
    ========================================================= */
 
 const LANG_MARKER_RE = /^[ \t]*<!--\s*===LANG:(EN|HI|HINGLISH)===\s*-->[ \t]*$/gm;
+const DEPTH_MARKER_RE = /^[ \t]*<!--\s*===DEPTH:(FULL|HALF|MINI)===\s*-->[ \t]*$/gm;
 
 function splitContentByLanguage(rawMarkdown) {
     const text = String(rawMarkdown || "");
@@ -565,17 +566,47 @@ function splitContentByLanguage(rawMarkdown) {
 // re-fetch and no re-parse of the raw text needed.
 let currentLanguageSplit = null;
 let currentContentLanguage = "EN";
+let currentDepthSplit = null;
+let currentContentDepth = "FULL";
 
 // Remembers the last language actually shown per topic node id, so
 // revisiting a topic keeps whatever the user was reading; falls back
 // to EN for topics that don't have that language authored.
 const lastLanguagePerTopic = new Map();
+const lastDepthPerTopicLanguage = new Map();
+
+function splitLayerByDepth(languageBlockText) {
+    const text = String(languageBlockText || "");
+    const matches = [...text.matchAll(DEPTH_MARKER_RE)];
+
+    if (!matches.length) {
+        return { full: text, half: null, mini: null, hasDepthMarkers: false };
+    }
+
+    const result = { full: null, half: null, mini: null, hasDepthMarkers: true };
+    const keyByTag = { FULL: "full", HALF: "half", MINI: "mini" };
+
+    matches.forEach((match, i) => {
+        const tag = keyByTag[match[1]];
+        const start = match.index + match[0].length;
+        const end = i + 1 < matches.length ? matches[i + 1].index : text.length;
+        const chunk = text.slice(start, end).trim();
+        result[tag] = chunk || null;
+    });
+
+    return result;
+}
 
 function applyMdTextToContentPanel(rawText, container) {
     currentLanguageSplit = splitContentByLanguage(rawText);
 
     const preferred = (selectedTopicNode && lastLanguagePerTopic.get(selectedTopicNode.id)) || "EN";
     currentContentLanguage = languageBlockFor(preferred, currentLanguageSplit) ? preferred : "EN";
+
+    const depthKey = selectedTopicNode ? `${selectedTopicNode.id}::${currentContentLanguage}` : null;
+    const preferredDepth = (depthKey && lastDepthPerTopicLanguage.get(depthKey)) || "FULL";
+    currentDepthSplit = splitLayerByDepth(languageBlockFor(currentContentLanguage, currentLanguageSplit) || "");
+    currentContentDepth = depthBlockFor(preferredDepth, currentDepthSplit) ? preferredDepth : "FULL";
 
     renderCurrentLanguageBlock(container);
     updateLanguageToggleUI();
@@ -588,9 +619,18 @@ function languageBlockFor(lang, split) {
     return split.en;
 }
 
+function depthBlockFor(depth, split) {
+    if (!split) return null;
+    if (depth === "HALF") return split.half;
+    if (depth === "MINI") return split.mini;
+    return split.full;
+}
+
 function renderCurrentLanguageBlock(container) {
     if (!container || !currentLanguageSplit) return;
-    const text = languageBlockFor(currentContentLanguage, currentLanguageSplit) || currentLanguageSplit.en || "";
+    const languageText = languageBlockFor(currentContentLanguage, currentLanguageSplit) || currentLanguageSplit.en || "";
+    currentDepthSplit = splitLayerByDepth(languageText);
+    const text = depthBlockFor(currentContentDepth, currentDepthSplit) || currentDepthSplit.full || "";
     renderRichContent(text, container);
     if (window.ReadingTools) window.ReadingTools.onContentRendered();
 }
@@ -603,12 +643,40 @@ function switchContentLanguage(lang) {
     currentContentLanguage = lang;
     if (selectedTopicNode) lastLanguagePerTopic.set(selectedTopicNode.id, lang);
 
+    const depthKey = selectedTopicNode ? `${selectedTopicNode.id}::${lang}` : null;
+    const languageText = languageBlockFor(lang, currentLanguageSplit) || "";
+    const depthSplit = splitLayerByDepth(languageText);
+    const preferredDepth = (depthKey && lastDepthPerTopicLanguage.get(depthKey)) || "FULL";
+    currentDepthSplit = depthSplit;
+    currentContentDepth = depthBlockFor(preferredDepth, depthSplit) ? preferredDepth : "FULL";
+
     const container = document.getElementById("rc-explanation");
     if (!container) return;
 
-    // Same reset/recompute lifecycle app.js already uses for topic
-    // switches, so "Read time" / "My reading time" correctly reflect
-    // whichever language is now on screen.
+    // Reset/recompute reading-time state before rendering the newly selected
+    // language/depth content, so all reading tools use the live DOM.
+    if (window.ReadingTools) window.ReadingTools.onNewArticle();
+    renderCurrentLanguageBlock(container);
+    updateLanguageToggleUI();
+}
+
+function switchContentDepth(depth) {
+    if (!currentLanguageSplit) return;
+
+    const languageText = languageBlockFor(currentContentLanguage, currentLanguageSplit) || "";
+    const depthSplit = splitLayerByDepth(languageText);
+    if (!depthBlockFor(depth, depthSplit)) return;
+    if (depth === currentContentDepth) return;
+
+    currentDepthSplit = depthSplit;
+    currentContentDepth = depth;
+    if (selectedTopicNode) {
+        lastDepthPerTopicLanguage.set(`${selectedTopicNode.id}::${currentContentLanguage}`, depth);
+    }
+
+    const container = document.getElementById("rc-explanation");
+    if (!container) return;
+
     if (window.ReadingTools) window.ReadingTools.onNewArticle();
     renderCurrentLanguageBlock(container);
     updateLanguageToggleUI();
@@ -637,10 +705,29 @@ function updateLanguageToggleUI() {
         btn.disabled = !languageBlockFor(lang, currentLanguageSplit);
         btn.classList.toggle("active", lang === currentContentLanguage);
     });
+
+    const depthButtons = {
+        FULL: document.getElementById("depth-toggle-full"),
+        HALF: document.getElementById("depth-toggle-half"),
+        MINI: document.getElementById("depth-toggle-mini")
+    };
+
+    const languageText = languageBlockFor(currentContentLanguage, currentLanguageSplit) || "";
+    const depthSplit = splitLayerByDepth(languageText);
+    currentDepthSplit = depthSplit;
+
+    Object.keys(depthButtons).forEach(depth => {
+        const btn = depthButtons[depth];
+        if (!btn) return;
+        btn.disabled = !depthBlockFor(depth, depthSplit);
+        btn.classList.toggle("active", depth === currentContentDepth);
+    });
 }
 
 function hideLanguageToggleRow() {
     currentLanguageSplit = null;
+    currentDepthSplit = null;
+    currentContentDepth = "FULL";
     const row = document.getElementById("content-toggle-row");
     if (row) row.hidden = true;
 }
@@ -750,43 +837,138 @@ notes to where this topic sits in the syllabus — a broad Unit-level
 topic needs wider coverage, while a narrow Subtopic needs sharper,
 more specific detail. Write clear, exam-oriented notes on this exact
 topic: a definition, a clear explanation, one worked example if
-relevant, and a short list of key points to remember at the end.
-Keep headings consistent (## for major sections, ### for
-sub-sections) and stay strictly within the scope of this one topic —
-do not repeat content that belongs to sibling or parent topics named
-in the hierarchy above. Do not use any HTML tags, only Markdown.
+relevant, and key points to remember. Keep headings consistent (##
+for major sections, ### for sub-sections) and stay strictly within the
+scope of this one topic — do not repeat content that belongs to
+sibling or parent topics named in the hierarchy above. Do not use any
+HTML tags, only Markdown.
 
-IMPORTANT — generate the SAME notes THREE times, once per language,
-inside this ONE file, separated by these exact marker lines (copy
-them exactly, each on its own line, nothing else on that line):
+IMPORTANT — the website has TWO independent controls for this file:
+1. Language: EN / HI / HINGLISH
+2. Content depth: Full Read / Half Read / Mini Read
+
+Therefore, generate THREE depth versions for EACH language. The
+language is the outer layer and the depth is nested inside it. The
+final file MUST follow this exact overall structure and marker order:
 
 <!-- ===LANG:EN=== -->
-... complete English notes here, following every instruction above ...
+<!-- ===DEPTH:FULL=== -->
+...complete English Full Read notes...
+<!-- ===DEPTH:HALF=== -->
+...English Half Read notes...
+<!-- ===DEPTH:MINI=== -->
+...English Mini Read notes...
 
 <!-- ===LANG:HI=== -->
-... the SAME notes, fully translated into Hindi (Devanagari script),
-same heading order, same depth, same examples ...
+<!-- ===DEPTH:FULL=== -->
+...complete Hindi Full Read notes...
+<!-- ===DEPTH:HALF=== -->
+...Hindi Half Read notes...
+<!-- ===DEPTH:MINI=== -->
+...Hindi Mini Read notes...
 
 <!-- ===LANG:HINGLISH=== -->
-... the SAME notes again, in natural spoken Hinglish. Specifically:
-write ALL sentence grammar, connectors, and explanations in Hindi
-(Devanagari script) — but keep subject-specific / technical / English
-terms in English (Roman script) exactly as they are, the way a
-Hindi-medium teacher would explain it out loud. Do NOT translate
-technical terms into Hindi, and do NOT write the whole thing in
-Roman-script Hindi.
+<!-- ===DEPTH:FULL=== -->
+...complete Hinglish Full Read notes...
+<!-- ===DEPTH:HALF=== -->
+...Hinglish Half Read notes...
+<!-- ===DEPTH:MINI=== -->
+...Hinglish Mini Read notes...
 
-Example of the exact expected style:
-"Mental Processes का मतलब है कि हमारा दिमाग कैसे काम करता है — जैसे
-Thinking, Learning और Remembering जैसी चीज़ें इसमें आती हैं।"
+MARKER RULES — CRITICAL:
+- Copy every marker EXACTLY as shown above.
+- Every marker must be alone on its own line.
+- Do not add spaces, punctuation, Markdown fences, headings, or other text on marker lines.
+- Do not omit any of the nine depth sections.
+- Keep the language blocks in exactly EN → HI → HINGLISH order.
+- Keep the depth blocks in exactly FULL → HALF → MINI order inside every language block.
+- Do NOT create separate files for the languages or depths. Everything must be in ONE .md file.
 
-Match this style throughout the Hinglish block: Devanagari sentence
-structure + English technical nouns kept as-is, in every heading,
-definition, explanation, and key point.
+DEPTH RULES — CRITICAL:
 
-Each of the three language blocks must independently and completely
-follow the same heading structure, and must stay strictly within the
-scope of this one topic.
+FULL READ:
+- This is the authoritative, most complete version.
+- Preserve the source material's important structure, sequence, terminology,
+  definitions, examples, classifications, relationships, and exam-relevant detail.
+- Match the source material's heading order as closely as possible.
+- Explain concepts clearly rather than merely listing keywords.
+- Include useful analogies, cross-links, "why it matters", and exam-oriented
+  clarification where they genuinely improve understanding, without inventing
+  facts not supported by the source.
+- Use the normal reading length appropriate to the topic and source material.
+
+HALF READ:
+- Keep the SAME major heading order and overall conceptual coverage as FULL.
+- Make it substantially shorter — roughly half the reading time of FULL.
+- Compress repetition and secondary detail, but retain definitions, core concepts,
+  important classifications, relationships, key examples, and exam-relevant facts.
+- Enrich concise explanations with an analogy, cross-link, or "why it matters"
+  note when useful.
+- It must remain understandable on its own; do not say "see Full Read" or refer
+  to omitted sections.
+
+MINI READ:
+- This is the fastest revision version.
+- Keep the SAME major heading order as FULL, but reduce each heading to its
+  essential recall points.
+- Prefer key terms, short definitions, one-line explanations, comparisons,
+  formulas/rules where relevant, and one-line recall cues.
+- Aim for roughly half the reading time of HALF (and therefore much shorter than FULL).
+- Optionally include a small mermaid mind-map when it genuinely improves recall.
+- It must also stand alone; do not say "see Full Read" or "see Half Read".
+
+IMPORTANT — all three depth versions must be derived from the SAME source
+material and must remain factually consistent with each other. Do not introduce
+new facts in Half or Mini that are absent from Full/source material. Do not simply
+truncate the Full version: deliberately rewrite each depth for its intended reading
+purpose while preserving the same core meaning and heading sequence.
+
+LANGUAGE INSTRUCTIONS:
+
+EN:
+Write natural, clear English suitable for exam preparation. Preserve important
+technical terms and standard terminology from the source.
+
+HI:
+Write fully in Hindi using Devanagari script. Pay special attention to the correct
+Hindi terminology used for difficult/important English terms. When a technical or
+academic English term is important or difficult, write the English term alongside
+its Hindi equivalent, e.g. "सूचना संगठन (Information Organization)". Use the source
+material's established Hindi terminology when it is available. Do not turn the
+entire section into Roman-script Hindi.
+
+HINGLISH:
+Write natural spoken Hinglish in Devanagari sentence structure: grammar,
+connectors, and explanations should be in Hindi (Devanagari), while
+subject-specific / technical / English terms remain in English (Roman script).
+Do NOT write the whole section in Roman-script Hindi and do NOT translate every
+technical term into Hindi.
+Example style:
+"Mental Processes का मतलब है कि हमारा दिमाग कैसे काम करता है — जैसे Thinking,
+Learning और Remembering जैसी चीज़ें इसमें आती हैं।"
+
+IMPORTANT — maintain the SAME underlying content, heading order, examples,
+classifications, and depth relationship across EN, HI, and HINGLISH. Only the
+language/style should change.
+
+SOURCE FIDELITY:
+- Treat the uploaded/original source material as authoritative.
+- Do not invent facts, examples, dates, classifications, quotations, or references
+  that are not supported by the source unless clearly labelled as a simple explanatory
+  analogy.
+- Preserve important source terminology, names, numbers, headings, and ordering.
+- If the source contains a figure/table/diagram whose information matters, represent
+  its information faithfully in Markdown where possible.
+- Do not silently replace the source's terminology with unrelated general-knowledge
+  terminology.
+
+OUTPUT HYGIENE:
+- Return ONLY the Markdown file content, not an explanation of what you did.
+- Do not wrap the entire answer in a \`\`\`markdown code fence.
+- Do not add a preface, conclusion, commentary, or "Here is your file" message outside
+  the requested language/depth blocks.
+- The marker lines are structural metadata for the website parser, so they must remain
+  exactly intact.
 
 ---
 FILE NAMING INSTRUCTION (for you, the human — not for the AI tool):
