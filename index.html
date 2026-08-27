@@ -53,7 +53,16 @@
             <section id="middle-panel" class="panel">
                 <div class="content-panel-header">
                     <div class="panel-heading content-panel-heading">
-                        <span class="content-heading-label">CONTENT</span>
+                        <button type="button" id="content-toc-btn" class="content-heading-label content-toc-btn content-toc-empty"
+                                aria-expanded="false" aria-controls="content-toc-panel"
+                                title="Show contents list" disabled>
+                            CONTENT
+                            <svg class="content-toc-caret" width="10" height="10" viewBox="0 0 10 10"
+                                 xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.4"
+                                      fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                        </button>
                         <div id="content-toggle-row" class="content-toggle-row" hidden>
                             <div class="toggle-group" role="group" aria-label="Content language">
                                 <button type="button" id="lang-toggle-en" class="toggle-btn active"
@@ -76,6 +85,11 @@
                     </div>
                     <div class="reading-progress-track">
                         <div id="reading-progress-fill" class="reading-progress-fill"></div>
+                    </div>
+
+                    <div id="content-toc-panel" class="content-toc-panel" hidden>
+                        <div class="content-toc-panel-title">CONTENTS</div>
+                        <div id="content-toc-list" class="content-toc-list"></div>
                     </div>
                 </div>
 

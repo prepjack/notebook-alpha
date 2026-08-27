@@ -1800,6 +1800,52 @@ body.index-directory-resizing .index-directory-workspace {
 .content-heading-label{
     flex:0 0 auto;
 }
+/* =========================================================
+   CONTENT → clickable outline (TOC) toggle. The CONTENT label
+   itself becomes the button; a caret shows open/closed state.
+   Panel is defined further below, right after the sticky
+   header's own rules, so it can rely on the same stacking
+   context (.content-panel-header is its positioned parent).
+   ========================================================= */
+.content-toc-btn{
+    display:inline-flex;
+    align-items:center;
+    gap:5px;
+    background:none;
+    border:none;
+    padding:2px 4px;
+    margin:0 0 0 -4px;
+    border-radius:5px;
+    cursor:pointer;
+    font:inherit;
+    color:inherit;
+}
+.content-toc-btn:hover{
+    background:var(--green-soft);
+}
+.content-toc-btn.active{
+    background:var(--green-soft);
+}
+.content-toc-caret{
+    flex:0 0 auto;
+    transition:transform .15s ease;
+    color:var(--green);
+}
+.content-toc-btn[aria-expanded="true"] .content-toc-caret{
+    transform:rotate(180deg);
+}
+.content-toc-btn.content-toc-empty{
+    cursor:default;
+}
+.content-toc-btn.content-toc-empty:hover{
+    background:none;
+}
+.content-toc-btn.content-toc-empty .content-toc-caret{
+    display:none;
+}
+.content-toc-btn:disabled{
+    opacity:1;
+}
 .read-time-btn{
     position:static;
     margin-left:auto;
@@ -1818,11 +1864,14 @@ body.index-directory-resizing .index-directory-workspace {
     background:var(--green-soft);
 }
 /* =========================================================
-   Content-language toggle (EN / HI / HINGLISH) — content panel
-   only. Hidden by default (id="content-toggle-row" hidden in
-   index.html); app.js unhides it once a topic's .md content is
-   found to contain language markers, and disables whichever
-   button has no matching block for the current topic.
+   Content-language + content-depth toggles — content panel
+   only. Both segmented-control groups sit in ONE row
+   (#content-toggle-row) between the CONTENT label and the
+   Read-time button, right up against the sticky header's
+   bottom edge, with the progress line directly beneath —
+   see the STEP 32 PHASE 2 block below for why the whole
+   header (label + both toggle groups + Read-time + progress
+   line) stays pinned together as one sticky unit.
    ========================================================= */
 .content-toggle-row{
     display:flex;
@@ -1878,6 +1927,57 @@ body.index-directory-resizing .index-directory-workspace {
     width:0%;
     background:var(--green);
     border-radius:2px;
+}
+
+/* =========================================================
+   CONTENT outline (TOC) panel — opens as a "curtain" right
+   under the sticky header (label + toggles + read-time +
+   progress line), overlaying the article beneath it.
+   .content-panel-header is position:sticky, which makes it a
+   positioned ancestor, so top:100% here lines up exactly with
+   the sticky header's own bottom edge — no extra math needed.
+   ========================================================= */
+.content-toc-panel{
+    position:absolute;
+    top:100%;
+    left:0;
+    right:0;
+    max-height:min(60vh, 420px);
+    overflow-y:auto;
+    background:var(--paper);
+    border:1px solid var(--line);
+    border-top:none;
+    border-radius:0 0 8px 8px;
+    box-shadow:0 8px 18px rgba(0,0,0,.12);
+    z-index:29;
+    padding:6px 0 8px;
+}
+.content-toc-panel-title{
+    font:700 10px Arial,sans-serif;
+    letter-spacing:.06em;
+    color:#8a988f;
+    padding:4px 14px 6px;
+}
+.content-toc-list{
+    display:flex;
+    flex-direction:column;
+}
+.content-toc-item{
+    display:block;
+    width:100%;
+    text-align:left;
+    background:none;
+    border:none;
+    padding:7px 14px;
+    font:600 12.5px Arial,sans-serif;
+    color:#354239;
+    cursor:pointer;
+    white-space:normal;
+    line-height:1.35;
+}
+.content-toc-item:hover{
+    background:var(--green-soft);
+    color:var(--green);
 }
 
 /* =========================================================

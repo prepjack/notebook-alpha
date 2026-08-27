@@ -360,136 +360,69 @@ function escapeHtml(value) {
 /* =========================================================
    ALPHA-PLUS — SCROLL POSITION MEMORY
    Keeps reading position per topic/language/depth in memory only.
-   Same combination restores exact scrollTop; language/depth switches
-   restore the same heading index so translated/shorter content does
-   not jump to an unrelated pixel offset.
+   Same combination restores exact scrollTop.
+
+   Language/depth switches restore by matching the NUMBERED POINT
+   (e.g. "1.", "2.", "3." at the start of a heading's text) rather
+   than by raw DOM position/index. Index-based matching broke
+   whenever a variant had a different total heading count (an
+   extra sub-heading in one language, a collapsed section in a
+   shorter depth layer) — the point numbers lined up, but "the
+   5th heading overall" didn't, since h1–h6 were all counted
+   together as one flat list. Matching on the number itself finds
+   the correct point regardless of how many other headings exist
+   around it in that particular variant. Falls back to the old
+   index-based match only for headings with no leading number, and
+   to a proportional scrollTop if nothing matches at all.
    ========================================================= */
 const contentScrollMemory = new Map();
 let pendingScrollRestore = null;
+
+const HEADING_SELECTOR = "#rc-explanation h1, #rc-explanation h2, #rc-explanation h3, #rc-explanation h4, #rc-explanation h5, #rc-explanation h6";
+
+// Reads a leading point-number off a heading's own text, e.g.
+// "1. Human Memory" -> "1", "2) Encoding" -> "2", "3: Types" -> "3".
+// Headings with no such prefix (an unnumbered sub-heading, a plain
+// title) return null and fall back to index-based matching.
+function extractHeadingNumber(headingText) {
+    const match = String(headingText || "").trim().match(/^(\d+)[.):]/);
+    return match ? match[1] : null;
+}
 
 function contentScrollKey(topicId, language, depth) {
     return `${topicId}::${language}::${depth}`;
 }
 
-function contentHeadings() {
-    return [...document.querySelectorAll("#rc-explanation h1, #rc-explanation h2, #rc-explanation h3, #rc-explanation h4, #rc-explanation h5, #rc-explanation h6")];
-}
-
-// This project's headings are authored as "5. Working Memory" /
-// "5. कार्यकारी स्मृति (Working Memory)" / etc. — the leading number
-// stays the same across EN/HI/HINGLISH and across FULL/HALF/MINI even
-// though the wording, and the TOTAL number of headings around it,
-// don't. Matching on this number is far more reliable than matching by
-// array position: if one variant merges, drops, or reorders a heading
-// anywhere else in the document, plain index-matching silently points
-// at the wrong section from then on, and each further switch compounds
-// the same error (this is what "one section further every time you
-// switch" looks like). Matching by this number is immune to that,
-// because it doesn't care how many OTHER headings exist before it.
-// Sub-headings without a leading number (e.g. "Components of Working
-// Memory") return null and fall back to positional-index matching.
-function headingNumberToken(heading) {
-    const text = (heading.textContent || "").trim();
-    const match = text.match(/^(\d+)\s*[.)]/);
-    return match ? match[1] : null;
-}
-
-// Resolves `pending`'s remembered heading against `headings` (the NEW
-// content's heading list). Prefers the number-token match; falls back
-// to the plain array index when the remembered heading had no number
-// (or that number doesn't exist in the new content).
-function resolveHeadingIndex(headings, pending) {
-    if (pending.headingNumber) {
-        const idx = headings.findIndex(h => headingNumberToken(h) === pending.headingNumber);
-        if (idx >= 0) return idx;
-    }
-    return pending.headingIndex;
-}
-
-// The CONTENT header (title + language/depth toggles + read-time button
-// + progress line) is position:sticky and overlaps whatever scrolls
-// underneath it (z-index:30 in style.css). A fixed "24px" guess used to
-// be used here, which is far smaller than the header's real rendered
-// height once the language/depth toggle row is visible — restoring a
-// heading to "24px below the panel top" therefore left it hidden behind
-// the frozen header. Measuring the header's actual height keeps both
-// "which heading counts as current" (capture) and "where to land that
-// heading" (restore) consistent with the real sticky header size.
-function stickyHeaderOffset(host) {
-    const header = host.querySelector(".content-panel-header");
-    const headerHeight = header ? header.getBoundingClientRect().height : 0;
-    return headerHeight + 12; // small breathing room below the header
-}
-
-function currentHeadingIndex(host) {
-    const headings = contentHeadings();
-    const threshold = host.getBoundingClientRect().top + stickyHeaderOffset(host);
+function findVisibleHeadingInfo(host) {
+    const headings = [...document.querySelectorAll(HEADING_SELECTOR)];
     let index = -1;
     let bestTop = -Infinity;
+    const hostTop = host.getBoundingClientRect().top;
 
-    for (let i = 0; i < headings.length; i++) {
-        const top = headings[i].getBoundingClientRect().top;
-        if (top <= threshold && top > bestTop) {
+    headings.forEach((heading, i) => {
+        const top = heading.getBoundingClientRect().top;
+        if (top <= hostTop + 24 && top > bestTop) {
             bestTop = top;
             index = i;
         }
-    }
-    return index;
-}
+    });
 
-// Absolute offset of `el` from the top of `host`'s scrollable content,
-// independent of the current scrollTop (unlike getBoundingClientRect()
-// alone, which is only relative to the current viewport).
-function contentOffsetOf(el, host) {
-    const hostRect = host.getBoundingClientRect();
-    const elRect = el.getBoundingClientRect();
-    return host.scrollTop + (elRect.top - hostRect.top);
-}
-
-// The document offset the user is actually reading at right now: not
-// host.scrollTop itself, but scrollTop + the sticky header's height,
-// since that header visually covers the first stickyHeaderOffset() px
-// of whatever scrollTop points to. currentHeadingIndex() already picks
-// "the heading whose top is at or above this same point" — so the
-// fraction below MUST measure from this point too, or the two
-// calculations disagree about where "here" is by exactly the header's
-// height, biasing every fraction low by a constant amount.
-function currentReadingPoint(host) {
-    return host.scrollTop + stickyHeaderOffset(host);
-}
-
-// How far the user has scrolled INSIDE the current section (between this
-// heading and the next one, or the end of the content if it's the last
-// heading), as a 0..1 fraction. Landing on the section's heading alone
-// (fraction always 0) is what caused restores to feel "close but not
-// quite there" — two languages/depths can render the same heading at
-// very different lengths, so remembering only "which heading" and not
-// "how far into it" loses real precision. This fraction is combined with
-// the matched heading on restore to land at the equivalent depth inside
-// the corresponding section, not just its top.
-function currentSectionFraction(host, headingIndex) {
-    if (headingIndex < 0) return 0;
-    const headings = contentHeadings();
-    const sectionStart = contentOffsetOf(headings[headingIndex], host);
-    const sectionEnd = headings[headingIndex + 1]
-        ? contentOffsetOf(headings[headingIndex + 1], host)
-        : host.scrollHeight;
-    const span = sectionEnd - sectionStart;
-    if (span <= 0) return 0;
-    return Math.min(1, Math.max(0, (currentReadingPoint(host) - sectionStart) / span));
+    return {
+        index,
+        number: index >= 0 ? extractHeadingNumber(headings[index].textContent) : null
+    };
 }
 
 function captureContentScrollPosition() {
     const host = document.getElementById("middle-panel");
     if (!host || !selectedTopicNode) return null;
 
-    const headingIndex = currentHeadingIndex(host);
-    const headings = contentHeadings();
+    const info = findVisibleHeadingInfo(host);
+
     const state = {
         scrollTop: host.scrollTop,
-        headingIndex,
-        headingNumber: headingIndex >= 0 ? headingNumberToken(headings[headingIndex]) : null,
-        sectionFraction: currentSectionFraction(host, headingIndex)
+        headingIndex: info.index,
+        headingNumber: info.number
     };
 
     contentScrollMemory.set(
@@ -503,31 +436,29 @@ function rememberBeforeContentVariantSwitch() {
     captureContentScrollPosition();
     const host = document.getElementById("middle-panel");
     if (!host || !selectedTopicNode) return;
-    const headingIndex = currentHeadingIndex(host);
-    const headings = contentHeadings();
+
+    const info = findVisibleHeadingInfo(host);
     pendingScrollRestore = {
         mode: "semantic",
-        headingIndex,
-        headingNumber: headingIndex >= 0 ? headingNumberToken(headings[headingIndex]) : null,
-        sectionFraction: currentSectionFraction(host, headingIndex),
+        headingIndex: info.index,
+        headingNumber: info.number,
         fallbackScrollTop: host.scrollTop
     };
 }
 
 function prepareTopicScrollRestore(node) {
+    const state = node ? contentScrollMemory.get(contentScrollKey(node.id, "EN", "FULL")) : null;
     // The exact topic/language/depth key is resolved once the new .md file
-    // has been parsed and the language/depth for this topic are known.
-    // Until then, a new topic starts at the top (see restoreContentScrollPosition).
+    // has been parsed. Until then, a new topic starts at the top.
     pendingScrollRestore = { mode: "topic", topicId: node ? node.id : null };
 }
 
-// Applies one restore target to `host`. Split out from
-// restoreContentScrollPosition() so the same target/fraction can be
-// re-applied a second time once async content (images, mermaid
-// diagrams) has finished changing the page's height — see
-// scheduleContentScrollRestore() below for why that second pass exists.
-function applyScrollRestore(pending, host) {
-    if (!pending || !host || !selectedTopicNode) return;
+function restoreContentScrollPosition() {
+    const host = document.getElementById("middle-panel");
+    if (!host || !selectedTopicNode || !pendingScrollRestore) return;
+
+    const pending = pendingScrollRestore;
+    pendingScrollRestore = null;
 
     if (pending.mode === "topic") {
         const target = contentScrollMemory.get(
@@ -537,65 +468,36 @@ function applyScrollRestore(pending, host) {
         return;
     }
 
-    const headings = contentHeadings();
-    const matchedIndex = resolveHeadingIndex(headings, pending);
-    if (matchedIndex >= 0 && headings[matchedIndex]) {
-        const sectionStart = contentOffsetOf(headings[matchedIndex], host);
-        const sectionEnd = headings[matchedIndex + 1]
-            ? contentOffsetOf(headings[matchedIndex + 1], host)
-            : host.scrollHeight;
-        const fraction = pending.sectionFraction || 0;
-        const targetContentOffset = sectionStart + fraction * (sectionEnd - sectionStart);
-        host.scrollTop = Math.max(0, targetContentOffset - stickyHeaderOffset(host));
-    } else {
-        host.scrollTop = Math.min(pending.fallbackScrollTop || 0, Math.max(0, host.scrollHeight - host.clientHeight));
+    const headings = [...document.querySelectorAll(HEADING_SELECTOR)];
+    const hostRect = host.getBoundingClientRect();
+
+    // 1. Preferred: find the SAME point-number in the new content,
+    // wherever it now sits — robust to a different total heading
+    // count between variants.
+    if (pending.headingNumber) {
+        const match = headings.find(h => extractHeadingNumber(h.textContent) === pending.headingNumber);
+        if (match) {
+            const headingRect = match.getBoundingClientRect();
+            host.scrollTop += headingRect.top - hostRect.top - 24;
+            return;
+        }
     }
+
+    // 2. Fall back to the old same-position match — only meaningful
+    // for headings that never carried a number to begin with.
+    if (pending.headingIndex >= 0 && headings[pending.headingIndex]) {
+        const headingRect = headings[pending.headingIndex].getBoundingClientRect();
+        host.scrollTop += headingRect.top - hostRect.top - 24;
+        return;
+    }
+
+    // 3. Last resort: same scrollTop, clamped to the new content's height.
+    host.scrollTop = Math.min(pending.fallbackScrollTop || 0, Math.max(0, host.scrollHeight - host.clientHeight));
 }
 
-function restoreContentScrollPosition() {
-    const host = document.getElementById("middle-panel");
-    if (!host || !selectedTopicNode || !pendingScrollRestore) return null;
-
-    const pending = pendingScrollRestore;
-    pendingScrollRestore = null;
-    applyScrollRestore(pending, host);
-    return pending;
-}
-
-// Resolves once every <img> still loading inside `host` has finished (or
-// failed) loading. Images without an explicit width/height attribute
-// don't have a known layout height until they load, so anything below
-// one in the reading flow (including the heading we're restoring to)
-// can still shift after our first restore pass. A short safety timeout
-// keeps a slow/broken image from blocking restoration indefinitely.
-function waitForImagesSettled(host) {
-    if (!host) return Promise.resolve();
-    const pending = [...host.querySelectorAll("img")].filter(img => !img.complete);
-    if (!pending.length) return Promise.resolve();
-    const loaded = pending.map(img => new Promise(resolve => {
-        img.addEventListener("load", resolve, { once: true });
-        img.addEventListener("error", resolve, { once: true });
-    }));
-    return Promise.race([Promise.all(loaded), new Promise(resolve => setTimeout(resolve, 1500))]);
-}
-
-// `renderDone` is the promise returned by renderRichContent() — it
-// resolves once mermaid diagrams have finished rendering. Combined with
-// waitForImagesSettled(), this covers the two things in this app that
-// change the page's height AFTER the initial synchronous render:
-// diagrams and images. A heading/fraction target computed against the
-// pre-settle layout can land slightly off; re-applying the exact same
-// target once the layout has stopped moving corrects that drift without
-// needing a second, different restoration strategy.
-function scheduleContentScrollRestore(renderDone) {
+function scheduleContentScrollRestore() {
     requestAnimationFrame(() => {
-        const pending = restoreContentScrollPosition();
-        if (!pending || pending.mode !== "semantic") return; // exact topic/lang/depth revisits don't need a settle correction
-
-        const host = document.getElementById("middle-panel");
-        Promise.resolve(renderDone)
-            .then(() => waitForImagesSettled(host))
-            .then(() => requestAnimationFrame(() => applyScrollRestore(pending, host)));
+        restoreContentScrollPosition();
     });
 }
 
@@ -638,6 +540,7 @@ function renderContentLayer() {
     // (possibly new) topic before its content is even in the DOM, so
     // the previous topic's numbers never briefly carry over.
     if (window.ReadingTools) window.ReadingTools.onNewArticle();
+    closeContentTocPanel();
 
     if (activeContentLayer === "core") {
         const c = node.content || {};
@@ -856,6 +759,7 @@ function applyMdTextToContentPanel(rawText, container) {
 
     renderCurrentLanguageBlock(container);
     updateLanguageToggleUI();
+    updateDepthToggleUI();
 }
 
 function languageBlockFor(lang, split) {
@@ -877,10 +781,123 @@ function renderCurrentLanguageBlock(container) {
     const languageText = languageBlockFor(currentContentLanguage, currentLanguageSplit) || currentLanguageSplit.en || "";
     currentDepthSplit = splitLayerByDepth(languageText);
     const text = depthBlockFor(currentContentDepth, currentDepthSplit) || currentDepthSplit.full || "";
-    const renderDone = renderRichContent(text, container);
+    renderRichContent(text, container);
     if (window.ReadingTools) window.ReadingTools.onContentRendered();
-    scheduleContentScrollRestore(renderDone);
+    scheduleContentScrollRestore();
+    scheduleContentTocRebuild();
 }
+
+/* =========================================================
+   CONTENT → outline (TOC) panel. The "CONTENT" label doubles
+   as a toggle button; clicking it opens a curtain-style panel
+   listing every heading currently on screen (indented by
+   level), right under the sticky header. Clicking a heading
+   scrolls #middle-panel to it — same offset math already used
+   by restoreContentScrollPosition() — then closes the panel.
+
+   Rebuilt on every render of the visible content (topic swap,
+   language toggle, depth toggle) so the list never goes stale;
+   any open panel is closed first since its item list is about
+   to change under it.
+   ========================================================= */
+function scheduleContentTocRebuild() {
+    closeContentTocPanel();
+    requestAnimationFrame(buildContentTocList);
+}
+
+function buildContentTocList() {
+    const btn = document.getElementById("content-toc-btn");
+    const listEl = document.getElementById("content-toc-list");
+    if (!btn || !listEl) return;
+
+    const headings = [...document.querySelectorAll(HEADING_SELECTOR)];
+    listEl.innerHTML = "";
+
+    if (!headings.length) {
+        btn.classList.add("content-toc-empty");
+        btn.disabled = true;
+        return;
+    }
+
+    btn.classList.remove("content-toc-empty");
+    btn.disabled = false;
+
+    // Indent relative to the shallowest heading level actually used,
+    // so a file authored only with h2/h3 doesn't look over-indented.
+    const minLevel = Math.min(...headings.map(h => Number(h.tagName[1])));
+
+    headings.forEach((heading, index) => {
+        const level = Number(heading.tagName[1]);
+        const item = document.createElement("button");
+        item.type = "button";
+        item.className = "content-toc-item";
+        item.style.paddingLeft = `${14 + (level - minLevel) * 16}px`;
+        item.textContent = heading.textContent.trim();
+        item.addEventListener("click", () => {
+            closeContentTocPanel();
+            scrollToContentHeading(index);
+        });
+        listEl.appendChild(item);
+    });
+}
+
+function scrollToContentHeading(index) {
+    const host = document.getElementById("middle-panel");
+    const target = document.querySelectorAll(HEADING_SELECTOR)[index];
+    if (!host || !target) return;
+
+    // The sticky header (CONTENT label + toggles + Read-time + progress
+    // line) sits on top of the article and its height varies (toggle
+    // row only shows once a topic has language variants). Offsetting
+    // by a fixed 24px isn't enough — the heading lands underneath the
+    // sticky header instead of just below it. Reading the header's
+    // OWN live height here means the heading always lands clear of it,
+    // whatever it's currently showing.
+    const headerEl = document.querySelector(".content-panel-header");
+    const headerHeight = headerEl ? headerEl.getBoundingClientRect().height : 24;
+
+    const hostRect = host.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    host.scrollTop += targetRect.top - hostRect.top - headerHeight - 14;
+}
+
+function toggleContentTocPanel() {
+    const panel = document.getElementById("content-toc-panel");
+    if (!panel) return;
+    if (panel.hidden) openContentTocPanel(); else closeContentTocPanel();
+}
+
+function openContentTocPanel() {
+    const btn = document.getElementById("content-toc-btn");
+    const panel = document.getElementById("content-toc-panel");
+    if (!btn || !panel || btn.disabled) return;
+    panel.hidden = false;
+    btn.setAttribute("aria-expanded", "true");
+    btn.classList.add("active");
+    document.addEventListener("click", handleContentTocOutsideClick, true);
+}
+
+function closeContentTocPanel() {
+    const btn = document.getElementById("content-toc-btn");
+    const panel = document.getElementById("content-toc-panel");
+    if (!btn || !panel) return;
+    panel.hidden = true;
+    btn.setAttribute("aria-expanded", "false");
+    btn.classList.remove("active");
+    document.removeEventListener("click", handleContentTocOutsideClick, true);
+}
+
+function handleContentTocOutsideClick(e) {
+    const btn = document.getElementById("content-toc-btn");
+    const panel = document.getElementById("content-toc-panel");
+    if (!btn || !panel) return;
+    if (panel.contains(e.target) || btn.contains(e.target)) return;
+    closeContentTocPanel();
+}
+
+document.addEventListener("click", e => {
+    if (e.target.closest("#content-toc-btn")) toggleContentTocPanel();
+});
 
 function switchContentLanguage(lang) {
     if (!currentLanguageSplit) return;
@@ -894,20 +911,7 @@ function switchContentLanguage(lang) {
     const depthKey = selectedTopicNode ? `${selectedTopicNode.id}::${lang}` : null;
     const languageText = languageBlockFor(lang, currentLanguageSplit) || "";
     const depthSplit = splitLayerByDepth(languageText);
-    // A language toggle should cross ONLY the language axis. Scroll
-    // restoration is designed around a single-axis jump (same heading,
-    // same fraction into it); silently also changing depth here — as
-    // this used to always do, via "whatever depth this language was
-    // last read at" — turns a language switch into a compound
-    // language+depth jump whenever that per-language memory doesn't
-    // happen to already match the current depth. That's what made
-    // restoration feel order-dependent: some toggle sequences kept the
-    // depth axis fixed by coincidence, others didn't. Stay on the
-    // CURRENT depth whenever the new language has it authored; only
-    // fall back to this topic's remembered depth for that language (or
-    // FULL) when it genuinely doesn't exist there.
-    const stayOnCurrentDepth = depthBlockFor(currentContentDepth, depthSplit) ? currentContentDepth : null;
-    const preferredDepth = stayOnCurrentDepth || (depthKey && lastDepthPerTopicLanguage.get(depthKey)) || "FULL";
+    const preferredDepth = (depthKey && lastDepthPerTopicLanguage.get(depthKey)) || "FULL";
     currentDepthSplit = depthSplit;
     currentContentDepth = depthBlockFor(preferredDepth, depthSplit) ? preferredDepth : "FULL";
 
@@ -919,6 +923,7 @@ function switchContentLanguage(lang) {
     if (window.ReadingTools) window.ReadingTools.onNewArticle();
     renderCurrentLanguageBlock(container);
     updateLanguageToggleUI();
+    updateDepthToggleUI();
 }
 
 function switchContentDepth(depth) {
@@ -942,6 +947,7 @@ function switchContentDepth(depth) {
     if (window.ReadingTools) window.ReadingTools.onNewArticle();
     renderCurrentLanguageBlock(container);
     updateLanguageToggleUI();
+    updateDepthToggleUI();
 }
 
 function updateLanguageToggleUI() {
@@ -967,21 +973,21 @@ function updateLanguageToggleUI() {
         btn.disabled = !languageBlockFor(lang, currentLanguageSplit);
         btn.classList.toggle("active", lang === currentContentLanguage);
     });
+}
 
-    const depthButtons = {
+function updateDepthToggleUI() {
+    if (!currentDepthSplit) return;
+
+    const buttons = {
         FULL: document.getElementById("depth-toggle-full"),
         HALF: document.getElementById("depth-toggle-half"),
         MINI: document.getElementById("depth-toggle-mini")
     };
 
-    const languageText = languageBlockFor(currentContentLanguage, currentLanguageSplit) || "";
-    const depthSplit = splitLayerByDepth(languageText);
-    currentDepthSplit = depthSplit;
-
-    Object.keys(depthButtons).forEach(depth => {
-        const btn = depthButtons[depth];
+    Object.keys(buttons).forEach(depth => {
+        const btn = buttons[depth];
         if (!btn) return;
-        btn.disabled = !depthBlockFor(depth, depthSplit);
+        btn.disabled = !depthBlockFor(depth, currentDepthSplit);
         btn.classList.toggle("active", depth === currentContentDepth);
     });
 }
@@ -992,6 +998,7 @@ function hideLanguageToggleRow() {
     currentContentDepth = "FULL";
     const row = document.getElementById("content-toggle-row");
     if (row) row.hidden = true;
+    scheduleContentTocRebuild();
 }
 
 document.addEventListener("click", e => {
