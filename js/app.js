@@ -380,6 +380,17 @@ let pendingScrollRestore = null;
 
 const HEADING_SELECTOR = "#rc-explanation h1, #rc-explanation h2, #rc-explanation h3, #rc-explanation h4, #rc-explanation h5, #rc-explanation h6";
 
+// The content-panel-header (CONTENT button + language/depth row + progress
+// line) is position:sticky and stays pinned to the top of #middle-panel's
+// scroll viewport, physically covering that much of the top of the visible
+// area. Any scroll-to-heading math must clear this — a flat magic number
+// under-shoots whenever the row wraps, the language row is hidden, or the
+// page is on the narrower mobile layout — so measure it live instead.
+function getStickyHeaderOffset() {
+    const header = document.querySelector("#middle-panel .content-panel-header");
+    return header ? header.getBoundingClientRect().height : 0;
+}
+
 // Reads a leading point-number off a heading's own text, e.g.
 // "1. Human Memory" -> "1", "2) Encoding" -> "2", "3: Types" -> "3".
 // Headings with no such prefix (an unnumbered sub-heading, a plain
@@ -478,7 +489,7 @@ function restoreContentScrollPosition() {
         const match = headings.find(h => extractHeadingNumber(h.textContent) === pending.headingNumber);
         if (match) {
             const headingRect = match.getBoundingClientRect();
-            host.scrollTop += headingRect.top - hostRect.top - 24;
+            host.scrollTop += headingRect.top - hostRect.top - getStickyHeaderOffset() - 12;
             return;
         }
     }
@@ -487,7 +498,7 @@ function restoreContentScrollPosition() {
     // for headings that never carried a number to begin with.
     if (pending.headingIndex >= 0 && headings[pending.headingIndex]) {
         const headingRect = headings[pending.headingIndex].getBoundingClientRect();
-        host.scrollTop += headingRect.top - hostRect.top - 24;
+        host.scrollTop += headingRect.top - hostRect.top - getStickyHeaderOffset() - 12;
         return;
     }
 
@@ -540,7 +551,6 @@ function renderContentLayer() {
     // (possibly new) topic before its content is even in the DOM, so
     // the previous topic's numbers never briefly carry over.
     if (window.ReadingTools) window.ReadingTools.onNewArticle();
-    closeContentTocPanel();
 
     if (activeContentLayer === "core") {
         const c = node.content || {};
@@ -784,122 +794,149 @@ function renderCurrentLanguageBlock(container) {
     renderRichContent(text, container);
     if (window.ReadingTools) window.ReadingTools.onContentRendered();
     scheduleContentScrollRestore();
-    scheduleContentTocRebuild();
+    buildContentTocPanel();
 }
 
-/* =========================================================
-   CONTENT → outline (TOC) panel. The "CONTENT" label doubles
-   as a toggle button; clicking it opens a curtain-style panel
-   listing every heading currently on screen (indented by
-   level), right under the sticky header. Clicking a heading
-   scrolls #middle-panel to it — same offset math already used
-   by restoreContentScrollPosition() — then closes the panel.
+// Languages that get their own segment (button + depth dropdown) in the
+// content-toggle-row. Each language remembers its own last-used depth via
+// lastDepthPerTopicLanguage, so every segment's dropdown reflects that
+// language's own Full/Half/Mini choice independently of the others.
+const CONTENT_LANGUAGES = ["EN", "HI", "HINGLISH"];
+const LANG_SEGMENT_SUFFIX = { EN: "en", HI: "hi", HINGLISH: "hinglish" };
 
-   Rebuilt on every render of the visible content (topic swap,
-   language toggle, depth toggle) so the list never goes stale;
-   any open panel is closed first since its item list is about
-   to change under it.
-   ========================================================= */
-function scheduleContentTocRebuild() {
-    closeContentTocPanel();
-    requestAnimationFrame(buildContentTocList);
-}
-
-function buildContentTocList() {
-    const btn = document.getElementById("content-toc-btn");
-    const listEl = document.getElementById("content-toc-list");
-    if (!btn || !listEl) return;
-
-    const headings = [...document.querySelectorAll(HEADING_SELECTOR)];
-    listEl.innerHTML = "";
-
-    if (!headings.length) {
-        btn.classList.add("content-toc-empty");
-        btn.disabled = true;
-        return;
+// Picking a depth from a language's own dropdown switches to that language
+// (if not already active) AND applies that depth, in one action.
+function selectLanguageDepth(lang, depth) {
+    if (!currentLanguageSplit) return;
+    if (lang !== currentContentLanguage) {
+        if (!languageBlockFor(lang, currentLanguageSplit)) return;
+        switchContentLanguage(lang, depth);
+    } else {
+        switchContentDepth(depth);
     }
+    closeAllLangDepthDropdowns();
+}
 
-    btn.classList.remove("content-toc-empty");
-    btn.disabled = false;
+function toggleLangDepthDropdown(lang) {
+    const suffix = LANG_SEGMENT_SUFFIX[lang];
+    const list = document.getElementById(`depth-list-${suffix}`);
+    const caret = document.getElementById(`lang-caret-${suffix}`);
+    if (!list || !caret) return;
+    const wasOpen = !list.hidden;
+    closeAllLangDepthDropdowns();
+    if (!wasOpen) {
+        list.hidden = false;
+        caret.setAttribute("aria-expanded", "true");
+    }
+}
 
-    // Indent relative to the shallowest heading level actually used,
-    // so a file authored only with h2/h3 doesn't look over-indented.
-    const minLevel = Math.min(...headings.map(h => Number(h.tagName[1])));
-
-    headings.forEach((heading, index) => {
-        const level = Number(heading.tagName[1]);
-        const item = document.createElement("button");
-        item.type = "button";
-        item.className = "content-toc-item";
-        item.style.paddingLeft = `${14 + (level - minLevel) * 16}px`;
-        item.textContent = heading.textContent.trim();
-        item.addEventListener("click", () => {
-            closeContentTocPanel();
-            scrollToContentHeading(index);
-        });
-        listEl.appendChild(item);
+function closeAllLangDepthDropdowns() {
+    CONTENT_LANGUAGES.forEach(lang => {
+        const suffix = LANG_SEGMENT_SUFFIX[lang];
+        const list = document.getElementById(`depth-list-${suffix}`);
+        const caret = document.getElementById(`lang-caret-${suffix}`);
+        if (list) list.hidden = true;
+        if (caret) caret.setAttribute("aria-expanded", "false");
     });
 }
 
-function scrollToContentHeading(index) {
+document.addEventListener("click", e => {
+    const row = document.getElementById("content-toggle-row");
+    if (row && !row.contains(e.target)) closeAllLangDepthDropdowns();
+
+    const tocBtn = document.getElementById("content-toc-btn");
+    const tocPanel = document.getElementById("content-toc-panel");
+    if (tocPanel && !tocPanel.hidden && tocBtn
+        && !tocBtn.contains(e.target) && !tocPanel.contains(e.target)) {
+        closeContentTocPanel();
+    }
+});
+
+document.addEventListener("keydown", e => {
+    if (e.key === "Escape") {
+        closeAllLangDepthDropdowns();
+        closeContentTocPanel();
+    }
+});
+
+/* =========================================================
+   CONTENT outline (table of contents) panel — lists every
+   heading of the currently rendered variant, indented by
+   level; clicking one scrolls the article to that heading.
+   Rebuilt on every render (topic load, language switch, depth
+   switch) so it always matches what's on screen right now.
+   ========================================================= */
+function buildContentTocPanel() {
+    const btn = document.getElementById("content-toc-btn");
+    const panel = document.getElementById("content-toc-panel");
+    const list = document.getElementById("content-toc-list");
+    if (!btn || !panel || !list) return;
+
+    const headings = [...document.querySelectorAll(HEADING_SELECTOR)]
+        .filter(h => h.textContent.trim());
+
+    list.innerHTML = "";
+
+    if (!headings.length) {
+        btn.disabled = true;
+        btn.classList.add("content-toc-empty");
+        btn.setAttribute("aria-expanded", "false");
+        closeContentTocPanel();
+        return;
+    }
+
+    btn.disabled = false;
+    btn.classList.remove("content-toc-empty");
+
+    headings.forEach(h => {
+        const item = document.createElement("button");
+        item.type = "button";
+        item.className = `content-toc-item content-toc-level-${h.tagName.charAt(1)}`;
+        item.textContent = h.textContent.trim();
+        item.addEventListener("click", () => {
+            closeContentTocPanel();
+            scrollContentToHeading(h);
+        });
+        list.appendChild(item);
+    });
+}
+
+function scrollContentToHeading(headingEl) {
+    // #middle-panel is the actual scrollable element (.panel has
+    // overflow:auto) — same host restoreContentScrollPosition() uses,
+    // NOT #topic-content, which has no scroll of its own.
     const host = document.getElementById("middle-panel");
-    const target = document.querySelectorAll(HEADING_SELECTOR)[index];
-    if (!host || !target) return;
-
-    // The sticky header (CONTENT label + toggles + Read-time + progress
-    // line) sits on top of the article and its height varies (toggle
-    // row only shows once a topic has language variants). Offsetting
-    // by a fixed 24px isn't enough — the heading lands underneath the
-    // sticky header instead of just below it. Reading the header's
-    // OWN live height here means the heading always lands clear of it,
-    // whatever it's currently showing.
-    const headerEl = document.querySelector(".content-panel-header");
-    const headerHeight = headerEl ? headerEl.getBoundingClientRect().height : 24;
-
+    if (!host || !headingEl) return;
     const hostRect = host.getBoundingClientRect();
-    const targetRect = target.getBoundingClientRect();
-    host.scrollTop += targetRect.top - hostRect.top - headerHeight - 14;
+    const headingRect = headingEl.getBoundingClientRect();
+    host.scrollTop += headingRect.top - hostRect.top - getStickyHeaderOffset() - 12;
 }
 
 function toggleContentTocPanel() {
-    const panel = document.getElementById("content-toc-panel");
-    if (!panel) return;
-    if (panel.hidden) openContentTocPanel(); else closeContentTocPanel();
-}
-
-function openContentTocPanel() {
     const btn = document.getElementById("content-toc-btn");
     const panel = document.getElementById("content-toc-panel");
     if (!btn || !panel || btn.disabled) return;
-    panel.hidden = false;
-    btn.setAttribute("aria-expanded", "true");
-    btn.classList.add("active");
-    document.addEventListener("click", handleContentTocOutsideClick, true);
+    if (panel.hidden) {
+        closeAllLangDepthDropdowns();
+        panel.hidden = false;
+        btn.setAttribute("aria-expanded", "true");
+        btn.classList.add("active");
+    } else {
+        closeContentTocPanel();
+    }
 }
 
 function closeContentTocPanel() {
     const btn = document.getElementById("content-toc-btn");
     const panel = document.getElementById("content-toc-panel");
-    if (!btn || !panel) return;
-    panel.hidden = true;
-    btn.setAttribute("aria-expanded", "false");
-    btn.classList.remove("active");
-    document.removeEventListener("click", handleContentTocOutsideClick, true);
+    if (panel) panel.hidden = true;
+    if (btn) {
+        btn.setAttribute("aria-expanded", "false");
+        btn.classList.remove("active");
+    }
 }
 
-function handleContentTocOutsideClick(e) {
-    const btn = document.getElementById("content-toc-btn");
-    const panel = document.getElementById("content-toc-panel");
-    if (!btn || !panel) return;
-    if (panel.contains(e.target) || btn.contains(e.target)) return;
-    closeContentTocPanel();
-}
-
-document.addEventListener("click", e => {
-    if (e.target.closest("#content-toc-btn")) toggleContentTocPanel();
-});
-
-function switchContentLanguage(lang) {
+function switchContentLanguage(lang, forceDepth) {
     if (!currentLanguageSplit) return;
     if (!languageBlockFor(lang, currentLanguageSplit)) return; // not authored for this topic — button should be disabled anyway
     if (lang === currentContentLanguage) return;
@@ -911,9 +948,12 @@ function switchContentLanguage(lang) {
     const depthKey = selectedTopicNode ? `${selectedTopicNode.id}::${lang}` : null;
     const languageText = languageBlockFor(lang, currentLanguageSplit) || "";
     const depthSplit = splitLayerByDepth(languageText);
-    const preferredDepth = (depthKey && lastDepthPerTopicLanguage.get(depthKey)) || "FULL";
+    // A depth picked directly from this language's own dropdown (selectLanguageDepth)
+    // wins over the remembered last-used depth for that language.
+    const preferredDepth = forceDepth || (depthKey && lastDepthPerTopicLanguage.get(depthKey)) || "FULL";
     currentDepthSplit = depthSplit;
     currentContentDepth = depthBlockFor(preferredDepth, depthSplit) ? preferredDepth : "FULL";
+    if (selectedTopicNode && depthKey) lastDepthPerTopicLanguage.set(depthKey, currentContentDepth);
 
     const container = document.getElementById("rc-explanation");
     if (!container) return;
@@ -961,34 +1001,59 @@ function updateLanguageToggleUI() {
 
     row.hidden = false;
 
-    const buttons = {
+    const langButtons = {
         EN: document.getElementById("lang-toggle-en"),
         HI: document.getElementById("lang-toggle-hi"),
         HINGLISH: document.getElementById("lang-toggle-hinglish")
     };
 
-    Object.keys(buttons).forEach(lang => {
-        const btn = buttons[lang];
-        if (!btn) return;
-        btn.disabled = !languageBlockFor(lang, currentLanguageSplit);
-        btn.classList.toggle("active", lang === currentContentLanguage);
+    CONTENT_LANGUAGES.forEach(lang => {
+        const btn = langButtons[lang];
+        const segment = document.getElementById(`lang-segment-${LANG_SEGMENT_SUFFIX[lang]}`);
+        const authored = !!languageBlockFor(lang, currentLanguageSplit);
+        if (btn) {
+            btn.disabled = !authored;
+            btn.classList.toggle("active", lang === currentContentLanguage);
+        }
+        if (segment) segment.classList.toggle("lang-segment-unavailable", !authored);
     });
 }
 
 function updateDepthToggleUI() {
-    if (!currentDepthSplit) return;
+    if (!currentLanguageSplit) return;
 
-    const buttons = {
-        FULL: document.getElementById("depth-toggle-full"),
-        HALF: document.getElementById("depth-toggle-half"),
-        MINI: document.getElementById("depth-toggle-mini")
-    };
+    CONTENT_LANGUAGES.forEach(lang => {
+        const suffix = LANG_SEGMENT_SUFFIX[lang];
+        const languageText = languageBlockFor(lang, currentLanguageSplit) || "";
+        // For the active language reuse the already-computed split; for the
+        // others (whose panel isn't rendered) compute it fresh — cheap, and
+        // needed so each language's own dropdown can disable Full/Half/Mini
+        // options that weren't authored for it.
+        const depthSplit = lang === currentContentLanguage
+            ? currentDepthSplit
+            : splitLayerByDepth(languageText);
+        if (!depthSplit) return;
 
-    Object.keys(buttons).forEach(depth => {
-        const btn = buttons[depth];
-        if (!btn) return;
-        btn.disabled = !depthBlockFor(depth, currentDepthSplit);
-        btn.classList.toggle("active", depth === currentContentDepth);
+        const depthKey = selectedTopicNode ? `${selectedTopicNode.id}::${lang}` : null;
+        const shownDepth = lang === currentContentLanguage
+            ? currentContentDepth
+            : ((depthKey && lastDepthPerTopicLanguage.get(depthKey)) || "FULL");
+
+        const buttons = {
+            FULL: document.getElementById(`depth-toggle-full-${suffix}`),
+            HALF: document.getElementById(`depth-toggle-half-${suffix}`),
+            MINI: document.getElementById(`depth-toggle-mini-${suffix}`)
+        };
+
+        Object.keys(buttons).forEach(depth => {
+            const btn = buttons[depth];
+            if (!btn) return;
+            const disabled = !depthBlockFor(depth, depthSplit);
+            const active = depth === shownDepth;
+            btn.disabled = disabled;
+            btn.classList.toggle("active", active);
+            btn.setAttribute("aria-selected", String(active));
+        });
     });
 }
 
@@ -998,7 +1063,15 @@ function hideLanguageToggleRow() {
     currentContentDepth = "FULL";
     const row = document.getElementById("content-toggle-row");
     if (row) row.hidden = true;
-    scheduleContentTocRebuild();
+    closeAllLangDepthDropdowns();
+    closeContentTocPanel();
+    const tocList = document.getElementById("content-toc-list");
+    if (tocList) tocList.innerHTML = "";
+    const tocBtn = document.getElementById("content-toc-btn");
+    if (tocBtn) {
+        tocBtn.disabled = true;
+        tocBtn.classList.add("content-toc-empty");
+    }
 }
 
 document.addEventListener("click", e => {
@@ -1153,6 +1226,21 @@ MARKER RULES — CRITICAL:
 - Keep the depth blocks in exactly FULL → HALF → MINI order inside every language block.
 - Do NOT create separate files for the languages or depths. Everything must be in ONE .md file.
 
+SECTION NUMBERING FOR TOGGLE SYNC — CRITICAL:
+- Every ## heading in the FULL version must start with a number: "1. Title",
+  "2. Title", "3. Title" ... in strictly increasing order, no gaps.
+- HALF and MINI must REUSE the exact same numbers for the same concept —
+  do not renumber. If you merge two FULL headings (e.g. 2 and 3) into one
+  HALF/MINI heading, keep the SMALLER number only (e.g. "2. Title"); never
+  invent a new number and never skip a number for a merged concept.
+- The same numbering must be IDENTICAL across EN, HI, and HINGLISH — heading
+  number "3" in English must be number "3" in Hindi and Hinglish too, even
+  though the wording is translated.
+- Never reuse one number for two different concepts within the same file.
+- Sub-headings (###) may optionally carry a decimal number like "2.1", "2.2"
+  but this is not required for sync — only the ## numbers matter.
+
+
 DEPTH RULES — CRITICAL:
 
 FULL READ:
@@ -1207,6 +1295,7 @@ material's established Hindi terminology when it is available. Do not turn the
 entire section into Roman-script Hindi.
 
 HINGLISH:
+Don't put Hinglish unless told.
 Write natural spoken Hinglish in Devanagari sentence structure: grammar,
 connectors, and explanations should be in Hindi (Devanagari), while
 subject-specific / technical / English terms remain in English (Roman script).

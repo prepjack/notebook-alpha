@@ -53,9 +53,9 @@
             <section id="middle-panel" class="panel">
                 <div class="content-panel-header">
                     <div class="panel-heading content-panel-heading">
-                        <button type="button" id="content-toc-btn" class="content-heading-label content-toc-btn content-toc-empty"
+                        <button type="button" id="content-toc-btn" class="content-toc-btn content-toc-empty"
                                 aria-expanded="false" aria-controls="content-toc-panel"
-                                title="Show contents list" disabled>
+                                title="Show contents list" onclick="toggleContentTocPanel()" disabled>
                             CONTENT
                             <svg class="content-toc-caret" width="10" height="10" viewBox="0 0 10 10"
                                  xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -64,21 +64,73 @@
                             </svg>
                         </button>
                         <div id="content-toggle-row" class="content-toggle-row" hidden>
-                            <div class="toggle-group" role="group" aria-label="Content language">
-                                <button type="button" id="lang-toggle-en" class="toggle-btn active"
-                                        onclick="switchContentLanguage('EN')">EN</button>
-                                <button type="button" id="lang-toggle-hi" class="toggle-btn"
-                                        onclick="switchContentLanguage('HI')">HI</button>
-                                <button type="button" id="lang-toggle-hinglish" class="toggle-btn"
-                                        onclick="switchContentLanguage('HINGLISH')">HINGLISH</button>
-                            </div>
-                            <div class="toggle-group" role="group" aria-label="Content depth">
-                                <button type="button" id="depth-toggle-full" class="toggle-btn active"
-                                        onclick="switchContentDepth('FULL')">Full Read</button>
-                                <button type="button" id="depth-toggle-half" class="toggle-btn"
-                                        onclick="switchContentDepth('HALF')">Half Read</button>
-                                <button type="button" id="depth-toggle-mini" class="toggle-btn"
-                                        onclick="switchContentDepth('MINI')">Mini Read</button>
+                            <div class="toggle-group lang-toggle-group" role="group" aria-label="Content language and depth">
+                                <div class="lang-segment" id="lang-segment-en">
+                                    <button type="button" id="lang-toggle-en" class="toggle-btn lang-btn active"
+                                            onclick="switchContentLanguage('EN')">EN</button>
+                                    <button type="button" id="lang-caret-en" class="lang-caret-btn"
+                                            title="English reading depth" aria-haspopup="listbox" aria-expanded="false"
+                                            aria-controls="depth-list-en" onclick="toggleLangDepthDropdown('EN')">
+                                        <svg class="lang-caret-icon" width="8" height="8" viewBox="0 0 10 10"
+                                             xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                            <path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.4"
+                                                  fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                                        </svg>
+                                    </button>
+                                    <div id="depth-list-en" class="lang-depth-list" role="listbox"
+                                         aria-label="English reading depth" hidden>
+                                        <button type="button" id="depth-toggle-full-en" class="lang-depth-item"
+                                                role="option" onclick="selectLanguageDepth('EN','FULL')">Full Read</button>
+                                        <button type="button" id="depth-toggle-half-en" class="lang-depth-item"
+                                                role="option" onclick="selectLanguageDepth('EN','HALF')">Half Read</button>
+                                        <button type="button" id="depth-toggle-mini-en" class="lang-depth-item"
+                                                role="option" onclick="selectLanguageDepth('EN','MINI')">Mini Read</button>
+                                    </div>
+                                </div>
+                                <div class="lang-segment" id="lang-segment-hi">
+                                    <button type="button" id="lang-toggle-hi" class="toggle-btn lang-btn"
+                                            onclick="switchContentLanguage('HI')">HI</button>
+                                    <button type="button" id="lang-caret-hi" class="lang-caret-btn"
+                                            title="Hindi reading depth" aria-haspopup="listbox" aria-expanded="false"
+                                            aria-controls="depth-list-hi" onclick="toggleLangDepthDropdown('HI')">
+                                        <svg class="lang-caret-icon" width="8" height="8" viewBox="0 0 10 10"
+                                             xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                            <path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.4"
+                                                  fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                                        </svg>
+                                    </button>
+                                    <div id="depth-list-hi" class="lang-depth-list" role="listbox"
+                                         aria-label="Hindi reading depth" hidden>
+                                        <button type="button" id="depth-toggle-full-hi" class="lang-depth-item"
+                                                role="option" onclick="selectLanguageDepth('HI','FULL')">Full Read</button>
+                                        <button type="button" id="depth-toggle-half-hi" class="lang-depth-item"
+                                                role="option" onclick="selectLanguageDepth('HI','HALF')">Half Read</button>
+                                        <button type="button" id="depth-toggle-mini-hi" class="lang-depth-item"
+                                                role="option" onclick="selectLanguageDepth('HI','MINI')">Mini Read</button>
+                                    </div>
+                                </div>
+                                <div class="lang-segment" id="lang-segment-hinglish">
+                                    <button type="button" id="lang-toggle-hinglish" class="toggle-btn lang-btn"
+                                            onclick="switchContentLanguage('HINGLISH')">HINGLISH</button>
+                                    <button type="button" id="lang-caret-hinglish" class="lang-caret-btn"
+                                            title="Hinglish reading depth" aria-haspopup="listbox" aria-expanded="false"
+                                            aria-controls="depth-list-hinglish" onclick="toggleLangDepthDropdown('HINGLISH')">
+                                        <svg class="lang-caret-icon" width="8" height="8" viewBox="0 0 10 10"
+                                             xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                            <path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.4"
+                                                  fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                                        </svg>
+                                    </button>
+                                    <div id="depth-list-hinglish" class="lang-depth-list" role="listbox"
+                                         aria-label="Hinglish reading depth" hidden>
+                                        <button type="button" id="depth-toggle-full-hinglish" class="lang-depth-item"
+                                                role="option" onclick="selectLanguageDepth('HINGLISH','FULL')">Full Read</button>
+                                        <button type="button" id="depth-toggle-half-hinglish" class="lang-depth-item"
+                                                role="option" onclick="selectLanguageDepth('HINGLISH','HALF')">Half Read</button>
+                                        <button type="button" id="depth-toggle-mini-hinglish" class="lang-depth-item"
+                                                role="option" onclick="selectLanguageDepth('HINGLISH','MINI')">Mini Read</button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         <button type="button" id="read-time-btn" class="read-time-btn">Read time</button>
