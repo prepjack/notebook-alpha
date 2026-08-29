@@ -570,7 +570,7 @@ function renderContentLayer() {
             <div class="content-action-row content-action-row-top">
                 <span class="content-status-tag">${hasContent ? "Content added" : "No content yet"}</span>
                 <button class="content-action" data-action="add-content-link">
-                    🔗 ${mdLink ? "Replace Content Link" : "Add Content Link"}
+                    🔗 ${mdLink ? "Replace Content Folder" : "Add Content Folder"}
                 </button>
                 <button class="content-action" data-action="open-drive-folder">
                     📁 Open Topic Folder
@@ -583,10 +583,8 @@ function renderContentLayer() {
 
             ${!hasContent ? `
                 <div class="empty-content-block">
-                    <p>No content available for this topic. Link a <strong>.md</strong> file
-                       already saved in Google Drive to add rich, formatted content —
-                       Markdown, tables, mermaid diagrams and charts are all supported.</p>
-                    <button class="content-action" data-action="add-content-link">🔗 Add Content Link</button>
+                    <p>No content available for this topic. Create a content package in this topic's Google Drive folder, then link the <strong>folder</strong> here. The folder can contain Markdown, images, Mermaid diagrams, charts and Lottie animations.</p>
+                    <button class="content-action" data-action="add-content-link">🔗 Add Content Folder</button>
                 </div>` : ""}
 
             <div class="topic-section">
@@ -641,6 +639,14 @@ async function loadAndRenderMdFileContent(node, mdLink, container, token) {
 
     if (markdownCache.has(cacheKey)) {
         const cached = markdownCache.get(cacheKey);
+        currentContentDebug = {
+            stage: "CACHE HIT",
+            mdLink,
+            requestUrl: "(no network request — using in-memory cache)",
+            responseKeys: "(cached object)",
+            assetsKeys: Object.keys(cached.assets || {}),
+            assetDataKeys: Object.keys(cached.assetData || {})
+        };
         applyMdTextToContentPanel(cached.text, container, cached.assets, cached.assetData);
         return;
     }
@@ -650,6 +656,14 @@ async function loadAndRenderMdFileContent(node, mdLink, container, token) {
 
     try {
         const url = `${GOOGLE_SHEET_API}?action=get_markdown&ref=${encodeURIComponent(mdLink)}`;
+        currentContentDebug = {
+            stage: "FETCH START",
+            mdLink,
+            requestUrl: url,
+            responseKeys: [],
+            assetsKeys: [],
+            assetDataKeys: []
+        };
         // A normal (non no-cors) fetch, since the JSON response must
         // actually be readable here — unlike the fire-and-forget
         // save_core/save_resource POSTs elsewhere in this file.
@@ -673,6 +687,20 @@ async function loadAndRenderMdFileContent(node, mdLink, container, token) {
             // returns assets: {}, so this is a no-op for the older flow.
             const assets = (data.assets && typeof data.assets === "object") ? data.assets : {};
             const assetData = (data.assetData && typeof data.assetData === "object") ? data.assetData : {};
+            currentContentDebug = {
+                stage: "API RESPONSE OK",
+                mdLink,
+                requestUrl: url,
+                responseKeys: data && typeof data === "object" ? Object.keys(data) : [],
+                assetsKeys: Object.keys(assets),
+                assetDataKeys: Object.keys(assetData),
+                rawOk: !!data.ok
+            };
+            console.log("ALPHA CONTENT DIAGNOSTIC — API response", {
+                mdLink, url, responseKeys: currentContentDebug.responseKeys,
+                assetsKeys: currentContentDebug.assetsKeys,
+                assetDataKeys: currentContentDebug.assetDataKeys, data
+            });
             markdownCache.set(cacheKey, { text, assets, assetData });
 
             if (!text.trim()) {
@@ -747,6 +775,9 @@ let currentContentDepth = "FULL";
 // loadAndRenderMdFileContent(). See richcontent.js resolveAssetRefs().
 let currentContentAssets = {};
 let currentContentAssetData = {};
+// TEMPORARY LOTTIE/API DIAGNOSTIC — traces the exact runtime path from
+// Apps Script response -> extracted maps -> content renderer.
+let currentContentDebug = null;
 
 // Remembers the last language actually shown per topic node id, so
 // revisiting a topic keeps whatever the user was reading; falls back
@@ -779,6 +810,12 @@ function splitLayerByDepth(languageBlockText) {
 function applyMdTextToContentPanel(rawText, container, assets, assetData) {
     currentContentAssets = (assets && typeof assets === "object") ? assets : {};
     currentContentAssetData = (assetData && typeof assetData === "object") ? assetData : {};
+    currentContentDebug = {
+        ...(currentContentDebug || {}),
+        stage: (currentContentDebug && currentContentDebug.stage) || "APPLY CONTENT",
+        applyAssetsKeys: Object.keys(currentContentAssets),
+        applyAssetDataKeys: Object.keys(currentContentAssetData)
+    };
     currentLanguageSplit = splitContentByLanguage(rawText);
 
     const preferred = (selectedTopicNode && lastLanguagePerTopic.get(selectedTopicNode.id)) || "EN";
@@ -814,9 +851,15 @@ function renderCurrentLanguageBlock(container) {
     currentDepthSplit = splitLayerByDepth(languageText);
     const text = depthBlockFor(currentContentDepth, currentDepthSplit) || currentDepthSplit.full || "";
     renderRichContent(text, container, currentContentAssets, currentContentAssetData);
+    renderAlphaContentDiagnostic(container);
     if (window.ReadingTools) window.ReadingTools.onContentRendered();
     scheduleContentScrollRestore();
     buildContentTocPanel();
+}
+
+function renderAlphaContentDiagnostic(container) {
+    // Production: diagnostics intentionally hidden; loading logic remains unchanged.
+    return;
 }
 
 // Languages that get their own segment (button + depth dropdown) in the
@@ -1201,407 +1244,400 @@ function clearMarkdownCacheForNode(nodeId) {
    and no file is uploaded through the browser here.
    ========================================================= */
 
-const CONTENT_LINK_AI_PROMPT = `You are helping me write study notes as a single Markdown (.md) file
-for a Library & Information Science exam-prep website. The file will
-be rendered on the web using marked.js (GitHub-flavored Markdown),
-so please use ONLY the following elements, and nothing else that
-needs special setup:
+const CONTENT_LINK_AI_PROMPT = `You are helping me create a complete study-content package for Notebook Alpha / Project Alpha, an AI-powered exam-preparation website.
 
-- ## / ### headings for structure
-- **bold** and *italic* for emphasis
-- - bullet lists and 1. numbered lists
-- Tables using standard Markdown pipe syntax
-- > blockquotes for "important for exam" callouts
-- Optionally, a mermaid diagram using a \`\`\`mermaid fenced code block
-  (flowchart/graph/mindmap syntax) if a concept has a visual structure
-- Optionally, a chart using a \`\`\`chart fenced code block containing
-  JSON like: {"type":"bar","labels":[...],"data":[...]}
-- Optionally, an image using standard Markdown image syntax:
-  ![Short caption](filename.png)
-- Optionally, a lightweight animation using a \`\`\`lottie fenced code
-  block: {"src":"filename.json","loop":true,"autoplay":true,"height":220}
+The website uses ONE Google Drive FOLDER as a self-contained content package for this topic. I will place your generated Markdown file and every related asset inside that same folder, then link the FOLDER to the website.
 
-SOURCE MATERIAL: I will attach or paste a PDF (or other source
-material) in this same chat. Treat it as the authoritative source for
-everything you write — see SOURCE FIDELITY below.
+SOURCE MATERIAL:
+I will attach or paste a PDF (or other source material) in this same chat. Treat it as authoritative. Follow SOURCE FIDELITY below.
 
-IMAGES & ANIMATIONS — READ CAREFULLY:
-I save your Markdown as a .md file inside a Google Drive FOLDER, and I
-put any images/animations for this topic in that SAME folder. The
-website fetches the whole folder, so an image or animation reference
-only needs to be the PLAIN FILENAME of a file sitting in that folder —
-never a made-up URL, and never a real external URL you don't actually
-have.
-- Only add an ![Caption](filename.ext) or \`\`\`lottie {"src":"filename.json"}
-  reference when a real visual genuinely helps (a labelled diagram, a
-  process animation, a figure from the source PDF) — do not add one for
-  decoration.
-- Prefer a \`\`\`mermaid diagram over an image whenever the visual is
-  structural (a flowchart, hierarchy, mind map, cycle) — you can
-  generate that yourself with no external file needed. Reach for an
-  image/lottie reference only when the visual can't be expressed as a
-  mermaid diagram or chart (e.g. a photo, a scanned figure from the
-  PDF, a labelled illustration, a real animation).
-- When you DO reference an image or animation file, use a short,
-  clear, lowercase-hyphenated filename (e.g. neuron-structure.png,
-  cell-mitosis.json) and list every filename you referenced in a short
-  "Files needed in this folder:" note AFTER the marked-up content (see
-  OUTPUT HYGIENE — that note is the one allowed exception to "Markdown
-  only", since it's an instruction to me, not part of the file).
-- Do not invent a filename for a figure that appears in the source PDF
-  unless you're confident I can extract/recreate that exact image —
-  when in doubt, describe the figure in words or redraw it as a
-  \`\`\`mermaid diagram instead.
-
-Full hierarchy path of this topic on the website:
+TOPIC CONTEXT:
+Full hierarchy path:
 <PUT HIERARCHY PATH HERE>
 
-Topic: <PUT TOPIC NAME HERE>
+Topic:
+<PUT TOPIC NAME HERE>
 
-Using the hierarchy path above, calibrate the depth and scope of the
-notes to where this topic sits in the syllabus — a broad Unit-level
-topic needs wider coverage, while a narrow Subtopic needs sharper,
-more specific detail. Write clear, exam-oriented notes on this exact
-topic: a definition, a clear explanation, one worked example if
-relevant, and key points to remember. Keep headings consistent (##
-for major sections, ### for sub-sections) and stay strictly within the
-scope of this one topic — do not repeat content that belongs to
-sibling or parent topics named in the hierarchy above. Do not use any
-HTML tags, only Markdown.
+====================================================
+CONTENT PACKAGE ARCHITECTURE — CRITICAL
+====================================================
+Create content intended for one self-contained folder:
 
-IMPORTANT — the website has TWO independent controls for this file:
+Topic Folder/
+├── content.md
+├── image-1.png                 (only if genuinely useful)
+├── diagram-1.png               (only if genuinely useful)
+├── animation-1.json            (only if genuinely useful)
+└── other supported assets
+
+The main Markdown file may have any filename ending in .md. All referenced assets must be placed in the SAME folder.
+
+Use only relative plain filenames for local assets.
+
+Correct image reference:
+![Information Lifecycle](information-lifecycle.png)
+
+Correct Lottie block:
+\`\`\`lottie
+{
+  "src": "study-process.json",
+  "autoplay": true,
+  "loop": true,
+  "height": 220
+}
+\`\`\`
+
+Incorrect Lottie syntax:
+\`\`\`lottie
+study-process.json
+\`\`\`
+
+Do NOT use made-up external URLs or Google Drive URLs inside the Markdown.
+Every filename referenced in Markdown must exactly match a real asset filename in the same folder.
+
+====================================================
+MARKDOWN + VISUAL SUPPORT
+====================================================
+The file is rendered using marked.js (GitHub-flavored Markdown). Use:
+
+- ## / ### headings
+- **bold** and *italic*
+- bullet lists and numbered lists
+- standard Markdown tables
+- > blockquotes for important exam callouts
+- Mermaid diagrams
+- Chart blocks
+- Markdown images
+- Lottie animations using the exact JSON configuration format above
+
+MERMAID:
+Use \`\`\`mermaid fenced blocks for processes, hierarchies, cycles, relationships, flowcharts, or mind maps when they genuinely improve understanding.
+
+CHART:
+Use \`\`\`chart blocks only when numerical/comparative visualization is useful. Example:
+\`\`\`chart
+{"type":"bar","labels":["Primary","Secondary"],"data":[40,35]}
+\`\`\`
+
+IMAGES:
+Use images only when they genuinely improve learning. Prefer Mermaid for structural diagrams that can be expressed directly in Markdown. Use simple lowercase-hyphenated filenames such as information-lifecycle.png.
+
+LOTTIE:
+Use a Lottie animation only when motion genuinely adds learning value. The .json animation file must be in the same folder and the Markdown block MUST contain a valid JSON configuration object with a "src" filename, as shown above.
+
+Do not add visuals merely for decoration.
+
+====================================================
+SCOPE AND EDUCATIONAL QUALITY
+====================================================
+Using the hierarchy above, calibrate depth and scope to this exact topic. Stay within this topic's boundaries and avoid repeating content that belongs primarily to sibling or parent topics.
+
+Create clear, serious, exam-oriented notes. Where relevant include:
+- definitions
+- core concepts
+- explanations and relationships
+- classifications/components/processes
+- examples
+- comparisons and tables
+- important facts and exam-oriented points
+- memory aids or recall cues where genuinely useful
+- quick revision points and concise summary where appropriate
+
+Do not use generic filler, excessive motivational language, decorative sections, or unnecessary repetition.
+Do not use HTML.
+
+====================================================
+LANGUAGE + DEPTH ARCHITECTURE — CRITICAL
+====================================================
+The website has TWO independent controls:
 1. Language: EN / HI / HINGLISH
 2. Content depth: Full Read / Half Read / Mini Read
 
-Therefore, generate THREE depth versions for EACH language. The
-language is the outer layer and the depth is nested inside it. The
-final file MUST follow this exact overall structure and marker order:
+Therefore generate THREE depth versions for EACH language in ONE .md file, using this exact marker order:
 
 <!-- ===LANG:EN=== -->
 <!-- ===DEPTH:FULL=== -->
-...complete English Full Read notes...
+...English Full Read...
 <!-- ===DEPTH:HALF=== -->
-...English Half Read notes...
+...English Half Read...
 <!-- ===DEPTH:MINI=== -->
-...English Mini Read notes...
+...English Mini Read...
 
 <!-- ===LANG:HI=== -->
 <!-- ===DEPTH:FULL=== -->
-...complete Hindi Full Read notes...
+...Hindi Full Read...
 <!-- ===DEPTH:HALF=== -->
-...Hindi Half Read notes...
+...Hindi Half Read...
 <!-- ===DEPTH:MINI=== -->
-...Hindi Mini Read notes...
+...Hindi Mini Read...
 
 <!-- ===LANG:HINGLISH=== -->
 <!-- ===DEPTH:FULL=== -->
-...complete Hinglish Full Read notes...
+...Hinglish Full Read...
 <!-- ===DEPTH:HALF=== -->
-...Hinglish Half Read notes...
+...Hinglish Half Read...
 <!-- ===DEPTH:MINI=== -->
-...Hinglish Mini Read notes...
+...Hinglish Mini Read...
 
-MARKER RULES — CRITICAL:
-- Copy every marker EXACTLY as shown above.
+MARKER RULES:
+- Copy every marker exactly.
 - Every marker must be alone on its own line.
-- Do not add spaces, punctuation, Markdown fences, headings, or other text on marker lines.
+- Do not add spaces, punctuation, headings, or fences on marker lines.
 - Do not omit any of the nine depth sections.
-- Keep the language blocks in exactly EN → HI → HINGLISH order.
-- Keep the depth blocks in exactly FULL → HALF → MINI order inside every language block.
-- Do NOT create separate files for the languages or depths. Everything must be in ONE .md file.
+- Keep language order EN → HI → HINGLISH.
+- Keep depth order FULL → HALF → MINI inside every language.
+- Do not create separate files for languages or depths.
 
 SECTION NUMBERING FOR TOGGLE SYNC — CRITICAL:
-- Every ## heading in the FULL version must start with a number: "1. Title",
-  "2. Title", "3. Title" ... in strictly increasing order, no gaps.
-- HALF and MINI must REUSE the exact same numbers for the same concept —
-  do not renumber. If you merge two FULL headings (e.g. 2 and 3) into one
-  HALF/MINI heading, keep the SMALLER number only (e.g. "2. Title"); never
-  invent a new number and never skip a number for a merged concept.
-- The same numbering must be IDENTICAL across EN, HI, and HINGLISH — heading
-  number "3" in English must be number "3" in Hindi and Hinglish too, even
-  though the wording is translated.
-- Never reuse one number for two different concepts within the same file.
-- Sub-headings (###) may optionally carry a decimal number like "2.1", "2.2"
-  but this is not required for sync — only the ## numbers matter.
+- Every ## heading in FULL must start with a strictly increasing major number: "1. Title", "2. Title", "3. Title".
+- HALF and MINI must reuse the same numbers for the same concepts; do not independently renumber.
+- If concepts are merged, keep the smaller original number.
+- Numbering must be identical concept-for-concept across EN, HI, and HINGLISH.
+- Never reuse one number for two different concepts.
+- ### headings may optionally use decimals such as 2.1, 2.2.
 
-
-DEPTH RULES — CRITICAL:
+DEPTH RULES:
 
 FULL READ:
-- This is the authoritative, most complete version.
-- Preserve the source material's important structure, sequence, terminology,
-  definitions, examples, classifications, relationships, and exam-relevant detail.
-- Match the source material's heading order as closely as possible.
-- Explain concepts clearly rather than merely listing keywords.
-- Include useful analogies, cross-links, "why it matters", and exam-oriented
-  clarification where they genuinely improve understanding, without inventing
-  facts not supported by the source.
-- Use the normal reading length appropriate to the topic and source material.
+- Most complete and authoritative version.
+- Preserve important source structure, sequence, terminology, definitions, examples, classifications, relationships, and exam-relevant detail.
+- Explain concepts clearly rather than listing keywords.
+- Add useful clarification, analogies, cross-links, or "why it matters" notes only when genuinely helpful and not factually invented.
 
 HALF READ:
-- Keep the SAME major heading order and overall conceptual coverage as FULL.
-- Make it substantially shorter — roughly half the reading time of FULL.
-- Compress repetition and secondary detail, but retain definitions, core concepts,
-  important classifications, relationships, key examples, and exam-relevant facts.
-- Enrich concise explanations with an analogy, cross-link, or "why it matters"
-  note when useful.
-- It must remain understandable on its own; do not say "see Full Read" or refer
-  to omitted sections.
+- Keep the same major heading order and conceptual coverage as FULL.
+- Roughly half the reading time of FULL.
+- Compress repetition and secondary detail while retaining definitions, core concepts, classifications, relationships, key examples, and exam-relevant facts.
+- Must stand alone; never say "see Full Read".
 
 MINI READ:
-- This is the fastest revision version.
-- Keep the SAME major heading order as FULL, but reduce each heading to its
-  essential recall points.
-- Prefer key terms, short definitions, one-line explanations, comparisons,
-  formulas/rules where relevant, and one-line recall cues.
-- Aim for roughly half the reading time of HALF (and therefore much shorter than FULL).
-- Optionally include a small mermaid mind-map when it genuinely improves recall.
-- It must also stand alone; do not say "see Full Read" or "see Half Read".
+- Fastest revision version.
+- Keep the same major heading order and numbering as FULL.
+- Reduce each section to essential recall points, short definitions, one-line explanations, comparisons, rules/formulas where relevant, and recall cues.
+- Roughly half the reading time of HALF.
+- Must stand alone; never say "see Full Read" or "see Half Read".
 
-IMPORTANT — all three depth versions must be derived from the SAME source
-material and must remain factually consistent with each other. Do not introduce
-new facts in Half or Mini that are absent from Full/source material. Do not simply
-truncate the Full version: deliberately rewrite each depth for its intended reading
-purpose while preserving the same core meaning and heading sequence.
+All depths must remain factually consistent. Do not introduce facts in HALF or MINI that are absent from FULL/source material.
 
-LANGUAGE INSTRUCTIONS:
-
+====================================================
+LANGUAGE INSTRUCTIONS
+====================================================
 EN:
-Write natural, clear English suitable for exam preparation. Preserve important
-technical terms and standard terminology from the source.
+Write natural, clear English suitable for exam preparation. Preserve important technical and standard terminology.
 
 HI:
-Write fully in Hindi using Devanagari script. Pay special attention to the correct
-Hindi terminology used for difficult/important English terms. When a technical or
-academic English term is important or difficult, write the English term alongside
-its Hindi equivalent, e.g. "सूचना संगठन (Information Organization)". Use the source
-material's established Hindi terminology when it is available. Do not turn the
-entire section into Roman-script Hindi.
+Write fully in Hindi using Devanagari script. For important or difficult technical/academic terms, include the English term alongside the correct Hindi equivalent where useful, e.g. "सूचना संगठन (Information Organization)". Prefer terminology established in the source when available. Do not turn the section into Roman-script Hindi.
 
 HINGLISH:
-Don't put Hinglish unless told.
-Write natural spoken Hinglish in Devanagari sentence structure: grammar,
-connectors, and explanations should be in Hindi (Devanagari), while
-subject-specific / technical / English terms remain in English (Roman script).
-Do NOT write the whole section in Roman-script Hindi and do NOT translate every
-technical term into Hindi.
+Write natural spoken Hinglish using Devanagari sentence structure for Hindi grammar/connectors while keeping subject-specific and technical English terms in Roman script. Do not write the whole section in Roman-script Hindi and do not mechanically translate every technical term.
 Example style:
-"Mental Processes का मतलब है कि हमारा दिमाग कैसे काम करता है — जैसे Thinking,
-Learning और Remembering जैसी चीज़ें इसमें आती हैं।"
+"Mental Processes का मतलब है कि हमारा दिमाग कैसे काम करता है — जैसे Thinking, Learning और Remembering जैसी चीज़ें इसमें आती हैं।"
 
-IMPORTANT — maintain the SAME underlying content, heading order, examples,
-classifications, and depth relationship across EN, HI, and HINGLISH. Only the
-language/style should change.
+Maintain the SAME underlying content, heading order, examples, classifications, numbering, and depth relationship across EN, HI, and HINGLISH. Only language/style should change.
 
-SOURCE FIDELITY:
+====================================================
+SOURCE FIDELITY
+====================================================
 - Treat the uploaded/original source material as authoritative.
-- Do not invent facts, examples, dates, classifications, quotations, or references
-  that are not supported by the source unless clearly labelled as a simple explanatory
-  analogy.
-- Preserve important source terminology, names, numbers, headings, and ordering.
-- If the source contains a figure/table/diagram whose information matters, represent
-  its information faithfully in Markdown where possible.
-- Do not silently replace the source's terminology with unrelated general-knowledge
-  terminology.
+- Do not invent facts, dates, classifications, quotations, references, or source claims.
+- Preserve important terminology, names, numbers, headings, and ordering.
+- If a figure/table/diagram contains important information, represent it faithfully in Markdown, Mermaid, a chart, or a clearly specified asset where possible.
+- Do not silently replace source terminology with unrelated general-knowledge terminology.
+- Any explanatory analogy must be clearly educational and must not be presented as a source fact.
 
-OUTPUT HYGIENE:
-- Return ONLY the Markdown file content, not an explanation of what you did.
-- Do not wrap the entire answer in a \`\`\`markdown code fence.
-- Do not add a preface, conclusion, commentary, or "Here is your file" message outside
-  the requested language/depth blocks.
-- The marker lines are structural metadata for the website parser, so they must remain
-  exactly intact.
-- The ONE exception: if (and only if) you referenced any image/lottie filenames, end
-  your reply with a short plain list titled "Files needed in this folder:" naming
-  every filename you referenced and, in a few words, what each should contain. This
-  list is an instruction to me, not part of the .md file — don't put it inside any
-  language/depth block.
+====================================================
+FINAL OUTPUT RULES
+====================================================
+- Return ONLY the Markdown content for the main .md file.
+- Do not wrap the entire answer in a \`\`\`markdown fence.
+- Do not add a preface, commentary, or "Here is your file" text.
+- Keep the marker lines exactly intact.
+- If you reference external assets by filename, after all Markdown content add a short plain section titled exactly:
 
----
-FILE NAMING INSTRUCTION (for you, the human — not for the AI tool):
-Once the AI above has generated the notes, save the file to your
-Google Drive using EXACTLY this file name. This keeps every topic's
-file uniquely and predictably named, matching this exact spot in the
-website's hierarchy, so nothing ever gets mixed up or overwritten:
+Files needed in this folder:
 
-<PUT SUGGESTED FILENAME HERE>
+List every required filename and what it should contain. This list is an instruction for assembling the folder and is NOT part of any language/depth block.
 
-If the AI referenced any image/lottie filenames above, instead create a
-FOLDER with that same name (drop the .md), put the .md file inside it
-(any name ending in .md works — content.md is a good default), then add
-each referenced image/animation file into that same folder using the
-exact filenames the AI listed.
+Before finishing, verify:
+- all 9 language/depth blocks exist
+- marker order is exact
+- section numbering sync is preserved
+- Markdown references are valid
+- Mermaid syntax is valid
+- chart JSON is valid
+- every image filename is consistent
+- every Lottie block contains valid JSON configuration, not a bare filename
+- every referenced asset filename is listed in "Files needed in this folder:"
+- no unnecessary external URLs are used
 
-Then set that file's — or that whole folder's — sharing to "Anyone
-with the link can view", copy its share link, and paste that link into
-the "Add Content Link" box on the website for this topic.`;
-
-// Maps each node_type to the short label used inside the generated
-// Google-Drive file name (Sub / Course / Unit / Chapter / Topic / Subtopic).
-const NODE_TYPE_FILE_LABELS = {
-    subject: "Sub",
-    course: "Course",
-    unit: "Unit",
-    chapter: "Chapter",
-    topic: "Topic",
-    subtopic: "Subtopic"
-};
-
-// Full ancestor chain (Subject -> ... -> this node), reusing the same
-// tree-walk already used elsewhere (selectNodeById, Index search).
-function getTopicAncestorPath(node) {
-    return findPathToNode(window.__studyData?.subjects || [], node.id) || [node];
-}
-
-// Human-readable breadcrumb for the prompt's context section, e.g.
-// "LIS → ePG → P-01 Knowledge Society(17) → M-02 Data, Information, and Knowledge → Information"
-function buildTopicBreadcrumb(node) {
-    return getTopicAncestorPath(node).map(n => n.title).join(" → ");
-}
-
-// Deterministic, hierarchy-based Drive file name, e.g.
-// "Sub_LIS_Course_ePG_Unit_P-01-Knowledge-Society(17)_Chapter_M-02-Data,-Information,-and-Knowledge_Topic_Information.md"
-// Spaces inside each title become hyphens; everything else (commas,
-// parentheses, numbers) is kept exactly as it is in the Nodes sheet.
-function buildTopicFileName(node) {
-    const parts = getTopicAncestorPath(node).map(n => {
-        const label = NODE_TYPE_FILE_LABELS[n.type] ||
-            (n.type ? n.type.charAt(0).toUpperCase() + n.type.slice(1) : "Node");
-        const safeTitle = String(n.title || "").trim().replace(/\s+/g, "-");
-        return `${label}_${safeTitle}`;
-    });
-    return parts.join("_") + ".md";
-}
+Create the complete Notebook Alpha study-content package for the topic and source material provided.`;
 
 function openAddContentLink() {
     if (!selectedTopicNode) return;
     document.getElementById("add-content-link-modal")?.remove();
 
     const existingLink = String((selectedTopicNode.content || {}).md_file || "");
-    const suggestedFileName = buildTopicFileName(selectedTopicNode);
 
     const modal = document.createElement("div");
     modal.id = "add-content-link-modal";
     modal.innerHTML = `
         <div class="add-resource-overlay">
-            <div class="add-resource-modal">
+            <div class="add-resource-modal content-link-modal-clean">
                 <button type="button" class="modal-close" onclick="closeAddContentLink()">×</button>
-                <h2>🔗 Add Content Link</h2>
+                <h2>🔗 Add Content Folder</h2>
                 <p class="add-resource-scope">Adding to: <strong>${escapeHtml(selectedTopicNode.title)}</strong></p>
 
-                <label>Google Drive link — a single .md file, OR a folder containing
-                    your .md file plus its images/animations</label>
+                <div class="content-folder-steps">
+                    <div class="content-folder-step"><span>1</span><div><strong>Copy the AI prompt</strong><small>Generate the Markdown and any images/animations needed for this topic.</small></div></div>
+                    <div class="content-folder-step"><span>2</span><div><strong>Open this topic's Google Drive folder</strong><small>Upload the generated <code>.md</code> file and all referenced assets into that same folder.</small></div></div>
+                    <div class="content-folder-step"><span>3</span><div><strong>Share the folder and paste its link below</strong><small>Set the folder to <strong>Anyone with the link can view</strong>.</small></div></div>
+                </div>
+
+                <div class="content-action-row content-folder-tools">
+                    <button type="button" class="content-action primary" onclick="copyContentLinkAiPrompt()">📋 Copy AI Prompt</button>
+                    <button type="button" class="content-action" onclick="openTopicDriveFolder()">📁 Open Topic Folder</button>
+                </div>
+
+                <label for="content-link-url">Google Drive folder link</label>
                 <input id="content-link-url" type="url" value="${escapeHtml(existingLink)}"
-                       placeholder="https://drive.google.com/file/d/.../view  or  .../drive/folders/...">
-                <p class="drive-note">The file (or the whole folder, for the folder option)
-                    must be shared as <strong>"Anyone with the link can view"</strong>, or the
-                    website won't be able to read it.</p>
+                       placeholder="https://drive.google.com/drive/folders/...">
+                <p class="drive-note"><strong>Paste the topic folder link here — not the individual .md file link.</strong><br>
+                    The folder should contain one <code>.md</code> file plus any images, Lottie <code>.json</code> files, or other assets referenced by that Markdown.</p>
 
                 <details class="content-link-guide">
-                    <summary>Formatting guide</summary>
-                    <pre class="content-link-guide-body">## Heading                -&gt; section heading
-**bold**  *italic*        -&gt; bold / italic text
-- point one               -&gt; bullet list
-- point two
-1. step one                -&gt; numbered list
-2. step two
+                    <summary>Supported content formats</summary>
+                    <pre class="content-link-guide-body">## Heading
+**bold**  *italic*
+- bullet point
+1. numbered step
 
-| Term | Meaning |         -&gt; a real HTML table
+| Term | Meaning |
 |------|---------|
-| RAM  | Volatile memory |
-| ROM  | Non-volatile    |
+| RAM  | Volatile |
 
-&gt; Important exam note      -&gt; highlighted quote/callout box
+> Important exam note
 
 \`\`\`mermaid
-graph TD
-A[Information Society] --&gt; B[Digital Divide]
+flowchart TD
+A[Concept] --> B[Explanation]
 \`\`\`
--&gt; mind maps / flowcharts (mermaid.js syntax)
 
 \`\`\`chart
-{"type":"bar","labels":["Primary","Secondary"],"data":[40,35]}
+{"type":"bar","labels":["A","B"],"data":[40,60]}
 \`\`\`
--&gt; bar / line / pie / doughnut charts (Chart.js JSON spec)
 
-![Neuron structure](neuron.png)
--&gt; a captioned, click-to-enlarge image — the alt text becomes the
-   caption. Works with a full URL, OR (if you link a FOLDER above,
-   not a single file) just the plain filename of an image sitting
-   in that same folder.
+![Caption](image-file.png)
 
 \`\`\`lottie
-{"src":"mitosis.json","loop":true,"autoplay":true,"height":220}
+{"src":"animation-file.json","autoplay":true,"loop":true,"height":220}
 \`\`\`
--&gt; a lightweight vector animation (lottie-web). "src" works the
-   same way as the image filename above: a full URL, or a plain
-   filename from the linked folder.</pre>
+
+All local filenames above must exist in the same linked folder.</pre>
                 </details>
 
-                <div class="content-action-row">
-                    <button type="button" class="content-action" onclick="copyContentLinkAiPrompt()">📋 Copy AI Prompt</button>
-                </div>
-
-                <label>Suggested name (save your .md file — or your whole folder,
-                    for the folder option — with this exact name)</label>
-                <div class="content-action-row">
-                    <input id="suggested-filename-box" type="text" readonly
-                           value="${escapeHtml(suggestedFileName)}"
-                           onclick="this.select()">
-                    <button type="button" class="content-action" onclick="copySuggestedFileName()">📋 Copy Name</button>
-                </div>
-                <p class="drive-note">This name is unique to this topic's exact place in the
-                    hierarchy (Subject/Course/Unit/Chapter/Topic), so it never clashes with
-                    another topic's file. Using a folder instead of a single file? Name the
-                    folder the same way (drop the <code>.md</code>), and put a .md file — named
-                    <code>content.md</code>, <code>index.md</code>, or anything ending in
-                    <code>.md</code> — plus your images/animations inside it.</p>
-
-                <button class="resource-submit-btn" type="button" onclick="submitContentLink()">Save Link</button>
+                <button class="resource-submit-btn" type="button" onclick="submitContentLink()">Save Folder Link</button>
             </div>
         </div>`;
     document.body.appendChild(modal);
-}
-
-function copySuggestedFileName() {
-    const box = document.getElementById("suggested-filename-box");
-    if (!box) return;
-
-    const fileName = box.value;
-    const done = () => alert("File name copied! Use this exact name when saving the .md file to Google Drive.");
-    const manual = () => {
-        box.select();
-        alert("Could not copy automatically — the name is now selected, press Ctrl+C / Cmd+C to copy it.");
-    };
-
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(fileName).then(done).catch(manual);
-    } else {
-        manual();
-    }
 }
 
 function closeAddContentLink() {
     document.getElementById("add-content-link-modal")?.remove();
 }
 
+// Build the exact hierarchy path for the selected node.
+// This intentionally uses the actual loaded tree, so the AI prompt always
+// receives the same Subject → Course → Unit → Chapter → Topic context that
+// the user is currently working inside.
+function buildTopicBreadcrumb(node) {
+    if (!node) return "";
+
+    const path = findPathToNode(
+        window.__studyData?.subjects || [],
+        node.id
+    );
+
+    if (path && path.length) {
+        return path.map(item => item.title).filter(Boolean).join(" → ");
+    }
+
+    // Safe fallback for partially loaded/local data.
+    const chain = [];
+    let current = node;
+    const seen = new Set();
+
+    while (current && !seen.has(current.id)) {
+        chain.unshift(current.title || "");
+        seen.add(current.id);
+        current = current.parentId
+            ? findNodeById(window.__studyData?.subjects || [], current.parentId)
+            : null;
+    }
+
+    return chain.filter(Boolean).join(" → ") || (node.title || "");
+}
+
 function copyContentLinkAiPrompt() {
-    if (!selectedTopicNode) return;
+    if (!selectedTopicNode) {
+        alert("Please select a topic before copying the AI prompt.");
+        return;
+    }
 
     const topicTitle = selectedTopicNode.title || "<PUT TOPIC NAME HERE>";
     const breadcrumb = buildTopicBreadcrumb(selectedTopicNode);
-    const fileName = buildTopicFileName(selectedTopicNode);
-
     const prompt = CONTENT_LINK_AI_PROMPT
         .replace("<PUT HIERARCHY PATH HERE>", breadcrumb)
-        .replace("<PUT TOPIC NAME HERE>", topicTitle)
-        .replace("<PUT SUGGESTED FILENAME HERE>", fileName);
+        .replace("<PUT TOPIC NAME HERE>", topicTitle);
 
-    const done = () => alert("Prompt copied! Paste it into ChatGPT, Claude, Gemini, or any AI tool, then attach/paste the source PDF (or other material) in the same message.");
-    const manual = () => alert("Could not copy automatically — please copy this prompt manually:\n\n" + prompt);
+    const button = document.querySelector(
+        "#add-content-link-modal button[onclick='copyContentLinkAiPrompt()']"
+    );
+    const originalLabel = button?.innerHTML || "📋 Copy AI Prompt";
 
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(prompt).then(done).catch(() => fallbackCopyText(prompt, done, manual));
+    const done = () => {
+        if (button) {
+            button.innerHTML = "✓ Prompt Copied";
+            button.disabled = true;
+            setTimeout(() => {
+                if (button && document.body.contains(button)) {
+                    button.innerHTML = originalLabel;
+                    button.disabled = false;
+                }
+            }, 1800);
+        }
+
+        alert("Prompt copied! Paste it into ChatGPT, Claude, Gemini, or any AI tool, then attach or paste the source PDF (or other material) in the same message.");
+    };
+
+    const manual = () => {
+        // Last-resort manual fallback: open a selectable prompt instead of
+        // silently failing on browsers that block clipboard access.
+        const modal = document.createElement("textarea");
+        modal.value = prompt;
+        modal.style.cssText = [
+            "position:fixed",
+            "inset:8%",
+            "width:84%",
+            "height:70%",
+            "z-index:99999",
+            "padding:16px",
+            "font-family:monospace",
+            "font-size:13px",
+            "background:#fff",
+            "border:2px solid #2f5b52",
+            "border-radius:10px"
+        ].join(";");
+        document.body.appendChild(modal);
+        modal.focus();
+        modal.select();
+        alert("Automatic clipboard access was blocked. The full prompt is selected in the text box — press Ctrl+C (or Cmd+C) to copy it, then close the box.");
+        modal.addEventListener("blur", () => setTimeout(() => modal.remove(), 300));
+    };
+
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(prompt)
+            .then(done)
+            .catch(() => fallbackCopyText(prompt, done, manual));
     } else {
         fallbackCopyText(prompt, done, manual);
     }
@@ -1610,22 +1646,31 @@ function copyContentLinkAiPrompt() {
 function fallbackCopyText(text, onSuccess, onFailure) {
     const ta = document.createElement("textarea");
     ta.value = text;
+    ta.setAttribute("readonly", "");
     ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    ta.style.top = "0";
     ta.style.opacity = "0";
     document.body.appendChild(ta);
+
+    ta.focus();
     ta.select();
+    ta.setSelectionRange(0, ta.value.length);
+
     try {
-        document.execCommand("copy");
-        onSuccess();
+        const copied = document.execCommand("copy");
+        if (copied) onSuccess();
+        else onFailure();
     } catch (error) {
         onFailure();
+    } finally {
+        ta.remove();
     }
-    ta.remove();
 }
 
 async function submitContentLink() {
     const url = document.getElementById("content-link-url")?.value.trim();
-    if (!url) { alert("Please paste a Google Drive link to the .md file or folder."); return; }
+    if (!url) { alert("Please paste the Google Drive folder link containing this topic's content package."); return; }
     if (!selectedTopicNode) return;
 
     const submitBtn = document.querySelector("#add-content-link-modal .resource-submit-btn");
@@ -1657,7 +1702,7 @@ async function submitContentLink() {
     } catch (error) {
         console.error("Content link save failed:", error);
         alert("Could not save this link. Please check your connection and try again.");
-        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "Save Link"; }
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "Save Folder Link"; }
     }
 }
 

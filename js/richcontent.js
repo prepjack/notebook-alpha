@@ -167,23 +167,8 @@
             };
 
             function showDebug() {
-                const old = wrap.querySelector(".rc-lottie-debug");
-                if (old) old.remove();
-                const panel = document.createElement("div");
-                panel.className = "rc-lottie-debug";
-                panel.textContent = [
-                    "Lottie diagnostic",
-                    `source: ${debug.source}`,
-                    `lottie loaded: ${debug.lottieLoaded ? "YES" : "NO"}`,
-                    `assetData keys: ${debug.assetDataKeys.length ? debug.assetDataKeys.join(", ") : "(none)"}`,
-                    `assets keys: ${debug.assetKeys.length ? debug.assetKeys.join(", ") : "(none)"}`,
-                    `matched key: ${debug.matchedKey || "NO MATCH"}`,
-                    `data type: ${debug.dataType || "(none)"}`,
-                    `data size: ${debug.dataSize == null ? "(unknown)" : debug.dataSize + " chars"}`,
-                    `render path: ${debug.path || "(not reached)"}`,
-                    debug.error ? `error: ${debug.error}` : ""
-                ].filter(Boolean).join("\n");
-                wrap.appendChild(panel);
+                // Production: keep diagnostics internal, but do not render a visible panel.
+                return;
             }
 
             console.groupCollapsed("[Notebook Alpha] Lottie diagnostic");

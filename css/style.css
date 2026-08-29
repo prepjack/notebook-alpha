@@ -3194,17 +3194,15 @@ body.index-directory-resizing .index-directory-workspace {
     font: 11px/1.5 "Courier New", monospace;
     color: #3a463d;
 }
-#suggested-filename-box {
-    flex: 1 1 200px;
-    min-width: 0;
-    box-sizing: border-box;
-    padding: 8px 10px;
-    border: 1px solid var(--line);
-    border-radius: 7px;
-    background: #f5f6f3;
-    color: #3a463d;
-    font: 11px "Courier New", monospace;
-}
+
+.content-link-modal-clean { width:min(620px,94vw); }
+.content-folder-steps { display:grid; gap:8px; margin:14px 0 4px; }
+.content-folder-step { display:flex; align-items:flex-start; gap:10px; padding:10px 11px; border:1px solid var(--line); border-radius:8px; background:#fafaf6; }
+.content-folder-step > span { flex:0 0 22px; width:22px; height:22px; display:grid; place-items:center; border-radius:50%; background:var(--green-soft); color:var(--green); font:700 11px Arial,sans-serif; }
+.content-folder-step strong { display:block; color:#354239; font:700 12px Arial,sans-serif; }
+.content-folder-step small { display:block; margin-top:3px; color:var(--muted); font:11px/1.45 Arial,sans-serif; }
+.content-folder-tools { margin:12px 0 16px; }
+.content-link-modal-clean > label { margin-top:8px; }
 
 /* Key points as cards instead of a plain bullet list */
 .key-points-grid {
