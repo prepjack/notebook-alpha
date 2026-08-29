@@ -1460,7 +1460,7 @@ Files needed in this folder:
 List every required filename and what it should contain. This list is an instruction for assembling the folder and is NOT part of any language/depth block.
 
 Before finishing, verify:
-- all 9 language/depth blocks exist if Hinglish is requested otherwise 6 blocks
+- all 9 language/depth blocks exist if Hinglish is requested otherwise 6 language/depth blocks
 - marker order is exact
 - section numbering sync is preserved
 - Markdown references are valid
