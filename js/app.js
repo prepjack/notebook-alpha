@@ -1447,7 +1447,7 @@ SOURCE FIDELITY
 - Any explanatory analogy must be clearly educational and must not be presented as a source fact.
 
 ====================================================
-FINAL OUTPUT RULES
+FINAL ZIP FOLDER OUTPUT RULES
 ====================================================
 - Return ONLY the Markdown content for the main .md file.
 - Do not wrap the entire answer in a \`\`\`markdown fence.
