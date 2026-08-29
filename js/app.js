@@ -1265,9 +1265,9 @@ Create content intended for one self-contained folder:
 
 Topic Folder/
 ├── content.md
-├── image-1.png                 (only if genuinely useful)
-├── diagram-1.png               (only if genuinely useful)
-├── animation-1.json            (only if genuinely useful)
+├── image-1.png                 (genuinely useful)
+├── diagram-1.png               (genuinely useful)
+├── animation-1.json            (genuinely useful)
 └── other supported assets
 
 The main Markdown file may have any filename ending in .md. All referenced assets must be placed in the SAME folder.
