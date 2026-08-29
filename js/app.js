@@ -1323,7 +1323,7 @@ IMAGES:
 Use images only when they genuinely improve learning. Prefer Mermaid for structural diagrams that can be expressed directly in Markdown. Use simple lowercase-hyphenated filenames such as information-lifecycle.png.
 
 LOTTIE:
-Use a Lottie animation only when motion genuinely adds learning value. The .json animation file must be in the same folder and the Markdown block MUST contain a valid JSON configuration object with a "src" filename, as shown above.
+Use a Lottie animation because it genuinely adds learning value. The .json animation file must be in the same folder and the Markdown block MUST contain a valid JSON configuration object with a "src" filename, as shown above.
 
 Do not add visuals merely for decoration.
 
@@ -1429,6 +1429,7 @@ HI:
 Write fully in Hindi using Devanagari script. For important or difficult technical/academic terms, include the English term alongside the correct Hindi equivalent where useful, e.g. "सूचना संगठन (Information Organization)". Prefer terminology established in the source when available. Do not turn the section into Roman-script Hindi.
 
 HINGLISH:
+Don't add HINGLISH unless specifically told to do so.
 Write natural spoken Hinglish using Devanagari sentence structure for Hindi grammar/connectors while keeping subject-specific and technical English terms in Roman script. Do not write the whole section in Roman-script Hindi and do not mechanically translate every technical term.
 Example style:
 "Mental Processes का मतलब है कि हमारा दिमाग कैसे काम करता है — जैसे Thinking, Learning और Remembering जैसी चीज़ें इसमें आती हैं।"
@@ -1459,7 +1460,7 @@ Files needed in this folder:
 List every required filename and what it should contain. This list is an instruction for assembling the folder and is NOT part of any language/depth block.
 
 Before finishing, verify:
-- all 9 language/depth blocks exist
+- all 9 language/depth blocks exist if Hinglish is requested otherwise 6 blocks
 - marker order is exact
 - section numbering sync is preserved
 - Markdown references are valid
@@ -1470,7 +1471,7 @@ Before finishing, verify:
 - every referenced asset filename is listed in "Files needed in this folder:"
 - no unnecessary external URLs are used
 
-Create the complete Notebook Alpha study-content package for the topic and source material provided.`;
+Create the complete Notebook Alpha study-content package for the topic and source material provided in zip folder.`;
 
 function openAddContentLink() {
     if (!selectedTopicNode) return;
