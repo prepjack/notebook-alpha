@@ -88,26 +88,29 @@ already has text saved this way keeps rendering exactly as before; no
 data migration was needed or performed. New content should be added
 only via "Add Content Link" going forward.
 
-7. ALPHA-PLUS — CONTENT LINK (Google Drive .md, fetched live)
+7. ALPHA-PLUS — CONTENT LINK (Google Drive .md file OR folder, fetched live)
 --------------------------------------------------------------------
 The only way to add rich content through the website UI now. No new
 sheet, no file upload:
 
     content_type = "md_file"
-    content      = the Google Drive share link (or a bare Drive file
-                   ID, or a filename inside a designated "study
-                   content" Drive folder, for manual entry)
+    content      = the Google Drive share link — either a single .md
+                   file, OR a FOLDER containing one .md file plus that
+                   topic's images/animations (see "FOLDER MODE" below)
+                   (or a bare Drive file ID, or a filename inside a
+                   designated "study content" Drive folder, for manual
+                   entry)
 
 This is written by the SAME "save_core" action as every other
 content_type (definition/explanation/example/index_terms/md_file) —
 "Add Content Link" in the website UI just calls it with
 content_type = "md_file" and the pasted link as content. Nothing is
-ever uploaded through the browser; the .md file stays in the user's
-own Drive, shared as "Anyone with the link can view".
+ever uploaded through the browser; the file(s) stay in the user's own
+Drive, shared as "Anyone with the link can view".
 
-You can also skip the website entirely and paste a Drive .md link (or
-bare file ID, or filename) straight into this row/cell yourself —
-reload the site and it renders exactly the same way.
+You can also skip the website entirely and paste a Drive link (or bare
+file ID, or filename) straight into this row/cell yourself — reload
+the site and it renders exactly the same way.
 
 At render time, if a node has a `md_file` link, the website calls the
 Apps Script `get_markdown` GET action with that link and renders the
@@ -117,6 +120,24 @@ everything else). If a node has no `md_file` link but does have
 Upload Markdown flow), that keeps rendering exactly as before — the
 two are not mutually exclusive in the data model, but `md_file`
 takes priority when both are present. "Remove Content" clears both.
+
+FOLDER MODE (images & animations, auto-fetched):
+Paste a Drive FOLDER link instead of a single-file link, and put a
+.md file (any name ending in .md — content.md or index.md is picked
+automatically if present, otherwise the first .md file found) PLUS
+that topic's images/animation files all in that one folder, all shared
+together as "Anyone with the link can view". `get_markdown` detects a
+folder link automatically (handleGetContentFolder_ in Code.gs — see
+the URL pattern in extractDriveFolderId_), reads the .md file as the
+topic text, and returns every OTHER file in the folder as an
+{filename: url} asset map. This lets the .md reference an image or
+\`\`\`lottie animation by its PLAIN FILENAME alone — no per-file share
+link needed — e.g. ![Neuron structure](neuron.png) or a \`\`\`lottie
+fence with "src":"mitosis.json". See section 8 below for the exact
+image/animation syntax, and js/richcontent.js resolveAssetRefs() for
+how filenames are matched against the asset map (a full http(s)/data:
+URL is left untouched either way, so single-file links with
+already-hosted image URLs keep working unchanged).
 
 8. RICH CONTENT SYNTAX (definition / explanation / example columns)
 --------------------------------------------------------------------
@@ -158,11 +179,49 @@ CHARTS / GRAPHS — put a chart code fence with a small JSON spec in the cell:
   ```
   type can be "bar", "line", "pie", or "doughnut".
 
+IMAGES — plain Markdown image syntax, no fence needed:
+
+  ![Neuron structure](https://drive.google.com/uc?export=view&id=FILE_ID)
+  ![Neuron structure](neuron.png)   <- if this topic's Content Link is a
+                                        FOLDER (section 7), just the plain
+                                        filename of an image in that same
+                                        folder works, no per-file link needed
+
+  The alt text ("Neuron structure") becomes a caption under the image
+  automatically, and clicking the image opens it full-size in a new tab.
+  Same "link, don't upload" rule as Resources (see section above) — host
+  the image in Google Drive (shared "Anyone with the link", then use the
+  uc?export=view&id=... form of the link so it renders directly) or any
+  public image URL, and paste the Markdown line into the cell. Or, easiest
+  of all, put the image file straight in the topic's Content Link folder
+  and reference it by filename as shown above.
+
+ANIMATIONS — put a lottie code fence in the cell, pointing at a hosted
+Lottie/Bodymovin JSON animation (e.g. a public file from lottiefiles.com,
+a "uc?export=view&id=..." Google Drive link, or — same shortcut as
+images above — just the plain filename if this topic's Content Link is
+a folder):
+
+  ```lottie
+  {"src":"https://assets.lottiefiles.com/packages/lf20_example.json",
+   "loop":true,"autoplay":true,"height":220}
+  ```
+  ```lottie
+  {"src":"mitosis.json","loop":true,"autoplay":true,"height":220}
+  ```
+  loop/autoplay/height are all optional (default: loop on, autoplay on,
+  auto height). A full inline Bodymovin JSON export also works directly
+  in the fence instead of "src", if you'd rather not host a separate file.
+  Lottie animations are small, scalable vector animations — a much
+  lighter alternative to uploading GIF/video files for things like
+  process/cycle animations.
+
 These fences are plain text — they paste into a single Google Sheets cell
 exactly like everything else, and render automatically on the website via
 js/richcontent.js (Markdown -> marked.js + DOMPurify, mermaid -> mermaid.js,
-chart -> Chart.js). If a cell has no fences, it just renders as formatted
-Markdown text — nothing breaks for topics that don't use diagrams/charts.
+chart -> Chart.js, lottie -> lottie-web). If a cell has no fences or images,
+it just renders as formatted Markdown text — nothing breaks for topics that
+don't use diagrams/charts/images/animations.
 
 9. ALPHA-PLUS — INDEX REGISTRY (Code.gs, TWO NEW OPTIONAL SHEETS)
 --------------------------------------------------------------------
@@ -226,3 +285,56 @@ or resource) that wants to reference concepts should store index_ids,
 never the literal term text, so a display-name change never needs to
 ripple through every place that referenced it.
 
+
+
+8. ALPHA-PLUS — AUTO DRIVE FOLDERS
+----------------------------------
+Structure nodes now get a managed Google Drive folder automatically when
+save_structure runs. The Nodes sheet gains:
+
+    drive_folder_id
+
+Folder hierarchy mirrors the website hierarchy:
+
+    Study Notebook Content /
+        Subject /
+            Course /
+                Unit /
+                    Chapter /
+                        Topic /
+                            Subtopic /
+
+The folder is created under the parent node's folder. Repeated saves reuse
+the stored drive_folder_id. If a node title changes, the managed Drive
+folder is renamed to match. If an old folder ID becomes inaccessible, the
+folder is repaired/recreated on the next ensure operation.
+
+Every managed folder is shared as "Anyone with the link can view" so the
+existing folder-mode Markdown reader can read the .md and asset files.
+The website now exposes "Open Topic Folder" in the content panel; it calls
+get_or_create_node_folder and opens the exact managed folder.
+
+Deleting a structure node also finds all descendants, trashes their managed
+Drive folders (recoverable from Google Drive Trash), then deletes the Nodes
+rows. This intentionally avoids permanent Drive deletion.
+
+Run setupDriveStorage() ONCE from the Apps Script editor after pasting the
+updated Code.gs. It creates/repairs the drive_folder_id column, creates the
+root folder "Study Notebook Content" when needed, and creates a
+Storage_Config sheet.
+
+IMPORTANT — MULTI-GMAIL STORAGE
+--------------------------------
+Storage_Config is intentionally a configuration layer, not a claim that one
+Apps Script can spend multiple Gmail accounts' Drive quotas merely by listing
+their email addresses. DriveApp operates under the account/authorization of
+the executing Apps Script. True automatic quota rotation across separate
+Gmail accounts requires separately authorized execution endpoints (or a
+shared/organizational storage product designed for this purpose).
+The current implementation therefore makes the root/folder mapping stable
+and migration-friendly without pretending that a second Gmail address alone
+changes the Drive quota used by DriveApp.
+
+The existing folder-mode Markdown reader remains unchanged: it detects a
+Drive folder link, selects content.md/index.md (or the first .md), and returns
+other files as filename-based assets.

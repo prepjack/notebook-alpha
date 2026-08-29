@@ -76,14 +76,49 @@ function doGet(e) {
   // it always did.
   const action = e && e.parameter ? e.parameter.action : null;
 
+  // ALPHA-PLUS — AUTO DRIVE FOLDERS: on-demand folder fetch/create.
+  // This must be a GET endpoint because the frontend opens/fetches the
+  // folder URL directly. Existing get_markdown behaviour remains unchanged.
+  if (action === "get_or_create_node_folder") {
+    try {
+      const result = getNodeFolderInfo_(e.parameter.node_id);
+      return jsonResponse_(result);
+    } catch (error) {
+      return jsonResponse_({
+        success: false,
+        error: error.message
+      });
+    }
+  }
+
+  if (action === "get_drive_migration_status") return jsonResponse_(getDriveFolderMigrationStatus());
+
   if (action === "get_markdown") {
     return handleGetMarkdown(e.parameter.ref);
+  }
+
+  // ALPHA-PLUS — DRIVE ASSET PROXY: Lottie/JSON assets cannot reliably
+  // be loaded by lottie-web directly from Google Drive because Drive may
+  // return an HTML viewer/download response or block the browser's CORS
+  // request. The frontend therefore fetches JSON through this Apps Script
+  // endpoint and passes the parsed Bodymovin object to lottie-web.
+  if (action === "get_drive_asset") {
+    return handleGetDriveAsset_(e.parameter.file_id);
   }
 
   // MCQ BANK — PHASE 5: lazy get_mcqs action.
   // MCQs are intentionally excluded from the default dump below.
   if (action === "get_mcqs") {
     return handleGetMcqs(e.parameter);
+  }
+
+  // AUTO DRIVE FOLDERS: on-demand folder creation/opening for a node.
+  if (action === "get_or_create_node_folder") {
+    return jsonResponse_(getNodeFolderInfo_(e.parameter.node_id));
+  }
+
+  if (action === "get_storage_status") {
+    return jsonResponse_(getStorageStatus_());
   }
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -565,45 +600,440 @@ function deleteResourceRow(data) {
   };
 }
 
-function saveStructureNode(data) {
+/* =========================================================
+   ALPHA-PLUS — AUTO DRIVE STORAGE
 
+   Every structure node gets its own managed Drive folder, nested under
+   its parent's folder. The folder ID is stored in Nodes.drive_folder_id.
+
+   IMPORTANT STORAGE NOTE:
+   DriveApp runs under the Google account that authorizes this Apps Script.
+   Adding another Gmail address to a configuration table does NOT by itself
+   make DriveApp write against that account's quota. Multi-account quota
+   rotation therefore needs separately authorized execution endpoints.
+   This phase keeps the storage root configurable and the node/folder
+   mapping stable so that such a migration can be added later safely.
+   ========================================================= */
+
+const STUDY_ROOT_FOLDER_NAME_ = "Study Notebook Content";
+const STORAGE_CONFIG_SHEET_ = "Storage_Config";
+
+function ensureNodesDriveFolderColumn_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Nodes");
+  if (!sheet) throw new Error("Nodes sheet not found.");
+
+  const lastCol = Math.max(sheet.getLastColumn(), 1);
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
+  let col = headers.indexOf("drive_folder_id");
+
+  if (col === -1) {
+    col = headers.length;
+    sheet.getRange(1, col + 1).setValue("drive_folder_id");
+    col += 1;
+  } else {
+    col += 1;
+  }
+
+  return col;
+}
+
+function ensureStorageConfigSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(STORAGE_CONFIG_SHEET_);
+
+  if (!sheet) {
+    sheet = ss.insertSheet(STORAGE_CONFIG_SHEET_);
+    sheet.appendRow([
+      "slot", "label", "root_folder_id", "threshold_gb", "status",
+      "notes", "created_at", "updated_at"
+    ]);
+  }
+
+  return sheet;
+}
+
+function ensureRootFolder_() {
+  const props = PropertiesService.getScriptProperties();
+  let rootId = props.getProperty("STUDY_ROOT_FOLDER_ID");
+
+  if (rootId) {
+    try {
+      return DriveApp.getFolderById(rootId);
+    } catch (e) {
+      // Stored ID is stale/inaccessible. Recreate below.
+    }
+  }
+
+  const root = DriveApp.createFolder(STUDY_ROOT_FOLDER_NAME_);
+  root.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  props.setProperty("STUDY_ROOT_FOLDER_ID", root.getId());
+
+  const storageSheet = ensureStorageConfigSheet_();
+  const values = storageSheet.getDataRange().getValues();
+  const headers = values[0].map(String);
+  const slotIndex = headers.indexOf("slot");
+  const rootIndex = headers.indexOf("root_folder_id");
+  let found = false;
+
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][slotIndex]) === "1") {
+      storageSheet.getRange(i + 1, rootIndex + 1).setValue(root.getId());
+      storageSheet.getRange(i + 1, headers.indexOf("status") + 1).setValue("ACTIVE");
+      storageSheet.getRange(i + 1, headers.indexOf("updated_at") + 1).setValue(new Date());
+      found = true;
+      break;
+    }
+  }
+
+  if (!found) {
+    const now = new Date();
+    storageSheet.appendRow([
+      1, "Primary Drive", root.getId(), 12, "ACTIVE",
+      "Created automatically by Apps Script. Multi-account rotation requires separately authorized execution endpoints.",
+      now, now
+    ]);
+  }
+
+  return root;
+}
+
+function findOrCreateSubfolder_(parentFolder, title) {
+  const safeTitle = String(title || "Untitled").trim() || "Untitled";
+  const existing = parentFolder.getFoldersByName(safeTitle);
+  if (existing.hasNext()) return existing.next();
+
+  const folder = parentFolder.createFolder(safeTitle);
+  folder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  return folder;
+}
+
+function getNodeRecordMap_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Nodes");
+  if (!sheet) throw new Error("Nodes sheet not found.");
+
+  const values = sheet.getDataRange().getValues();
+  if (!values.length) return { sheet: sheet, headers: [], rows: [], byId: {} };
+
+  const headers = values[0].map(String);
+  const idCol = headers.indexOf("node_id");
+  const parentCol = headers.indexOf("parent_id");
+  const titleCol = headers.indexOf("title");
+  const folderCol = headers.indexOf("drive_folder_id");
+
+  if (idCol === -1 || parentCol === -1 || titleCol === -1) {
+    throw new Error("Required Nodes columns not found.");
+  }
+
+  const byId = {};
+  for (let i = 1; i < values.length; i++) {
+    const id = String(values[i][idCol] || "");
+    if (!id) continue;
+    byId[id] = {
+      rowNumber: i + 1,
+      nodeId: id,
+      parentId: String(values[i][parentCol] || ""),
+      title: String(values[i][titleCol] || "Untitled").trim() || "Untitled",
+      folderId: folderCol === -1 ? "" : String(values[i][folderCol] || "")
+    };
+  }
+
+  return { sheet: sheet, headers: headers, rows: values, byId: byId };
+}
+
+function ensureNodeFolder_(nodeId, stack) {
+  const registry = getNodeRecordMap_();
+  const node = registry.byId[String(nodeId)];
+  if (!node) throw new Error("Node not found: " + nodeId);
+
+  const folderCol = ensureNodesDriveFolderColumn_();
+  stack = stack || {};
+
+  if (stack[node.nodeId]) {
+    throw new Error("Circular parent_id chain detected at node: " + node.nodeId);
+  }
+  stack[node.nodeId] = true;
+
+  if (node.folderId) {
+    try {
+      const existingFolder = DriveApp.getFolderById(node.folderId);
+      if (existingFolder.getName() !== node.title) {
+        existingFolder.setName(node.title);
+      }
+      delete stack[node.nodeId];
+      return existingFolder.getId();
+    } catch (e) {
+      // Stale/deleted folder ID — rebuild the folder below.
+    }
+  }
+
+  let parentFolder;
+  if (node.parentId) {
+    if (!registry.byId[node.parentId]) {
+      throw new Error("Parent node not found: " + node.parentId);
+    }
+    parentFolder = DriveApp.getFolderById(
+      ensureNodeFolder_(node.parentId, stack)
+    );
+  } else {
+    parentFolder = ensureRootFolder_();
+  }
+
+  const folder = findOrCreateSubfolder_(parentFolder, node.title);
+  registry.sheet.getRange(node.rowNumber, folderCol).setValue(folder.getId());
+
+  delete stack[node.nodeId];
+  return folder.getId();
+}
+
+function getNodeFolderInfo_(nodeId) {
+  const folderId = ensureNodeFolder_(nodeId);
+  return {
+    success: true,
+    node_id: String(nodeId),
+    drive_folder_id: folderId,
+    drive_folder_url: "https://drive.google.com/drive/folders/" + folderId
+  };
+}
+
+function trashDriveFolder_(folderId) {
+  if (!folderId) return false;
+  try {
+    const folder = DriveApp.getFolderById(String(folderId));
+    folder.setTrashed(true);
+    return true;
+  } catch (e) {
+    // Already deleted/inaccessible: deletion of the Sheet row can continue.
+    return false;
+  }
+}
+
+function getStorageStatus_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(STORAGE_CONFIG_SHEET_);
+  if (!sheet) {
+    return { success: true, configured: false, slots: [] };
+  }
+
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) return { success: true, configured: true, slots: [] };
+  const headers = values[0].map(String);
+
+  return {
+    success: true,
+    configured: true,
+    slots: values.slice(1).filter(function(row) {
+      return String(row[headers.indexOf("slot")] || "").trim() !== "";
+    }).map(function(row) {
+      const out = {};
+      headers.forEach(function(h, i) { out[h] = row[i]; });
+      return out;
+    })
+  };
+}
+
+
+/* =========================================================
+   ALPHA-PLUS — AUTO DRIVE FOLDERS: OPTIMIZED RESUMABLE MIGRATION
+   ========================================================= */
+
+const DRIVE_MIGRATION_BATCH_SIZE_ = 50;
+const DRIVE_MIGRATION_CURSOR_KEY_ = "AUTO_DRIVE_MIGRATION_CURSOR";
+const DRIVE_MIGRATION_DONE_KEY_ = "AUTO_DRIVE_MIGRATION_DONE";
+const DRIVE_MIGRATION_STATUS_KEY_ = "AUTO_DRIVE_MIGRATION_STATUS";
+const DRIVE_MIGRATION_TRIGGER_KEY_ = "AUTO_DRIVE_MIGRATION_TRIGGER_ID";
+
+function buildMigrationRegistry_(sheet) {
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0].map(String);
+  const idCol=headers.indexOf("node_id"), parentCol=headers.indexOf("parent_id");
+  const titleCol=headers.indexOf("title"), folderCol=headers.indexOf("drive_folder_id");
+  if(idCol<0||parentCol<0||titleCol<0) throw new Error("Required Nodes columns not found.");
+  const byId={}, ids=[];
+  for(let i=1;i<values.length;i++){
+    const id=String(values[i][idCol]||""); if(!id) continue;
+    byId[id]={rowNumber:i+1,nodeId:id,parentId:String(values[i][parentCol]||""),
+      title:String(values[i][titleCol]||"Untitled").trim()||"Untitled",
+      folderId:folderCol<0?"":String(values[i][folderCol]||"")};
+    ids.push(id);
+  }
+  return {sheet,headers,byId,ids,folderCol};
+}
+
+function ensureNodeFolderFromRegistry_(nodeId, registry, stack, cache) {
+  const id=String(nodeId), node=registry.byId[id];
+  if(!node) throw new Error("Node not found: "+id);
+  stack=stack||{}; cache=cache||{};
+  if(cache[id]) return cache[id];
+  if(stack[id]) throw new Error("Circular parent_id chain detected at node: "+id);
+  stack[id]=true;
+
+  if(node.folderId){
+    try{
+      const f=DriveApp.getFolderById(node.folderId);
+      if(f.getName()!==node.title) f.setName(node.title);
+      cache[id]=f.getId(); delete stack[id]; return cache[id];
+    }catch(e){}
+  }
+
+  let parentFolder;
+  if(node.parentId){
+    if(!registry.byId[node.parentId]) throw new Error("Parent node not found: "+node.parentId);
+    parentFolder=DriveApp.getFolderById(
+      ensureNodeFolderFromRegistry_(node.parentId,registry,stack,cache)
+    );
+  }else parentFolder=ensureRootFolder_();
+
+  const folder=findOrCreateSubfolder_(parentFolder,node.title);
+  if(registry.folderCol!==-1)
+    registry.sheet.getRange(node.rowNumber,registry.folderCol+1).setValue(folder.getId());
+  node.folderId=folder.getId(); cache[id]=folder.getId();
+  delete stack[id];
+  return folder.getId();
+}
+
+function writeMigrationStatus_(x){
+  PropertiesService.getScriptProperties().setProperty(DRIVE_MIGRATION_STATUS_KEY_,JSON.stringify(x));
+}
+
+function getDriveFolderMigrationStatus(){
+  const p=PropertiesService.getScriptProperties(), raw=p.getProperty(DRIVE_MIGRATION_STATUS_KEY_);
+  if(raw) try{return JSON.parse(raw)}catch(e){}
+  const sh=SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Nodes");
+  if(!sh) return {success:false,error:"Nodes sheet not found."};
+  const r=buildMigrationRegistry_(sh), total=r.ids.length;
+  const cur=Math.min(Math.max(parseInt(p.getProperty(DRIVE_MIGRATION_CURSOR_KEY_)||"0",10)||0,0),total);
+  return {success:true,total_nodes:total,processed:cur,remaining:total-cur,
+    progress_percent:total?Math.round(cur/total*10000)/100:100,
+    status:p.getProperty(DRIVE_MIGRATION_DONE_KEY_)==="true"?"COMPLETE":"NOT_STARTED"};
+}
+
+function migrateExistingNodeFoldersBatch(){
+  const lock=LockService.getScriptLock();
+  if(!lock.tryLock(5000)) return {success:true,skipped:true,message:"Another migration execution is running."};
+  try{
+    const sh=SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Nodes");
+    if(!sh) throw new Error("Nodes sheet not found.");
+    ensureNodesDriveFolderColumn_();
+    const r=buildMigrationRegistry_(sh), ids=r.ids, total=ids.length, p=PropertiesService.getScriptProperties();
+    let cur=parseInt(p.getProperty(DRIVE_MIGRATION_CURSOR_KEY_)||"0",10);
+    if(!Number.isFinite(cur)||cur<0) cur=0;
+    if(cur>=total||p.getProperty(DRIVE_MIGRATION_DONE_KEY_)==="true"){
+      p.setProperty(DRIVE_MIGRATION_CURSOR_KEY_,String(total)); p.setProperty(DRIVE_MIGRATION_DONE_KEY_,"true");
+      const done={success:true,total_nodes:total,processed:total,remaining:0,progress_percent:100,status:"COMPLETE",message:"Migration complete."};
+      writeMigrationStatus_(done); return done;
+    }
+    const end=Math.min(cur+DRIVE_MIGRATION_BATCH_SIZE_,total), cache={}, errors=[];
+    let existing=0,created=0;
+    for(let i=cur;i<end;i++){
+      try{
+        const n=r.byId[ids[i]], before=n.folderId;
+        const fid=ensureNodeFolderFromRegistry_(ids[i],r,{},cache);
+        if(before&&String(before)===String(fid)) existing++; else created++;
+      }catch(err){errors.push({node_id:ids[i],title:r.byId[ids[i]]?.title||"",error:err.message});}
+      p.setProperty(DRIVE_MIGRATION_CURSOR_KEY_,String(i+1));
+    }
+    const processed=end,remaining=total-processed,complete=remaining===0;
+    if(complete)p.setProperty(DRIVE_MIGRATION_DONE_KEY_,"true"); else p.deleteProperty(DRIVE_MIGRATION_DONE_KEY_);
+    const out={success:errors.length===0,total_nodes:total,processed,remaining,
+      progress_percent:Math.round(processed/total*10000)/100,batch_start:cur+1,batch_end:end,
+      existing_folders:existing,created_or_repaired:created,errors,status:complete?"COMPLETE":"RUNNING",
+      message:complete?"Migration complete.":"Batch complete."};
+    writeMigrationStatus_(out); return out;
+  }finally{lock.releaseLock();}
+}
+
+function startDriveFolderMigrationAuto(){
+  const p=PropertiesService.getScriptProperties();
+  if(p.getProperty(DRIVE_MIGRATION_DONE_KEY_)==="true") return getDriveFolderMigrationStatus();
+  const result=migrateExistingNodeFoldersBatch();
+  if(result.status==="COMPLETE"){removeDriveMigrationTrigger_();return result;}
+  ensureSingleDriveMigrationTrigger_();
+  return result;
+}
+
+function continueDriveFolderMigration_(){
+  const result=migrateExistingNodeFoldersBatch();
+  if(result.status==="COMPLETE") removeDriveMigrationTrigger_();
+  else ensureSingleDriveMigrationTrigger_();
+}
+
+function ensureSingleDriveMigrationTrigger_(){
+  const p=PropertiesService.getScriptProperties();
+  const ts=ScriptApp.getProjectTriggers().filter(t=>t.getHandlerFunction()==="continueDriveFolderMigration_");
+  for(let i=1;i<ts.length;i++) ScriptApp.deleteTrigger(ts[i]);
+  if(ts.length){p.setProperty(DRIVE_MIGRATION_TRIGGER_KEY_,ts[0].getUniqueId());return;}
+  const t=ScriptApp.newTrigger("continueDriveFolderMigration_").timeBased().after(60000).create();
+  p.setProperty(DRIVE_MIGRATION_TRIGGER_KEY_,t.getUniqueId());
+}
+
+function removeDriveMigrationTrigger_(){
+  ScriptApp.getProjectTriggers().forEach(t=>{if(t.getHandlerFunction()==="continueDriveFolderMigration_")ScriptApp.deleteTrigger(t);});
+  PropertiesService.getScriptProperties().deleteProperty(DRIVE_MIGRATION_TRIGGER_KEY_);
+}
+
+function resetDriveFolderMigration(){
+  removeDriveMigrationTrigger_();
+  const p=PropertiesService.getScriptProperties();
+  p.deleteProperty(DRIVE_MIGRATION_CURSOR_KEY_);p.deleteProperty(DRIVE_MIGRATION_DONE_KEY_);
+  const x={success:true,status:"NOT_STARTED",total_nodes:0,processed:0,remaining:0,progress_percent:0,message:"Migration progress reset."};
+  writeMigrationStatus_(x);return x;
+}
+
+function setupDriveStorage() {
+  ensureNodesDriveFolderColumn_();
+  const root = ensureRootFolder_();
+  const sheet = ensureStorageConfigSheet_();
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0].map(String);
+  const slotIndex = headers.indexOf("slot");
+  const rootIndex = headers.indexOf("root_folder_id");
+  let hasSlot1 = false;
+
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][slotIndex]) === "1") {
+      sheet.getRange(i + 1, rootIndex + 1).setValue(root.getId());
+      hasSlot1 = true;
+      break;
+    }
+  }
+
+  if (!hasSlot1) {
+    const now = new Date();
+    sheet.appendRow([1, "Primary Drive", root.getId(), 12, "ACTIVE", "", now, now]);
+  }
+
+  return {
+    success: true,
+    root_folder_id: root.getId(),
+    root_folder_url: "https://drive.google.com/drive/folders/" + root.getId()
+  };
+}
+
+function saveStructureNode(data) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName("Nodes");
 
-  if (!sheet) {
-    throw new Error("Nodes sheet not found.");
-  }
+  if (!sheet) throw new Error("Nodes sheet not found.");
 
   const now = new Date();
-
   const nodeId = data.node_id;
   const nodeType = data.node_type;
   const title = data.title;
 
-  if (!nodeId) {
-    throw new Error("node_id is required.");
-  }
+  if (!nodeId) throw new Error("node_id is required.");
+  if (!nodeType) throw new Error("node_type is required.");
+  if (!title) throw new Error("title is required.");
 
-  if (!nodeType) {
-    throw new Error("node_type is required.");
-  }
-
-  if (!title) {
-    throw new Error("title is required.");
-  }
-
+  const folderCol = ensureNodesDriveFolderColumn_();
   const values = sheet.getDataRange().getValues();
-  const headers = values[0];
-
+  const headers = values[0].map(String);
   const idIndex = headers.indexOf("node_id");
 
-  if (idIndex === -1) {
-    throw new Error("node_id column not found in Nodes sheet.");
-  }
+  if (idIndex === -1) throw new Error("node_id column not found in Nodes sheet.");
 
-  // Find existing row for this node_id (update instead of duplicate)
   let existingRow = -1;
-
   for (let i = 1; i < values.length; i++) {
     if (String(values[i][idIndex]) === String(nodeId)) {
       existingRow = i + 1;
@@ -623,68 +1053,64 @@ function saveStructureNode(data) {
     updated_at: now
   };
 
-  const row = headers.map(function(header) {
-    return rowData[header] !== undefined
-      ? rowData[header]
-      : "";
-  });
-
+  // Keep the existing folder ID in the row when updating. ensureNodeFolder_()
+  // will validate it and rename the actual Drive folder if the title changed.
   if (existingRow !== -1) {
-
     const oldRow = values[existingRow - 1];
-    const createdAtIndex = headers.indexOf("created_at");
-
-    if (createdAtIndex !== -1) {
-      row[createdAtIndex] = oldRow[createdAtIndex];
+    const existingFolderIndex = headers.indexOf("drive_folder_id");
+    if (existingFolderIndex !== -1) {
+      rowData.drive_folder_id = oldRow[existingFolderIndex] || "";
     }
+    const createdAtIndex = headers.indexOf("created_at");
+    if (createdAtIndex !== -1) rowData.created_at = oldRow[createdAtIndex];
 
-    sheet.getRange(existingRow, 1, 1, headers.length)
-      .setValues([row]);
+    const row = headers.map(function(header) {
+      return rowData[header] !== undefined ? rowData[header] : oldRow[headers.indexOf(header)];
+    });
 
-    return {
-      success: true,
-      action: "updated",
-      node_id: nodeId
-    };
-
+    sheet.getRange(existingRow, 1, 1, headers.length).setValues([row]);
   } else {
-
+    const row = headers.map(function(header) {
+      return rowData[header] !== undefined ? rowData[header] : "";
+    });
     sheet.appendRow(row);
-
-    return {
-      success: true,
-      action: "created",
-      node_id: nodeId
-    };
   }
+
+  // Create/repair/rename the Drive folder after the node is safely present.
+  const folderId = ensureNodeFolder_(nodeId);
+
+  // ensureNodeFolder_ may have written a repaired folder ID after the row write.
+  return {
+    success: true,
+    action: existingRow !== -1 ? "updated" : "created",
+    node_id: nodeId,
+    drive_folder_id: folderId,
+    drive_folder_url: "https://drive.google.com/drive/folders/" + folderId
+  };
 }
 
 function deleteStructureNodeRow(data) {
-
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName("Nodes");
 
-  if (!sheet) {
-    throw new Error("Nodes sheet not found.");
-  }
+  if (!sheet) throw new Error("Nodes sheet not found.");
 
   const nodeId = data.node_id;
-
-  if (!nodeId) {
-    throw new Error("node_id is required.");
-  }
+  if (!nodeId) throw new Error("node_id is required.");
 
   const values = sheet.getDataRange().getValues();
-  const headers = values[0];
-
+  const headers = values[0].map(String);
   const idIndex = headers.indexOf("node_id");
   const parentIndex = headers.indexOf("parent_id");
+  const folderIndex = headers.indexOf("drive_folder_id");
 
   if (idIndex === -1 || parentIndex === -1) {
     throw new Error("Required Nodes columns not found.");
   }
 
-  // Collect this node and every descendant (recursive via parent_id chain)
+  // Collect this node and every descendant using the same parent_id tree
+  // logic already used by the website. Capture Drive folder IDs BEFORE rows
+  // disappear so deletion remains correct even for nested descendants.
   const idsToDelete = {};
   idsToDelete[String(nodeId)] = true;
 
@@ -694,7 +1120,6 @@ function deleteStructureNodeRow(data) {
     for (let i = 1; i < values.length; i++) {
       const rowId = String(values[i][idIndex]);
       const rowParent = String(values[i][parentIndex]);
-
       if (idsToDelete[rowParent] && !idsToDelete[rowId]) {
         idsToDelete[rowId] = true;
         changed = true;
@@ -702,9 +1127,25 @@ function deleteStructureNodeRow(data) {
     }
   }
 
-  // Delete matching rows bottom-up so row indices stay valid
-  let deletedCount = 0;
+  const foldersToTrash = [];
+  if (folderIndex !== -1) {
+    for (let i = 1; i < values.length; i++) {
+      const rowId = String(values[i][idIndex]);
+      if (idsToDelete[rowId] && values[i][folderIndex]) {
+        foldersToTrash.push(String(values[i][folderIndex]));
+      }
+    }
+  }
 
+  // Delete Drive folders first. setTrashed(true) is deliberately used instead
+  // of permanent deletion, so accidental website deletions remain recoverable
+  // from Google Drive Trash.
+  let foldersTrashed = 0;
+  foldersToTrash.forEach(function(folderId) {
+    if (trashDriveFolder_(folderId)) foldersTrashed++;
+  });
+
+  let deletedCount = 0;
   for (let i = values.length - 1; i >= 1; i--) {
     const rowId = String(values[i][idIndex]);
     if (idsToDelete[rowId]) {
@@ -717,7 +1158,9 @@ function deleteStructureNodeRow(data) {
     success: true,
     action: "deleted",
     node_id: nodeId,
-    rows_deleted: deletedCount
+    rows_deleted: deletedCount,
+    drive_folders_trashed: foldersTrashed,
+    drive_folder_cleanup: folderIndex === -1 ? "column_missing" : "completed"
   };
 }
 
@@ -838,6 +1281,16 @@ function handleGetMarkdown(ref) {
       return jsonResponse_({ ok: false, error: "No content link is saved for this topic." });
     }
 
+    // ALPHA-PLUS — CONTENT LINK: folder mode. A Drive FOLDER link (one
+    // .md file + images/lottie animations sitting together) is handled
+    // completely separately from the single-.md-file mode below — see
+    // handleGetContentFolder_. Detected first so a folder link never
+    // falls through to the single-file path.
+    const folderId = extractDriveFolderId_(cleanRef);
+    if (folderId) {
+      return handleGetContentFolder_(folderId);
+    }
+
     const fileId = extractDriveFileId_(cleanRef);
     let file = null;
 
@@ -862,7 +1315,7 @@ function handleGetMarkdown(ref) {
     }
 
     const text = file.getBlob().getDataAsString("UTF-8");
-    return jsonResponse_({ ok: true, content: text });
+    return jsonResponse_({ ok: true, content: text, assets: {} });
 
   } catch (error) {
     // Never let an unexpected error surface as a raw failure — always
@@ -872,6 +1325,114 @@ function handleGetMarkdown(ref) {
       error: "Unexpected error reading this file: " + error.message
     });
   }
+}
+
+// ALPHA-PLUS — CONTENT LINK: folder mode.
+// Reads every file inside a shared Drive folder: the single .md file
+// becomes the topic's text, and every OTHER file (images, ```lottie
+// animation .json files, etc.) becomes a directly-fetchable asset keyed
+// by its plain filename — so the .md can reference "neuron.png" or
+// "mitosis.json" by name alone, with no separate per-file share link.
+// See README.txt section 7 for the authoring workflow this backs.
+function handleGetContentFolder_(folderId) {
+  let folder;
+  try {
+    folder = DriveApp.getFolderById(folderId);
+  } catch (notFoundOrNoAccess) {
+    return jsonResponse_({
+      ok: false,
+      error: "Could not open this folder. Check that it's shared as " +
+             "\"Anyone with the link can view\" and that the link is correct."
+    });
+  }
+
+  const iterator = folder.getFiles();
+  const allFiles = [];
+  while (iterator.hasNext()) allFiles.push(iterator.next());
+
+  // Prefer a file literally named content.md / index.md if one exists;
+  // otherwise just take the first .md file Drive returns.
+  const mdFiles = allFiles.filter(f => /\.md$/i.test(f.getName()));
+  const mdFile = mdFiles.find(f => /^(content|index)\.md$/i.test(f.getName())) || mdFiles[0] || null;
+
+  if (!mdFile) {
+    return jsonResponse_({
+      ok: false,
+      error: "No .md file found in this folder. Add one .md file (e.g. " +
+             "content.md) alongside your images/animations, then make sure " +
+             "the whole folder is shared as \"Anyone with the link can view\"."
+    });
+  }
+
+  const assets = {};
+  const assetData = {};
+  allFiles.forEach(function(f) {
+    if (f.getId() === mdFile.getId()) return;
+    // Use a browser-friendly URL per asset type. Drive's `view` endpoint can
+    // return an HTML viewer for JSON, which breaks Lottie fetch(). Images are
+    // better served through the thumbnail endpoint; JSON is downloaded as
+    // JSON by the browser. Both still respect the file's Drive sharing.
+    var mime = String(f.getMimeType() || "");
+    if (mime.indexOf("image/") === 0) {
+      assets[f.getName()] = "https://drive.google.com/thumbnail?id=" + f.getId() + "&sz=w1600";
+    } else if (mime === "application/json" || /\.json$/i.test(f.getName())) {
+      // Lottie/Bodymovin JSON is parsed server-side and sent inline.
+      // This completely avoids Drive/Apps-Script CORS, redirect and
+      // content-type issues in the browser. The URL remains in `assets`
+      // for backwards compatibility, while `assetData` is the preferred
+      // rendering path.
+      assets[f.getName()] = ScriptApp.getService().getUrl() +
+        "?action=get_drive_asset&file_id=" + encodeURIComponent(f.getId());
+      try {
+        const jsonText = f.getBlob().getDataAsString("UTF-8");
+        assetData[f.getName()] = JSON.parse(jsonText);
+      } catch (jsonError) {
+        // Keep the URL fallback if an asset is not valid JSON.
+      }
+    } else {
+      assets[f.getName()] = "https://drive.google.com/uc?export=download&id=" + f.getId();
+    }
+  });
+
+  const text = mdFile.getBlob().getDataAsString("UTF-8");
+  return jsonResponse_({ ok: true, content: text, assets: assets, assetData: assetData });
+}
+
+// Returns a Drive JSON asset as parsed JSON through the same Apps Script
+// web app. This is intentionally limited to JSON files and is used by the
+// frontend for Lottie/Bodymovin animations.
+function handleGetDriveAsset_(fileId) {
+  const id = String(fileId || "").trim();
+  if (!id) return jsonResponse_({ ok: false, error: "Missing file_id." });
+
+  try {
+    const file = DriveApp.getFileById(id);
+    const name = file.getName();
+    const mime = String(file.getMimeType() || "");
+    if (mime !== "application/json" && !/\.json$/i.test(name)) {
+      return jsonResponse_({ ok: false, error: "Asset is not a JSON file." });
+    }
+
+    const text = file.getBlob().getDataAsString("UTF-8");
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (parseError) {
+      return jsonResponse_({ ok: false, error: "Invalid JSON asset: " + parseError.message });
+    }
+
+    return jsonResponse_({ ok: true, name: name, data: data });
+  } catch (error) {
+    return jsonResponse_({ ok: false, error: "Could not read Drive asset: " + error.message });
+  }
+}
+
+// Recognizes a Drive FOLDER share link (https://drive.google.com/drive/folders/ID...).
+// A plain file link never matches this, so folder vs. file detection in
+// handleGetMarkdown() above is unambiguous.
+function extractDriveFolderId_(ref) {
+  const match = ref.match(/\/folders\/([a-zA-Z0-9_-]{10,})/);
+  return match ? match[1] : null;
 }
 
 // Recognizes common Drive share-link formats, or a bare file ID typed

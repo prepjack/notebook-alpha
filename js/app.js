@@ -236,6 +236,7 @@ function convertApiDataToStudyData(apiData) {
             title: row.title,
             type: row.node_type,
             parentId: row.parent_id || null,
+            driveFolderId: row.drive_folder_id || "",
             children: [],
             community: [],
             resources: []
@@ -571,6 +572,9 @@ function renderContentLayer() {
                 <button class="content-action" data-action="add-content-link">
                     🔗 ${mdLink ? "Replace Content Link" : "Add Content Link"}
                 </button>
+                <button class="content-action" data-action="open-drive-folder">
+                    📁 Open Topic Folder
+                </button>
                 ${hasContent ? `
                 <button class="content-action resource-delete-btn" data-action="remove-content">
                     🗑 Remove Content
@@ -636,7 +640,8 @@ async function loadAndRenderMdFileContent(node, mdLink, container, token) {
     const cacheKey = node.id + "::" + mdLink;
 
     if (markdownCache.has(cacheKey)) {
-        applyMdTextToContentPanel(markdownCache.get(cacheKey), container);
+        const cached = markdownCache.get(cacheKey);
+        applyMdTextToContentPanel(cached.text, container, cached.assets, cached.assetData);
         return;
     }
 
@@ -659,13 +664,22 @@ async function loadAndRenderMdFileContent(node, mdLink, container, token) {
 
         if (data && data.ok) {
             const text = String(data.content || "");
-            markdownCache.set(cacheKey, text);
+            // ALPHA-PLUS — CONTENT LINK: folder mode. When the saved
+            // link points at a Drive FOLDER (not a single .md file),
+            // get_markdown also returns an {filename: url} map for every
+            // other file in that folder (images, ```lottie animation
+            // .json files, ...) — see google-sheet-template/Code.gs
+            // handleGetContentFolder_(). A single-file link always
+            // returns assets: {}, so this is a no-op for the older flow.
+            const assets = (data.assets && typeof data.assets === "object") ? data.assets : {};
+            const assetData = (data.assetData && typeof data.assetData === "object") ? data.assetData : {};
+            markdownCache.set(cacheKey, { text, assets, assetData });
 
             if (!text.trim()) {
                 container.innerHTML = `<p class="rc-error">This file is empty.</p>`;
                 hideLanguageToggleRow();
             } else {
-                applyMdTextToContentPanel(text, container);
+                applyMdTextToContentPanel(text, container, assets, assetData);
             }
         } else {
             const reason = (data && data.error) || "Could not read this file.";
@@ -727,6 +741,12 @@ let currentLanguageSplit = null;
 let currentContentLanguage = "EN";
 let currentDepthSplit = null;
 let currentContentDepth = "FULL";
+// ALPHA-PLUS — CONTENT LINK: folder mode. {filename: url} for whatever
+// content is currently loaded — {} for legacy/single-file content, or
+// the folder's other files (images/lottie) when loaded via
+// loadAndRenderMdFileContent(). See richcontent.js resolveAssetRefs().
+let currentContentAssets = {};
+let currentContentAssetData = {};
 
 // Remembers the last language actually shown per topic node id, so
 // revisiting a topic keeps whatever the user was reading; falls back
@@ -756,7 +776,9 @@ function splitLayerByDepth(languageBlockText) {
     return result;
 }
 
-function applyMdTextToContentPanel(rawText, container) {
+function applyMdTextToContentPanel(rawText, container, assets, assetData) {
+    currentContentAssets = (assets && typeof assets === "object") ? assets : {};
+    currentContentAssetData = (assetData && typeof assetData === "object") ? assetData : {};
     currentLanguageSplit = splitContentByLanguage(rawText);
 
     const preferred = (selectedTopicNode && lastLanguagePerTopic.get(selectedTopicNode.id)) || "EN";
@@ -791,7 +813,7 @@ function renderCurrentLanguageBlock(container) {
     const languageText = languageBlockFor(currentContentLanguage, currentLanguageSplit) || currentLanguageSplit.en || "";
     currentDepthSplit = splitLayerByDepth(languageText);
     const text = depthBlockFor(currentContentDepth, currentDepthSplit) || currentDepthSplit.full || "";
-    renderRichContent(text, container);
+    renderRichContent(text, container, currentContentAssets, currentContentAssetData);
     if (window.ReadingTools) window.ReadingTools.onContentRendered();
     scheduleContentScrollRestore();
     buildContentTocPanel();
@@ -1087,12 +1109,38 @@ document.addEventListener("click", e => {
             return;
         }
 
+        if (action.dataset.action === "open-drive-folder") {
+            openTopicDriveFolder();
+            return;
+        }
+
         if (action.dataset.action === "remove-content") {
             removeTopicContent();
             return;
         }
     }
 });
+
+async function openTopicDriveFolder() {
+    if (!selectedTopicNode) return;
+
+    try {
+        const url = `${GOOGLE_SHEET_API}?action=get_or_create_node_folder&node_id=${encodeURIComponent(selectedTopicNode.id)}&_=${Date.now()}`;
+        const response = await fetch(url, { cache: "no-store" });
+        if (!response.ok) throw new Error(`Folder API failed (${response.status})`);
+
+        const data = await response.json();
+        if (!data || !data.drive_folder_url) {
+            throw new Error(data?.error || "Drive folder URL was not returned.");
+        }
+
+        selectedTopicNode.driveFolderId = data.drive_folder_id || selectedTopicNode.driveFolderId || "";
+        window.open(data.drive_folder_url, "_blank", "noopener,noreferrer");
+    } catch (error) {
+        console.error("Open topic folder failed:", error);
+        alert("Could not open/create this topic's Drive folder. Please check the Apps Script Drive authorization.");
+    }
+}
 
 async function removeTopicContent() {
     if (!selectedTopicNode) return;
@@ -1168,6 +1216,42 @@ needs special setup:
   (flowchart/graph/mindmap syntax) if a concept has a visual structure
 - Optionally, a chart using a \`\`\`chart fenced code block containing
   JSON like: {"type":"bar","labels":[...],"data":[...]}
+- Optionally, an image using standard Markdown image syntax:
+  ![Short caption](filename.png)
+- Optionally, a lightweight animation using a \`\`\`lottie fenced code
+  block: {"src":"filename.json","loop":true,"autoplay":true,"height":220}
+
+SOURCE MATERIAL: I will attach or paste a PDF (or other source
+material) in this same chat. Treat it as the authoritative source for
+everything you write — see SOURCE FIDELITY below.
+
+IMAGES & ANIMATIONS — READ CAREFULLY:
+I save your Markdown as a .md file inside a Google Drive FOLDER, and I
+put any images/animations for this topic in that SAME folder. The
+website fetches the whole folder, so an image or animation reference
+only needs to be the PLAIN FILENAME of a file sitting in that folder —
+never a made-up URL, and never a real external URL you don't actually
+have.
+- Only add an ![Caption](filename.ext) or \`\`\`lottie {"src":"filename.json"}
+  reference when a real visual genuinely helps (a labelled diagram, a
+  process animation, a figure from the source PDF) — do not add one for
+  decoration.
+- Prefer a \`\`\`mermaid diagram over an image whenever the visual is
+  structural (a flowchart, hierarchy, mind map, cycle) — you can
+  generate that yourself with no external file needed. Reach for an
+  image/lottie reference only when the visual can't be expressed as a
+  mermaid diagram or chart (e.g. a photo, a scanned figure from the
+  PDF, a labelled illustration, a real animation).
+- When you DO reference an image or animation file, use a short,
+  clear, lowercase-hyphenated filename (e.g. neuron-structure.png,
+  cell-mitosis.json) and list every filename you referenced in a short
+  "Files needed in this folder:" note AFTER the marked-up content (see
+  OUTPUT HYGIENE — that note is the one allowed exception to "Markdown
+  only", since it's an instruction to me, not part of the file).
+- Do not invent a filename for a figure that appears in the source PDF
+  unless you're confident I can extract/recreate that exact image —
+  when in doubt, describe the figure in words or redraw it as a
+  \`\`\`mermaid diagram instead.
 
 Full hierarchy path of this topic on the website:
 <PUT HIERARCHY PATH HERE>
@@ -1327,6 +1411,11 @@ OUTPUT HYGIENE:
   the requested language/depth blocks.
 - The marker lines are structural metadata for the website parser, so they must remain
   exactly intact.
+- The ONE exception: if (and only if) you referenced any image/lottie filenames, end
+  your reply with a short plain list titled "Files needed in this folder:" naming
+  every filename you referenced and, in a few words, what each should contain. This
+  list is an instruction to me, not part of the .md file — don't put it inside any
+  language/depth block.
 
 ---
 FILE NAMING INSTRUCTION (for you, the human — not for the AI tool):
@@ -1337,9 +1426,15 @@ website's hierarchy, so nothing ever gets mixed up or overwritten:
 
 <PUT SUGGESTED FILENAME HERE>
 
-Then set that file's sharing to "Anyone with the link can view",
-copy its share link, and paste that link into the "Add Content Link"
-box on the website for this topic.`;
+If the AI referenced any image/lottie filenames above, instead create a
+FOLDER with that same name (drop the .md), put the .md file inside it
+(any name ending in .md works — content.md is a good default), then add
+each referenced image/animation file into that same folder using the
+exact filenames the AI listed.
+
+Then set that file's — or that whole folder's — sharing to "Anyone
+with the link can view", copy its share link, and paste that link into
+the "Add Content Link" box on the website for this topic.`;
 
 // Maps each node_type to the short label used inside the generated
 // Google-Drive file name (Sub / Course / Unit / Chapter / Topic / Subtopic).
@@ -1394,11 +1489,13 @@ function openAddContentLink() {
                 <h2>🔗 Add Content Link</h2>
                 <p class="add-resource-scope">Adding to: <strong>${escapeHtml(selectedTopicNode.title)}</strong></p>
 
-                <label>Google Drive link to the .md file</label>
+                <label>Google Drive link — a single .md file, OR a folder containing
+                    your .md file plus its images/animations</label>
                 <input id="content-link-url" type="url" value="${escapeHtml(existingLink)}"
-                       placeholder="https://drive.google.com/file/d/.../view">
-                <p class="drive-note">The file must be shared as <strong>"Anyone with the link
-                    can view"</strong>, or the website won't be able to read it.</p>
+                       placeholder="https://drive.google.com/file/d/.../view  or  .../drive/folders/...">
+                <p class="drive-note">The file (or the whole folder, for the folder option)
+                    must be shared as <strong>"Anyone with the link can view"</strong>, or the
+                    website won't be able to read it.</p>
 
                 <details class="content-link-guide">
                     <summary>Formatting guide</summary>
@@ -1425,14 +1522,28 @@ A[Information Society] --&gt; B[Digital Divide]
 \`\`\`chart
 {"type":"bar","labels":["Primary","Secondary"],"data":[40,35]}
 \`\`\`
--&gt; bar / line / pie / doughnut charts (Chart.js JSON spec)</pre>
+-&gt; bar / line / pie / doughnut charts (Chart.js JSON spec)
+
+![Neuron structure](neuron.png)
+-&gt; a captioned, click-to-enlarge image — the alt text becomes the
+   caption. Works with a full URL, OR (if you link a FOLDER above,
+   not a single file) just the plain filename of an image sitting
+   in that same folder.
+
+\`\`\`lottie
+{"src":"mitosis.json","loop":true,"autoplay":true,"height":220}
+\`\`\`
+-&gt; a lightweight vector animation (lottie-web). "src" works the
+   same way as the image filename above: a full URL, or a plain
+   filename from the linked folder.</pre>
                 </details>
 
                 <div class="content-action-row">
                     <button type="button" class="content-action" onclick="copyContentLinkAiPrompt()">📋 Copy AI Prompt</button>
                 </div>
 
-                <label>Suggested file name (save your Drive file with this exact name)</label>
+                <label>Suggested name (save your .md file — or your whole folder,
+                    for the folder option — with this exact name)</label>
                 <div class="content-action-row">
                     <input id="suggested-filename-box" type="text" readonly
                            value="${escapeHtml(suggestedFileName)}"
@@ -1441,7 +1552,10 @@ A[Information Society] --&gt; B[Digital Divide]
                 </div>
                 <p class="drive-note">This name is unique to this topic's exact place in the
                     hierarchy (Subject/Course/Unit/Chapter/Topic), so it never clashes with
-                    another topic's file.</p>
+                    another topic's file. Using a folder instead of a single file? Name the
+                    folder the same way (drop the <code>.md</code>), and put a .md file — named
+                    <code>content.md</code>, <code>index.md</code>, or anything ending in
+                    <code>.md</code> — plus your images/animations inside it.</p>
 
                 <button class="resource-submit-btn" type="button" onclick="submitContentLink()">Save Link</button>
             </div>
@@ -1483,7 +1597,7 @@ function copyContentLinkAiPrompt() {
         .replace("<PUT TOPIC NAME HERE>", topicTitle)
         .replace("<PUT SUGGESTED FILENAME HERE>", fileName);
 
-    const done = () => alert("Prompt copied! Paste it into ChatGPT, Claude, Gemini, or any AI tool. along with the content material you want to convert into a Markdown file.");
+    const done = () => alert("Prompt copied! Paste it into ChatGPT, Claude, Gemini, or any AI tool, then attach/paste the source PDF (or other material) in the same message.");
     const manual = () => alert("Could not copy automatically — please copy this prompt manually:\n\n" + prompt);
 
     if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -1511,7 +1625,7 @@ function fallbackCopyText(text, onSuccess, onFailure) {
 
 async function submitContentLink() {
     const url = document.getElementById("content-link-url")?.value.trim();
-    if (!url) { alert("Please paste a Google Drive link to the .md file."); return; }
+    if (!url) { alert("Please paste a Google Drive link to the .md file or folder."); return; }
     if (!selectedTopicNode) return;
 
     const submitBtn = document.querySelector("#add-content-link-modal .resource-submit-btn");

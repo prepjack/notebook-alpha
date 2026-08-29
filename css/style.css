@@ -3110,6 +3110,54 @@ body.index-directory-resizing .index-directory-workspace {
     height: 280px;
 }
 
+/* Lottie animations (```lottie fence) */
+.rc-lottie {
+    margin: 14px 0;
+    padding: 14px;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    min-height: 160px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+.rc-lottie svg { max-width: 100%; }
+.rc-lottie-debug {
+    width: 100%;
+    margin-top: 10px;
+    padding: 8px 10px;
+    border: 1px dashed var(--line);
+    border-radius: 6px;
+    background: #f7f8f4;
+    color: #526057;
+    white-space: pre-wrap;
+    font: 11px/1.45 "Courier New", monospace;
+    text-align: left;
+}
+
+
+/* Captioned, click-to-enlarge study images (Markdown ![alt](url)) */
+.rc-figure {
+    margin: 14px 0;
+    text-align: center;
+}
+.rc-figure img {
+    max-width: 100%;
+    max-height: 360px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #fff;
+    cursor: zoom-in;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
+.rc-figure figcaption {
+    margin-top: 6px;
+    font: italic 12px/1.4 Arial, sans-serif;
+    color: var(--muted);
+}
+
 .rc-error {
     color: #b33;
     font: 12px Arial, sans-serif;

@@ -37,12 +37,22 @@ TABLE OF CONTENTS | CONTENT | REFERENCES / INDEX
   used for the alphabetical panel below.
 - CONTENT (middle): author/core content, community contribution and
   My Notes layers, plus an "Add Content Link" path for linking a
-  topic's content to a .md file already saved in the user's own
-  Google Drive, fetched and rendered live (see js/app.js,
-  openAddContentLink / loadAndRenderMdFileContent, and
+  topic's content to a .md file — or a whole Drive FOLDER containing
+  that .md file plus its images/animations, auto-fetched together —
+  already saved in the user's own Google Drive, fetched and rendered
+  live (see js/app.js, openAddContentLink / loadAndRenderMdFileContent,
+  google-sheet-template/Code.gs handleGetContentFolder_, and
   google-sheet-template/README.txt section 7). The older "Upload
   Markdown" button has been removed from the UI; any topic with
   legacy explanation text saved that way still renders as before.
+  The Markdown in that .md file / cell can also include mermaid
+  diagrams, Chart.js charts, plain Markdown images (auto-captioned
+  from the alt text, click to enlarge), and lottie animation fences —
+  all handled by js/richcontent.js; see README.txt section 8 for the
+  authoring syntax. A "Copy AI Prompt" button in the same modal copies
+  a ready-made prompt (js/app.js CONTENT_LINK_AI_PROMPT) for turning a
+  source PDF into this exact syntax, including which image/animation
+  filenames to add to the Drive folder.
 - RIGHT PANEL now has three tabs:
   - REFERENCES (was "Resources"): unchanged — links such as Google
     Drive/Web and YouTube, with a page/location reference.
