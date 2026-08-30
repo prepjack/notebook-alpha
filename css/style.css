@@ -3124,6 +3124,40 @@ body.index-directory-resizing .index-directory-workspace {
     overflow: hidden;
 }
 .rc-lottie svg { max-width: 100%; }
+
+/* Applied instead of the default sizing when a ```lottie block couldn't be
+   rendered, so the error message reads as a normal inline note rather than
+   sitting inside a large, mostly-empty box (which is exactly the "empty
+   box" symptom this whole system exists to avoid). */
+.rc-lottie.rc-lottie-error {
+    min-height: 0;
+    display: block;
+    justify-content: flex-start;
+    text-align: left;
+}
+
+/* Reliable motion fallback for simple hand-authored Lottie diagrams.
+   Applied only when the lottie fence explicitly requests "motion". */
+.rc-lottie-motion-float svg {
+    animation: rcLottieFloat 3.6s ease-in-out infinite;
+    transform-origin: center;
+    will-change: transform;
+}
+.rc-lottie-motion-pulse svg {
+    animation: rcLottiePulse 2.8s ease-in-out infinite;
+    transform-origin: center;
+    will-change: transform;
+}
+@keyframes rcLottieFloat {
+    0%, 100% { transform: translateY(0) scale(1); }
+    25% { transform: translateY(-7px) scale(1.015); }
+    50% { transform: translateY(-2px) scale(1.025); }
+    75% { transform: translateY(5px) scale(1.012); }
+}
+@keyframes rcLottiePulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.035); }
+}
 .rc-lottie-debug {
     width: 100%;
     margin-top: 10px;
