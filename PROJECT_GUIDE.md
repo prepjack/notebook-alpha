@@ -137,3 +137,39 @@ Do not redesign the UI unless explicitly requested. Preserve the current hierarc
 
 ## Canonical node labels
 `Subject → Course → Unit → Chapter → Topic → Subtopic → Subtopic → …`. The visible classification label is derived from the node's depth in the tree (see `getNodeLevelLabel` in `js/app.js`), not from its stored `type` field. Subject, Course, Unit, Chapter and Topic must never be displayed as Subtopic.
+
+## Index Terms — {{}} auto-detection + manual marking + subtopic-scoped tab
+Builds on the existing "Index_Terms" / "Index_Node" registry above — this is
+the SAME two-sheet schema, not a new one. Two new ways terms get INTO that
+registry, plus a second UI lens onto it:
+
+- **Auto ({{}})**: authors wrap glossary-worthy terms in double curly braces
+  in the .md source (see the updated `CONTENT_LINK_AI_PROMPT` in `js/app.js`
+  — INDEX TERM MARKING section). `js/richcontent.js`'s `extractIndexTerms()`
+  turns the FIRST occurrence per rendered depth/language block into a
+  `<span class="rc-index-term">`; repeats fall back to plain **bold**.
+  `source_type = "content"` when synced to the registry.
+- **Manual (right-click)**: selecting text inside the content panel and
+  choosing "Mark as index term" (custom context menu, `js/app.js`) wraps it
+  in the same span shape (`.rc-index-term.manual`) and syncs it the same
+  way. `source_type = "manual"`.
+- Both are synced via a single POST action, **`sync_index_term`**
+  (`{term, node_id, source_type}`) — it does find-or-create AND link
+  server-side in one call, because POST responses on this public webapp are
+  sent with `mode:"no-cors"` and are never actually readable client-side
+  (same constraint as every other write in `Code.gs`). "Unmark" calls
+  **`unlink_index_term`** (`{term, node_id}`), which removes only that one
+  (term, node) link — the term itself, and any of its other node links,
+  are left alone.
+- The Index tab (right panel) now has TWO views: **"This Topic"** (default)
+  — only terms linked to the currently open subtopic, fetched via the new
+  GET action **`get_index_terms_for_node`** — and **"Full A-Z Glossary"**,
+  the original global view (`renderIndexAZList()`, unchanged). Both read the
+  same registry; switching scope never re-fetches from a different source.
+- Public-write abuse guard: `checkIndexWriteRateLimit_()` in `Code.gs` is a
+  simple GLOBAL rate limit (20 writes/60s across all visitors, via
+  `CacheService`) applied to `sync_index_term` / `unlink_index_term` only.
+  Flagging as a known gap: no OTHER public write action in `Code.gs`
+  (`save_core`, `save_resource`, `save_structure`, etc.) has any throttling
+  today either — the same helper can be reused there if that becomes a
+  real concern.

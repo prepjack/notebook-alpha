@@ -31,6 +31,72 @@
     // the user opens a new topic in the same session.
     const liveLottieInstances = new Set();
 
+    /* =========================================================
+       ALPHA-PLUS — INDEX TERMS: {{Term}} auto-detection
+       Runs BEFORE marked.parse()/DOMPurify, on the exact text that is
+       about to be rendered (i.e. already split to the current
+       language + depth block by app.js). A term is spanned only at
+       its FIRST occurrence within that block; later repeats of the
+       same term fall back to plain **bold** so no duplicate DOM id
+       is ever created. Returned alongside the rewritten text so the
+       caller (renderRichContent) can hand the term list to app.js
+       for the subtopic-scoped Index tab.
+       ========================================================= */
+
+    function slugifyIndexTerm(term) {
+        const base = String(term || "")
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9\s-]/g, "")
+            .replace(/\s+/g, "-")
+            .replace(/-+/g, "-")
+            .replace(/^-|-$/g, "");
+        return "term-" + (base || "entry");
+    }
+
+    function escapeIndexAttr(value) {
+        return String(value)
+            .replaceAll("&", "&amp;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;");
+    }
+
+    // Returns { text, terms } — text has every {{Term}} replaced (first
+    // occurrence -> <span>, repeats -> **bold**), terms is
+    // [{ term, id }] in first-seen order, ready to sync/list.
+    function extractIndexTerms(rawText) {
+        const seenNormalized = new Map(); // normalizedTerm -> id
+        const usedIds = new Set();
+        const terms = [];
+
+        const text = String(rawText || "").replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (match, rawTerm) => {
+            const term = rawTerm.trim();
+            if (!term) return "";
+
+            const normalized = term.toLowerCase();
+
+            if (seenNormalized.has(normalized)) {
+                // Repeat mention of an already-spanned term this block —
+                // keep it readable but don't create a second id.
+                return `**${term}**`;
+            }
+
+            let id = slugifyIndexTerm(term);
+            let suffix = 2;
+            while (usedIds.has(id)) {
+                id = `${slugifyIndexTerm(term)}-${suffix++}`;
+            }
+            usedIds.add(id);
+            seenNormalized.set(normalized, id);
+            terms.push({ term, id });
+
+            return `<span class="rc-index-term" data-term="${escapeIndexAttr(term)}" id="${id}">${term}</span>`;
+        });
+
+        return { text, terms };
+    }
+
     /**
      * Destroys tracked lottie-web instances whose element lives inside
      * `container` (or, with no argument, every tracked instance whose
@@ -556,20 +622,29 @@
         // every topic the user opens in the same session.
         destroyLottieAnimationsWithin(container);
 
-        const text = resolveAssetRefs(String(raw || "").trim(), assets);
+        const resolvedText = resolveAssetRefs(String(raw || "").trim(), assets);
 
-        if (!text) {
+        if (!resolvedText) {
             container.innerHTML = "";
+            window.lastRenderedIndexTerms = [];
             return;
         }
 
         if (typeof marked === "undefined" || typeof DOMPurify === "undefined") {
-            container.textContent = text; // safe fallback if a CDN script failed to load
+            container.textContent = resolvedText; // safe fallback if a CDN script failed to load
+            window.lastRenderedIndexTerms = [];
             return;
         }
 
+        // {{Term}} -> <span class="rc-index-term" ...> (first occurrence
+        // only). window.lastRenderedIndexTerms is read by app.js right
+        // after this call to sync/list terms for the subtopic-scoped
+        // Index tab — see ALPHA-PLUS INDEX TERMS in app.js.
+        const { text, terms } = extractIndexTerms(resolvedText);
+        window.lastRenderedIndexTerms = terms;
+
         const html = marked.parse(text);
-        container.innerHTML = DOMPurify.sanitize(html, { ADD_ATTR: ["target"] });
+        container.innerHTML = DOMPurify.sanitize(html, { ADD_ATTR: ["target", "data-term"] });
 
         container.querySelectorAll("a[href]").forEach(a => {
             a.setAttribute("target", "_blank");
@@ -583,4 +658,8 @@
     }
 
     window.renderRichContent = renderRichContent;
+    // Exposed so app.js's manual right-click "Mark as index term" can
+    // generate ids the exact same way as the {{Term}} auto-detection above
+    // (and avoid colliding with an id already used on the page).
+    window.slugifyIndexTerm = slugifyIndexTerm;
 })();

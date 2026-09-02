@@ -915,6 +915,28 @@ body.index-directory-resizing .index-directory-workspace {
 }
 
 /* ALPHA-PLUS — INDEX (A–Z, book-style) */
+/* ALPHA-PLUS — INDEX TERMS: scope toggle (This Topic / Full A-Z Glossary) */
+.index-scope-toggle{display:flex;gap:6px;margin-bottom:12px;background:#f1f4ee;border-radius:8px;padding:3px}
+.index-scope-btn{flex:1;padding:7px 8px;border:none;border-radius:6px;background:transparent;color:var(--muted);font:600 11.5px Arial,sans-serif;cursor:pointer}
+.index-scope-btn.active{background:#fff;color:var(--green);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.index-scoped-list{font-family:Arial,sans-serif}
+
+/* ALPHA-PLUS — INDEX TERMS: {{}} auto-detected + manually marked spans
+   inside rendered content (js/richcontent.js + js/app.js manual marking) */
+.rc-index-term{background:var(--green-soft);color:var(--green);border-radius:4px;padding:0 3px;cursor:default;border-bottom:2px solid rgba(90,140,110,.35)}
+.rc-index-term.manual{border-bottom-style:dashed}
+.rc-index-term-flash{animation:rcIndexTermFlash 1.6s ease}
+@keyframes rcIndexTermFlash{
+    0%{background:#ffe9a8}
+    100%{background:var(--green-soft)}
+}
+
+/* ALPHA-PLUS — INDEX TERMS: custom right-click context menu
+   (replaces the browser default on the content panel) */
+.index-context-menu{position:absolute;z-index:1000;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 28px rgba(0,0,0,.18);padding:4px;min-width:180px}
+.index-context-menu-item{display:block;width:100%;box-sizing:border-box;text-align:left;padding:8px 10px;border:none;background:transparent;border-radius:6px;font:12.5px Arial,sans-serif;color:#354239;cursor:pointer}
+.index-context-menu-item:hover{background:var(--green-soft);color:var(--green)}
+
 .index-search-wrap{position:relative;margin-bottom:14px}
 .index-search-input{width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid var(--line);border-radius:7px;font:12px Arial,sans-serif;background:#fff;color:var(--text)}
 .index-search-input:focus{outline:none;border-color:#9bb2a2}

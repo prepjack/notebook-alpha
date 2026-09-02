@@ -193,12 +193,17 @@
                             Open in new tab ↗
                         </button>
                     </div>
+                    <div class="index-scope-toggle" role="tablist" aria-label="Index scope">
+                        <button type="button" class="index-scope-btn active" data-index-scope="topic">This Topic</button>
+                        <button type="button" class="index-scope-btn" data-index-scope="global">Full A-Z Glossary</button>
+                    </div>
                     <div class="index-search-wrap">
                         <input type="text" id="index-search-input" class="index-search-input"
                                placeholder="Search the index... e.g. bibli" autocomplete="off">
                         <div id="index-suggestions" class="index-suggestions" hidden></div>
                     </div>
-                    <div id="index-az-list" class="index-az-list"></div>
+                    <div id="index-scoped-list" class="index-scoped-list"></div>
+                    <div id="index-az-list" class="index-az-list" hidden></div>
                 </div>
             </aside>
 

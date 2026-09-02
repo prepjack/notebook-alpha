@@ -855,6 +855,7 @@ function renderCurrentLanguageBlock(container) {
     if (window.ReadingTools) window.ReadingTools.onContentRendered();
     scheduleContentScrollRestore();
     buildContentTocPanel();
+    syncAndRenderScopedIndex();
 }
 
 function renderAlphaContentDiagnostic(container) {
@@ -1309,6 +1310,29 @@ The file is rendered using marked.js (GitHub-flavored Markdown). Use:
 - Chart blocks
 - Markdown images
 - Lottie animations using the exact JSON configuration format above
+- {{Term}} double-curly-brace wrapping for key terminologies, concepts,
+  and definitions that belong in a glossary/index — see INDEX TERM
+  MARKING below for how to use this
+
+INDEX TERM MARKING:
+As you write, identify the important terminologies, key concepts, and
+definitions in this topic — the kind that would belong in a glossary
+or index for a student revising this chapter. Wrap each such term in
+double curly braces the FIRST time it appears WITHIN EACH depth
+section (Full/Half/Mini), e.g. {{Mental Processes}} — each depth
+section is rendered on its own, so the "first occurrence" rule resets
+at the start of every FULL/HALF/MINI block, not just once for the
+whole file. Do not wrap every bolded phrase — only wrap terms that
+are genuinely index-worthy standalone concepts, not general emphasis.
+Wrap a given term only once per depth section, at its first occurrence
+there; leave all later mentions of the same term in that same section
+as plain text (still use **bold** for emphasis on repeat mentions if
+needed). Keep the exact same set of terms wrapped across EN, HI, and
+HINGLISH versions of the same depth section, so the glossary stays
+consistent regardless of which language the student is reading. Aim
+for the natural set of key terms a student would want in a quick-
+reference glossary for this topic — typically a handful per depth
+section, not every noun phrase.
 
 MERMAID:
 Use \`\`\`mermaid fenced blocks for processes, hierarchies, cycles, relationships, flowcharts, or mind maps when they genuinely improve understanding.
@@ -1470,6 +1494,7 @@ Before finishing, verify:
 - every Lottie block contains valid JSON configuration, not a bare filename
 - every referenced asset filename is listed in "Files needed in this folder:"
 - no unnecessary external URLs are used
+- {{}} is used only for genuine glossary-worthy terms, once per depth section, and the same terms are wrapped consistently across EN/HI/HINGLISH
 
 Create the complete Notebook Alpha study-content package for the topic and source material provided in zip folder.`;
 
@@ -2325,7 +2350,12 @@ function selectRightPanelTab(tab) {
     }
 
     if (tab === "index") {
-        renderIndexAZList(document.getElementById("index-search-input")?.value.trim().toLowerCase() || "");
+        const query = document.getElementById("index-search-input")?.value.trim().toLowerCase() || "";
+        if (indexTabScope === "global") {
+            renderIndexAZList(query);
+        } else {
+            renderScopedIndexList(query);
+        }
     }
 }
 
@@ -2530,6 +2560,351 @@ function cssEscapeId(id) {
     return (window.CSS && CSS.escape) ? CSS.escape(id) : String(id).replace(/["\\]/g, "\\$&");
 }
 
+/* =========================================================
+   ALPHA-PLUS — INDEX TERMS: subtopic-scoped Index tab
+   Adds a SECOND view to the Index tab, alongside the existing
+   global A-Z glossary above: "This Topic", listing only the terms
+   linked to whichever subtopic is currently open (auto {{}} terms
+   picked up by richcontent.js's extraction pass, PLUS anything
+   marked manually via right-click below). Both views read/write the
+   SAME Index_Terms/Index_Node registry — there is only ever one
+   source of truth; this is just a filtered lens onto it.
+   ========================================================= */
+
+let indexTabScope = "topic"; // "topic" | "global"
+let currentScopedIndexTerms = []; // [{ index_id, term, id, source_type }]
+
+function initIndexScopeToggle() {
+    document.querySelectorAll(".index-scope-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+            indexTabScope = btn.dataset.indexScope;
+            document.querySelectorAll(".index-scope-btn").forEach(b => b.classList.toggle("active", b === btn));
+
+            document.getElementById("index-scoped-list").hidden = indexTabScope !== "topic";
+            document.getElementById("index-az-list").hidden = indexTabScope !== "global";
+            const suggestions = document.getElementById("index-suggestions");
+            if (suggestions) suggestions.hidden = true;
+
+            const query = document.getElementById("index-search-input")?.value.trim().toLowerCase() || "";
+            if (indexTabScope === "global") {
+                renderIndexAZList(query);
+            } else {
+                renderScopedIndexList(query);
+            }
+        });
+    });
+}
+
+// Called right after every content render (renderCurrentLanguageBlock).
+// The current render's {{}} extraction is the ONLY source of truth for
+// which auto terms exist in this node's content RIGHT NOW — so this
+// also RECONCILES the registry: any previously-synced "content" term
+// that this render no longer contains (removed from the .md, or the
+// .md itself was swapped out/regenerated) gets unlinked, so it stops
+// showing up as a dead, unclickable entry in the Index tab. Manual
+// (right-click) terms are never touched by this reconciliation — only
+// "content"-sourced links are ever added or removed automatically.
+async function syncAndRenderScopedIndex() {
+    const node = selectedTopicNode;
+    if (!node) {
+        currentScopedIndexTerms = [];
+        renderScopedIndexList();
+        return;
+    }
+
+    const nodeId = node.id;
+    const autoTerms = window.lastRenderedIndexTerms || [];
+    const autoNormalized = new Set(autoTerms.map(t => t.term.trim().toLowerCase()));
+
+    const existing = await fetchIndexTermsForNode(nodeId);
+
+    const stale = existing.filter(t =>
+        t.source_type === "content" && !autoNormalized.has(String(t.term).trim().toLowerCase())
+    );
+    stale.forEach(t => unlinkIndexTermFromRegistry(t.term, nodeId));
+
+    autoTerms.forEach(t => syncIndexTermToRegistry(t.term, nodeId, "content"));
+
+    // Build the displayed list from what we just computed rather than
+    // re-fetching immediately — the unlink/sync writes above are
+    // fire-and-forget ("no-cors"), so a GET right after them could race
+    // and momentarily show pre-write data.
+    const staleIds = new Set(stale.map(t => t.index_id));
+    const keptExisting = existing.filter(t => !staleIds.has(t.index_id));
+    const existingNormalized = new Set(keptExisting.map(t => String(t.term).trim().toLowerCase()));
+    const newlyAdded = autoTerms
+        .filter(t => !existingNormalized.has(t.term.trim().toLowerCase()))
+        .map(t => ({ term: t.term, id: t.id, source_type: "content" }));
+
+    currentScopedIndexTerms = [...keptExisting, ...newlyAdded];
+    renderScopedIndexList(document.getElementById("index-search-input")?.value.trim().toLowerCase() || "");
+}
+
+// Pure fetch, no side effects on currentScopedIndexTerms/the UI — used
+// by syncAndRenderScopedIndex() above to read the PRE-reconciliation
+// state for whichever node id is passed in (never the stale, possibly
+// different-topic, currentScopedIndexTerms left over from before).
+async function fetchIndexTermsForNode(nodeId) {
+    try {
+        const url = `${GOOGLE_SHEET_API}?action=get_index_terms_for_node&node_id=${encodeURIComponent(nodeId)}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        return (data && data.success && Array.isArray(data.data)) ? data.data : [];
+    } catch (error) {
+        console.error("Fetching scoped index terms failed:", error);
+        return [];
+    }
+}
+
+// Fire-and-forget, same "no-cors" pattern every other write in this file
+// uses — the response is never read (Apps Script webapp POST responses
+// aren't reliably readable cross-origin), so the backend's sync_index_term
+// action does the find-or-create AND the link in one call server-side.
+async function syncIndexTermToRegistry(term, nodeId, sourceType) {
+    try {
+        await fetch(GOOGLE_SHEET_API, {
+            method: "POST",
+            mode: "no-cors",
+            body: JSON.stringify({ action: "sync_index_term", term, node_id: nodeId, source_type: sourceType })
+        });
+        invalidateIndexCache(); // global A-Z glossary should pick up the new link too
+    } catch (error) {
+        console.error("Index term sync failed:", term, error);
+    }
+}
+
+async function unlinkIndexTermFromRegistry(term, nodeId) {
+    try {
+        await fetch(GOOGLE_SHEET_API, {
+            method: "POST",
+            mode: "no-cors",
+            body: JSON.stringify({ action: "unlink_index_term", term, node_id: nodeId })
+        });
+        invalidateIndexCache();
+    } catch (error) {
+        console.error("Index term unlink failed:", term, error);
+    }
+}
+
+function renderScopedIndexList(filterText = "") {
+    const container = document.getElementById("index-scoped-list");
+    if (!container) return;
+
+    let terms = currentScopedIndexTerms;
+    if (filterText) {
+        terms = terms.filter(t => t.term.toLowerCase().includes(filterText));
+    }
+
+    if (!selectedTopicNode) {
+        container.innerHTML = `<p class="index-empty-note">Open a topic to see its index terms.</p>`;
+        return;
+    }
+
+    if (!terms.length) {
+        container.innerHTML = `<p class="index-empty-note">${
+            filterText ? "No index entries match your search." : "No index terms marked in this topic yet."
+        }</p>`;
+        return;
+    }
+
+    container.innerHTML = "";
+    terms
+        .slice()
+        .sort((a, b) => a.term.localeCompare(b.term, undefined, { sensitivity: "base" }))
+        .forEach(t => {
+            const row = document.createElement("div");
+            row.className = "index-term-row";
+            row.innerHTML = `
+                <span class="index-term-name">${escapeHtml(t.term)}</span>
+                ${t.source_type === "manual" ? `<span class="index-term-alias-of">manual</span>` : ""}
+            `;
+            row.addEventListener("click", () => scrollToScopedIndexTerm(t));
+            container.appendChild(row);
+        });
+}
+
+// Clicking a "This Topic" entry scrolls WITHIN the already-open content
+// (unlike the global glossary's rows, which navigate to a different
+// node entirely) — matches Part 2 of the original spec.
+function scrollToScopedIndexTerm(termEntry) {
+    const el = termEntry.id ? document.getElementById(cssEscapeId(termEntry.id)) : null;
+
+    if (!el) {
+        // Best-effort text match fallback for manually-marked terms whose
+        // span isn't present in the CURRENT render (different depth/
+        // language block than when it was marked) — still listed above,
+        // just nothing to scroll to yet.
+        return;
+    }
+
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("rc-index-term-flash");
+    setTimeout(() => el.classList.remove("rc-index-term-flash"), 1600);
+}
+
+/* =========================================================
+   ALPHA-PLUS — INDEX TERMS: manual right-click marking
+   Custom context menu on the content panel — no browser default.
+   Selecting text -> "Mark as index term" wraps it in the same
+   .rc-index-term span the {{}} auto-detection produces (source_type
+   "manual" server-side) so both kinds of terms behave identically
+   everywhere else (Index tab list, click-to-scroll, styling).
+   ========================================================= */
+
+let indexContextMenuEl = null;
+
+function initIndexTermContextMenu() {
+    const panel = document.getElementById("middle-panel");
+    if (!panel) return;
+
+    panel.addEventListener("contextmenu", (event) => {
+        const contentEl = document.getElementById("rc-explanation");
+        if (!contentEl || !contentEl.contains(event.target)) return;
+
+        const selection = window.getSelection();
+        const selectedText = selection ? selection.toString().trim() : "";
+        if (!selectedText) return;
+
+        event.preventDefault();
+
+        const range = selection.rangeCount ? selection.getRangeAt(0) : null;
+        const existingSpan = range ? findEnclosingIndexTermSpan(range, contentEl) : null;
+
+        showIndexContextMenu(event.pageX, event.pageY, {
+            mode: existingSpan ? "unmark" : "mark",
+            selectedText,
+            range,
+            existingSpan
+        });
+    });
+
+    document.addEventListener("click", closeIndexContextMenu);
+    document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") closeIndexContextMenu();
+    });
+}
+
+// A selection only qualifies for "unmark" if BOTH its start and end sit
+// inside the same single .rc-index-term span (a partial/crossing
+// selection is treated as a fresh "mark" instead, matching Part 3).
+function findEnclosingIndexTermSpan(range, contentEl) {
+    const startSpan = range.startContainer.nodeType === 3
+        ? range.startContainer.parentElement?.closest(".rc-index-term")
+        : range.startContainer.closest?.(".rc-index-term");
+    const endSpan = range.endContainer.nodeType === 3
+        ? range.endContainer.parentElement?.closest(".rc-index-term")
+        : range.endContainer.closest?.(".rc-index-term");
+
+    if (startSpan && startSpan === endSpan && contentEl.contains(startSpan)) {
+        return startSpan;
+    }
+    return null;
+}
+
+function closeIndexContextMenu() {
+    if (indexContextMenuEl) {
+        indexContextMenuEl.remove();
+        indexContextMenuEl = null;
+    }
+}
+
+function showIndexContextMenu(x, y, ctx) {
+    closeIndexContextMenu();
+
+    const menu = document.createElement("div");
+    menu.className = "index-context-menu";
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+
+    const option = document.createElement("button");
+    option.type = "button";
+    option.className = "index-context-menu-item";
+    option.textContent = ctx.mode === "unmark" ? "Unmark as index term" : "Mark as index term";
+    option.addEventListener("click", (event) => {
+        event.stopPropagation();
+        closeIndexContextMenu();
+        if (ctx.mode === "unmark") {
+            unmarkIndexTermSpan(ctx.existingSpan);
+        } else {
+            markSelectionAsIndexTerm(ctx.selectedText, ctx.range);
+        }
+    });
+
+    menu.appendChild(option);
+    document.body.appendChild(menu);
+    indexContextMenuEl = menu;
+
+    // Keep the menu on-screen if it was opened near the right/bottom edge.
+    const rect = menu.getBoundingClientRect();
+    if (rect.right > window.innerWidth) menu.style.left = `${x - rect.width}px`;
+    if (rect.bottom > window.innerHeight) menu.style.top = `${y - rect.height}px`;
+}
+
+function markSelectionAsIndexTerm(term, range) {
+    if (!selectedTopicNode || !range) return;
+
+    const existingIds = new Set(
+        [...document.querySelectorAll("#rc-explanation [id]")].map(el => el.id)
+    );
+    let id = window.slugifyIndexTerm ? window.slugifyIndexTerm(term) : `term-${Date.now()}`;
+    let suffix = 2;
+    while (existingIds.has(id)) {
+        id = `${window.slugifyIndexTerm(term)}-${suffix++}`;
+    }
+
+    const span = document.createElement("span");
+    span.className = "rc-index-term manual";
+    span.dataset.term = term;
+    span.id = id;
+
+    try {
+        range.surroundContents(span);
+    } catch (error) {
+        // Selection crosses element boundaries (spans two <p> tags, etc.)
+        // — surroundContents() can't wrap a non-contiguous range safely,
+        // so fall back to just extracting+re-inserting the plain text.
+        span.textContent = range.toString();
+        range.deleteContents();
+        range.insertNode(span);
+    }
+
+    window.getSelection()?.removeAllRanges();
+
+    // Optimistic UI: show it in the Index tab immediately, sync in the
+    // background, and roll back the DOM + list if the save fails.
+    const nodeId = selectedTopicNode.id;
+    currentScopedIndexTerms = [...currentScopedIndexTerms, { term, id, source_type: "manual" }];
+    renderScopedIndexList(document.getElementById("index-search-input")?.value.trim().toLowerCase() || "");
+
+    fetch(GOOGLE_SHEET_API, {
+        method: "POST",
+        mode: "no-cors",
+        body: JSON.stringify({ action: "sync_index_term", term, node_id: nodeId, source_type: "manual" })
+    })
+        .then(() => invalidateIndexCache())
+        .catch((error) => {
+            console.error("Marking index term failed, rolling back:", term, error);
+            span.replaceWith(document.createTextNode(span.textContent));
+            currentScopedIndexTerms = currentScopedIndexTerms.filter(t => t.id !== id);
+            renderScopedIndexList(document.getElementById("index-search-input")?.value.trim().toLowerCase() || "");
+        });
+}
+
+function unmarkIndexTermSpan(span) {
+    if (!span || !selectedTopicNode) return;
+
+    const term = span.dataset.term || span.textContent;
+    const id = span.id;
+    const nodeId = selectedTopicNode.id;
+
+    span.replaceWith(document.createTextNode(span.textContent));
+
+    currentScopedIndexTerms = currentScopedIndexTerms.filter(t => t.id !== id);
+    renderScopedIndexList(document.getElementById("index-search-input")?.value.trim().toLowerCase() || "");
+
+    unlinkIndexTermFromRegistry(term, nodeId);
+}
+
 function initIndexSearch() {
     const input = document.getElementById("index-search-input");
     const suggestions = document.getElementById("index-suggestions");
@@ -2537,12 +2912,18 @@ function initIndexSearch() {
 
     input.addEventListener("input", () => {
         const query = input.value.trim().toLowerCase();
-        renderIndexAZList(query);
-        renderIndexSuggestions(query);
+        if (indexTabScope === "global") {
+            renderIndexAZList(query);
+            renderIndexSuggestions(query);
+        } else {
+            renderScopedIndexList(query);
+        }
     });
 
     input.addEventListener("focus", () => {
-        if (input.value.trim()) renderIndexSuggestions(input.value.trim().toLowerCase());
+        if (indexTabScope === "global" && input.value.trim()) {
+            renderIndexSuggestions(input.value.trim().toLowerCase());
+        }
     });
 
     document.addEventListener("click", (event) => {
@@ -2616,6 +2997,8 @@ async function startApp() {
     invalidateIndexCache();
     initRightPanelTabs();
     initIndexSearch();
+    initIndexScopeToggle();
+    initIndexTermContextMenu();
 
     // Select the first topic automatically so the notebook is not empty.
     const firstTopic = studyTreeElement.querySelector(
