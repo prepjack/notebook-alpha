@@ -121,6 +121,31 @@ function doGet(e) {
     return jsonResponse_(getStorageStatus_());
   }
 
+  // ALPHA-PLUS — INDEX TERMS (subtopic-scoped tab): every term (both
+  // {{}}-auto and manual right-click) currently linked to one node,
+  // read fresh from Index_Terms/Index_Node — same registry the global
+  // A-Z glossary uses, just filtered to one node_id server-side.
+  if (action === "get_index_terms_for_node") {
+    return jsonResponse_(getIndexTermsForNode_(e.parameter.node_id));
+  }
+
+  // ALPHA-PLUS — INDEX TERMS: lightweight refresh for the GLOBAL
+  // views (Full A-Z Glossary in the main app, index-directory.html) —
+  // just the two index sheets, not the full Nodes/Content/Resources
+  // dump. Without this, invalidateIndexCache() only cleared a LOCAL
+  // rebuild cache and never actually re-fetched anything from the
+  // server, so a term synced mid-session (via {{}} or right-click)
+  // only ever showed up in "This Topic" (which does its own live
+  // fetch) and never in the global views until a full page reload.
+  if (action === "get_index_registry") {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    return jsonResponse_({
+      success: true,
+      index_terms: getSheetDataSafe_(ss, "Index_Terms"),
+      index_links: getSheetDataSafe_(ss, "Index_Node")
+    });
+  }
+
   const ss = SpreadsheetApp.getActiveSpreadsheet();
 
   const data = {
@@ -200,28 +225,77 @@ function doPost(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
 
-    // ALPHA-PLUS — INDEX REGISTRY: create/reuse a canonical Index term
-    // (spec sections 3/4). Not called by any current UI yet — this is
-    // the write path a future "add index term manually" (spec section
-    // 10 review workflow) or content-term-review UI will call. Safe to
-    // ship now: it's additive and nothing existing calls it.
-    if (data.action === "save_index_term") {
-      const result = findOrCreateIndexTerm_(data.term);
-
-      return ContentService
-        .createTextOutput(JSON.stringify(result))
-        .setMimeType(ContentService.MimeType.JSON);
+    // ALPHA-PLUS — INDEX TERMS (auto {{}} + manual right-click write
+    // path). Frontend POSTs here are sent with mode:"no-cors" (same as
+    // every other write action in this file), so the response is never
+    // actually read by the browser — this single action therefore does
+    // BOTH the find-or-create AND the link server-side in one round
+    // trip, since a separate create-then-link round trip would need a
+    // readable POST response we don't have.
+    // source_type: "content" for {{}} auto-detected terms, "manual"
+    // for right-click marks. Idempotent: safe to call repeatedly for
+    // the same (term, node) pair (e.g. every time a topic re-renders).
+    if (data.action === "sync_index_term") {
+      if (!checkIndexWriteRateLimit_()) {
+        return jsonResponse_({ success: false, error: "Rate limit exceeded. Please slow down." });
+      }
+      const result = syncIndexTerm_(data.term, data.node_id, data.source_type);
+      return jsonResponse_(result);
     }
 
-    // ALPHA-PLUS — INDEX REGISTRY: link an existing Index term to a
-    // tree node (many-to-many, spec section 7). source_type mirrors
-    // spec section 8: "tree" | "content" | "alias" | "manual".
-    if (data.action === "link_index_term") {
-      const result = linkIndexTerm_(data.index_id, data.node_id, data.source_type);
+    // ALPHA-PLUS — INDEX TERMS: batched version of the above — one
+    // topic's whole {{}} term set (often 10-15+ terms) in ONE HTTP
+    // round trip instead of one-per-term. This matters for two
+    // reasons: (1) each browser->Apps Script round trip is slow, and
+    // firing a dozen nearly simultaneously made it easy for two
+    // requests for the SAME new term to both read "not found" and
+    // both insert a row (a genuine duplicate — findOrCreateIndexTerm_
+    // has no lock); (2) it used to count as a dozen separate writes
+    // against checkIndexWriteRateLimit_() below, so a single busy
+    // topic could burn most of the per-minute budget by itself.
+    if (data.action === "sync_index_terms_bulk") {
+      if (!checkIndexWriteRateLimit_()) {
+        return jsonResponse_({ success: false, error: "Rate limit exceeded. Please slow down." });
+      }
+      const result = syncIndexTermsBulk_(data.node_id, data.terms, data.unlink);
+      return jsonResponse_(result);
+    }
 
-      return ContentService
-        .createTextOutput(JSON.stringify(result))
-        .setMimeType(ContentService.MimeType.JSON);
+    // ALPHA-PLUS — INDEX TERMS: standalone add (index-directory.html's
+    // "Add a term") — a concept-only entry with no topic link yet.
+    // Legitimate per the registry's own design (a term with zero
+    // Index_Node links just has nothing to navigate to until it's
+    // linked later, from a topic).
+    if (data.action === "add_index_term_standalone") {
+      if (!checkIndexWriteRateLimit_()) {
+        return jsonResponse_({ success: false, error: "Rate limit exceeded. Please slow down." });
+      }
+      const result = findOrCreateIndexTerm_(data.term);
+      return jsonResponse_({ success: true, index_id: result.index_id, term: result.term });
+    }
+
+    // ALPHA-PLUS — INDEX TERMS: full delete (index-directory.html's
+    // "×" per row) — removes the Index_Terms row AND every Index_Node
+    // link to it. Different from unlink_index_term, which only removes
+    // ONE (term, node) link and leaves the term + its other links alone.
+    if (data.action === "delete_index_term") {
+      if (!checkIndexWriteRateLimit_()) {
+        return jsonResponse_({ success: false, error: "Rate limit exceeded. Please slow down." });
+      }
+      const result = deleteIndexTermCascade_(data.index_id);
+      return jsonResponse_(result);
+    }
+
+    // ALPHA-PLUS — INDEX TERMS: removes ONE (term, node) link only —
+    // e.g. "Unmark as index term" on one subtopic. The term itself
+    // (and any of its OTHER node links) is left untouched, since the
+    // same term may legitimately be marked on several subtopics.
+    if (data.action === "unlink_index_term") {
+      if (!checkIndexWriteRateLimit_()) {
+        return jsonResponse_({ success: false, error: "Rate limit exceeded. Please slow down." });
+      }
+      const result = unlinkIndexTermByTerm_(data.term, data.node_id);
+      return jsonResponse_(result);
     }
 
     // MCQ BANK — PHASE 3: bulk import from js/mcq-parse.js's parseMcqMarkdown()
@@ -1585,6 +1659,216 @@ function linkIndexTerm_(indexId, nodeId, sourceType) {
   linksSheet.appendRow([indexId, nodeId, sourceType || "manual", new Date()]);
 
   return { success: true, action: "linked", index_id: indexId, node_id: nodeId };
+}
+
+// ALPHA-PLUS — INDEX TERMS: bulk find-or-create + link (+ unlink),
+// one Lock-protected pass per call instead of N separate HTTP round
+// trips. Reuses the same per-term primitives below — just called in
+// a loop, inside ONE request — so an entire topic's {{}} term set
+// syncs as a single atomic-ish unit and only counts once against the
+// rate limiter, instead of the previous one-request-per-term design
+// which both wasted the write budget AND, being N near-simultaneous
+// unlocked requests, could race and create a duplicate Index_Terms
+// row for the same new term (two requests both seeing "not found").
+function syncIndexTermsBulk_(nodeId, syncTerms, unlinkTerms) {
+  if (!nodeId) throw new Error("node_id is required.");
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+
+  try {
+    const synced = (syncTerms || []).map(function (t) {
+      const termResult = findOrCreateIndexTerm_(t.term);
+      const linkResult = linkIndexTerm_(termResult.index_id, nodeId, t.source_type || "manual");
+      return { term: t.term, index_id: termResult.index_id, link_action: linkResult.action };
+    });
+
+    const unlinked = (unlinkTerms || []).map(function (term) {
+      return unlinkIndexTermByTerm_(term, nodeId);
+    });
+
+    return { success: true, synced_count: synced.length, unlinked_count: unlinked.length };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ALPHA-PLUS — INDEX TERMS: full delete — the Index_Terms row itself
+// AND every Index_Node row linking it to any topic (cascade). Used by
+// index-directory.html's per-row "×" — a deliberate, different action
+// from unlinkIndexTermByTerm_() above, which only removes one (term,
+// node) pair and leaves the term (and its other links) alone.
+function deleteIndexTermCascade_(indexId) {
+  if (!indexId) throw new Error("index_id is required.");
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const { termsSheet, linksSheet } = ensureIndexSheets_(ss);
+
+  const linkValues = linksSheet.getDataRange().getValues();
+  const linkHeaders = linkValues[0];
+  const lIdIdx = linkHeaders.indexOf("index_id");
+
+  let unlinkedCount = 0;
+  for (let i = linkValues.length - 1; i >= 1; i--) {
+    if (String(linkValues[i][lIdIdx]) === String(indexId)) {
+      linksSheet.deleteRow(i + 1); // +1: getValues() is 0-indexed, sheet rows are 1-indexed
+      unlinkedCount++;
+    }
+  }
+
+  const termValues = termsSheet.getDataRange().getValues();
+  const termHeaders = termValues[0];
+  const tIdIdx = termHeaders.indexOf("index_id");
+
+  let deleted = false;
+  for (let i = termValues.length - 1; i >= 1; i--) {
+    if (String(termValues[i][tIdIdx]) === String(indexId)) {
+      termsSheet.deleteRow(i + 1);
+      deleted = true;
+      break;
+    }
+  }
+
+  return { success: true, deleted, unlinked_count: unlinkedCount };
+}
+
+// ALPHA-PLUS — INDEX TERMS: combined find-or-create + link, for the
+// public sync_index_term write path (see doPost). Wraps the two
+// existing primitives so the client never needs a readable POST
+// response to know the index_id — everything happens server-side.
+function syncIndexTerm_(term, nodeId, sourceType) {
+  if (!nodeId) throw new Error("node_id is required.");
+
+  const termResult = findOrCreateIndexTerm_(term);
+  const linkResult = linkIndexTerm_(termResult.index_id, nodeId, sourceType || "manual");
+
+  return {
+    success: true,
+    index_id: termResult.index_id,
+    term: termResult.term,
+    term_action: termResult.action,
+    link_action: linkResult.action
+  };
+}
+
+// ALPHA-PLUS — INDEX TERMS: removes the Index_Node row linking this
+// term to this node only (by normalized_term lookup, since the
+// client-side "no-cors" write never has an index_id to send back).
+// Other nodes linked to the same term, and the Index_Terms row
+// itself, are left alone — a term can be legitimately marked on
+// more than one subtopic.
+function unlinkIndexTermByTerm_(term, nodeId) {
+  const cleanTerm = String(term || "").trim();
+  if (!cleanTerm) throw new Error("term is required.");
+  if (!nodeId) throw new Error("node_id is required.");
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const { termsSheet, linksSheet } = ensureIndexSheets_(ss);
+  const normalized = normalizeTerm_(cleanTerm);
+
+  const termValues = termsSheet.getDataRange().getValues();
+  const termHeaders = termValues[0];
+  const normIdx = termHeaders.indexOf("normalized_term");
+  const idIdx = termHeaders.indexOf("index_id");
+
+  let indexId = null;
+  for (let i = 1; i < termValues.length; i++) {
+    if (String(termValues[i][normIdx]) === normalized) {
+      indexId = termValues[i][idIdx];
+      break;
+    }
+  }
+
+  if (!indexId) {
+    return { success: true, action: "not_found" };
+  }
+
+  const linkValues = linksSheet.getDataRange().getValues();
+  const linkHeaders = linkValues[0];
+  const lIdIdx = linkHeaders.indexOf("index_id");
+  const lNodeIdx = linkHeaders.indexOf("node_id");
+
+  for (let i = linkValues.length - 1; i >= 1; i--) {
+    if (String(linkValues[i][lIdIdx]) === String(indexId) && String(linkValues[i][lNodeIdx]) === String(nodeId)) {
+      linksSheet.deleteRow(i + 1); // +1: getValues() is 0-indexed, sheet rows are 1-indexed
+      return { success: true, action: "unlinked", index_id: indexId, node_id: nodeId };
+    }
+  }
+
+  return { success: true, action: "not_linked" };
+}
+
+// ALPHA-PLUS — INDEX TERMS: every term currently linked to one node,
+// for the subtopic-scoped Index tab. Reuses the same two sheets the
+// global A-Z glossary reads, filtered server-side to one node_id.
+function getIndexTermsForNode_(nodeId) {
+  if (!nodeId) return { success: false, error: "node_id is required." };
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const terms = getSheetDataSafe_(ss, "Index_Terms");
+  const links = getSheetDataSafe_(ss, "Index_Node");
+
+  const termById = {};
+  terms.forEach(function (row) { termById[row.index_id] = row; });
+
+  const data = links
+    .filter(function (link) { return String(link.node_id) === String(nodeId); })
+    .map(function (link) {
+      const term = termById[link.index_id];
+      if (!term) return null;
+      return {
+        index_id: link.index_id,
+        term: term.term,
+        id: (typeof slugifyIndexTermServer_ === "function") ? slugifyIndexTermServer_(term.term) : null,
+        source_type: link.source_type || "manual"
+      };
+    })
+    .filter(Boolean);
+
+  return { success: true, data: data };
+}
+
+// Server-side mirror of js/richcontent.js's slugifyIndexTerm(), so a
+// manually-marked term (which may not exist as a live <span> on the
+// page yet, e.g. right after adding it on a different render) still
+// gets a usable/consistent id for scroll-to-highlight in the Index tab.
+function slugifyIndexTermServer_(term) {
+  const base = String(term || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return "term-" + (base || "entry");
+}
+
+// ALPHA-PLUS — INDEX TERMS: minimal public-write abuse guard.
+// This site has no login, so there is no real per-user identity to
+// throttle by — this is a deliberately simple GLOBAL rate limit
+// (max WRITES_PER_WINDOW index-term writes per WINDOW_SECONDS,
+// across all visitors combined) using CacheService, which is the
+// only cheap shared counter Apps Script gives a webapp without a
+// database write of its own. It stops a runaway script/bot from
+// flooding Index_Terms/Index_Node; it will NOT stop a determined
+// abuser rotating requests slowly. Flagging as requested: no other
+// public write endpoint in this file has ANY throttling today either
+// (save_core, save_resource, save_structure, etc. are all wide open)
+// — if that's a real concern, the same helper can be reused there.
+function checkIndexWriteRateLimit_() {
+  const WRITES_PER_WINDOW = 40; // bumped from 20 now that a whole topic's
+  // {{}} term set is ONE bulk write instead of one-per-term (see
+  // sync_index_terms_bulk above) — this budget is about guarding
+  // against a runaway script/bot, not normal editorial use.
+  const WINDOW_SECONDS = 60;
+  const cache = CacheService.getScriptCache();
+  const key = "idxWriteCount_" + Math.floor(Date.now() / (WINDOW_SECONDS * 1000));
+
+  const current = Number(cache.get(key) || 0);
+  if (current >= WRITES_PER_WINDOW) return false;
+
+  cache.put(key, String(current + 1), WINDOW_SECONDS);
+  return true;
 }
 
 // ALPHA-PLUS — ONE-SHOT MIGRATION (spec section 16/17, Phase 3).

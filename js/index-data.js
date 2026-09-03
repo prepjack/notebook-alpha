@@ -82,17 +82,34 @@ function buildIndexRegistry(data) {
 
 function buildRegistryFromServer(data) {
     const byId = new Map();
+    // Defensive: two Index_Terms rows can end up with the same
+    // normalized_term (e.g. an old race between two near-simultaneous
+    // sync requests, before sync_index_terms_bulk's single-Lock write
+    // existed) — normalizedTerm -> indexId lets a second such row
+    // merge into the first instead of showing as a separate entry.
+    const idByNormalized = new Map();
+    // Every raw row's OWN index_id -> whichever canonical id it merged
+    // into, so Index_Node links (which still reference the original,
+    // possibly-duplicate index_id) resolve to the merged entry below.
+    const canonicalByRawId = new Map();
 
     (data.indexTerms || []).forEach(row => {
         const indexId = String(row.index_id);
         if (!indexId || !row.term) return;
 
-        byId.set(indexId, {
-            indexId,
-            term: row.term,
-            normalizedTerm: row.normalized_term || normalizeTerm(row.term),
-            matches: []
-        });
+        const normalizedTerm = row.normalized_term || normalizeTerm(row.term);
+        const canonicalId = idByNormalized.get(normalizedTerm) || indexId;
+        idByNormalized.set(normalizedTerm, canonicalId);
+        canonicalByRawId.set(indexId, canonicalId);
+
+        if (!byId.has(canonicalId)) {
+            byId.set(canonicalId, {
+                indexId: canonicalId,
+                term: row.term,
+                normalizedTerm,
+                matches: []
+            });
+        }
     });
 
     // node_id -> title lookup, so a link can show a human-readable
@@ -106,7 +123,8 @@ function buildRegistryFromServer(data) {
     })(data.subjects);
 
     (data.indexLinks || []).forEach(link => {
-        const entry = byId.get(String(link.index_id));
+        const canonicalId = canonicalByRawId.get(String(link.index_id));
+        const entry = canonicalId ? byId.get(canonicalId) : null;
         const nodeId = link.node_id;
         if (!entry || !nodeId) return; // term with no node yet is fine — spec section 5
 

@@ -42,6 +42,21 @@
 
                 <div id="index-directory-count" class="index-directory-count"></div>
 
+                <div class="index-directory-add">
+                    <div class="index-directory-more-title">ADD A TERM</div>
+                    <div class="index-add-row">
+                        <input type="text" id="index-add-input" class="index-search-input"
+                               placeholder="New glossary term..." autocomplete="off">
+                        <button type="button" id="index-add-btn" class="index-add-btn">+ Add</button>
+                    </div>
+                    <p class="index-directory-refresh-note">
+                        Adds a concept-only entry (not linked to any topic yet) —
+                        useful for a term you want in the glossary before its
+                        topic exists. Use {{Term}} in a .md file, or right-click
+                        marking in the notebook, to link a term to a topic.
+                    </p>
+                </div>
+
                 <!-- Reserved space for future index tools (filters,
                      bookmarks, recently viewed terms, etc). -->
                 <div class="index-directory-more">
@@ -55,8 +70,19 @@
 
             <!-- RIGHT: every index term, multi-column, scrollable -->
             <section id="index-directory-right-panel" class="panel index-directory-right">
-                <div class="panel-heading">ALL INDEX TERMS</div>
+                <div class="panel-heading-row">
+                    <div class="panel-heading">ALL INDEX TERMS</div>
+                    <div class="index-directory-right-controls">
+                        <button type="button" id="index-directory-refresh" class="index-directory-refresh-btn"
+                                title="Refresh index" aria-label="Refresh index">⟳</button>
+                        <div class="index-sort-toggle" role="tablist" aria-label="Index sort order">
+                            <button type="button" class="index-sort-btn active" data-index-sort="az">A–Z</button>
+                            <button type="button" class="index-sort-btn" data-index-sort="hierarchy">By Subject</button>
+                        </div>
+                    </div>
+                </div>
                 <div id="index-directory-columns" class="index-directory-columns"></div>
+                <div id="index-directory-hierarchy" class="index-directory-hierarchy" hidden></div>
             </section>
 
         </section>

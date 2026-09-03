@@ -2395,8 +2395,33 @@ document.getElementById("index-open-newtab")?.addEventListener("click", () => {
    kept as the name every existing call site already uses.
    ========================================================= */
 
-function invalidateIndexCache() {
+// ALPHA-PLUS — INDEX TERMS: unlike the local cache-clear this name
+// originally only did, this NOW also re-fetches index_terms/index_links
+// fresh from the server (via the lightweight get_index_registry action)
+// before rebuilding the registry — otherwise "Full A-Z Glossary" would
+// never see a term synced during THIS session (window.__studyData was
+// only ever populated once, at app start). "This Topic" is unaffected
+// either way since it already does its own always-live fetch.
+async function invalidateIndexCache() {
+    try {
+        const url = `${GOOGLE_SHEET_API}?action=get_index_registry`;
+        const response = await fetch(url);
+        const data = await response.json();
+        if (data && data.success) {
+            window.__studyData = window.__studyData || {};
+            window.__studyData.indexTerms = data.index_terms || [];
+            window.__studyData.indexLinks = data.index_links || [];
+        }
+    } catch (error) {
+        console.error("Refreshing index registry failed:", error);
+    }
     invalidateIndexRegistry();
+    // Full A-Z Glossary is only actually visible while that sub-tab is
+    // active — re-render it now so an open glossary updates live too,
+    // not just on the next manual tab switch.
+    if (typeof indexTabScope !== "undefined" && indexTabScope === "global") {
+        renderIndexAZList(document.getElementById("index-search-input")?.value.trim().toLowerCase() || "");
+    }
 }
 
 function renderIndexAZList(filterText = "") {
@@ -2472,10 +2497,17 @@ function showIndexPicker(group) {
             <h3>${escapeHtml(group.term)}</h3>
             <p>This term appears in more than one place. Choose the topic you meant:</p>
             <div class="index-picker-list">
-                ${group.matches.map(m => `
+                ${group.matches.map(m => {
+                    const path = findPathToNode(window.__studyData?.subjects || [], m.nodeId);
+                    const breadcrumb = path && path.length
+                        ? path.map(n => n.title).filter(Boolean).join(" → ")
+                        : null;
+                    return `
                     <button type="button" class="index-picker-option" data-node-id="${escapeHtml(m.nodeId)}">
-                        ${escapeHtml(m.nodeTitle)}
-                    </button>`).join("")}
+                        <span class="index-picker-option-title">${escapeHtml(m.nodeTitle)}</span>
+                        ${breadcrumb ? `<span class="index-picker-option-path">${escapeHtml(breadcrumb)}</span>` : ""}
+                    </button>`;
+                }).join("")}
             </div>
             <div class="structure-dialog-actions">
                 <button type="button" id="index-picker-cancel">Cancel</button>
@@ -2573,6 +2605,11 @@ function cssEscapeId(id) {
 
 let indexTabScope = "topic"; // "topic" | "global"
 let currentScopedIndexTerms = []; // [{ index_id, term, id, source_type }]
+// nodeId -> signature of the {{}} term set last successfully sent to
+// sync_index_terms_bulk THIS session — skips re-sending an unchanged
+// set (e.g. just toggling EN/HI/depth re-renders the same {{}} terms
+// every time; no need to hit the network again for identical data).
+const syncedTermSignatureByNode = new Map();
 
 function initIndexScopeToggle() {
     document.querySelectorAll(".index-scope-btn").forEach(btn => {
@@ -2621,14 +2658,14 @@ async function syncAndRenderScopedIndex() {
     const stale = existing.filter(t =>
         t.source_type === "content" && !autoNormalized.has(String(t.term).trim().toLowerCase())
     );
-    stale.forEach(t => unlinkIndexTermFromRegistry(t.term, nodeId));
-
-    autoTerms.forEach(t => syncIndexTermToRegistry(t.term, nodeId, "content"));
 
     // Build the displayed list from what we just computed rather than
-    // re-fetching immediately — the unlink/sync writes above are
-    // fire-and-forget ("no-cors"), so a GET right after them could race
-    // and momentarily show pre-write data.
+    // re-fetching immediately — the bulk write below is fire-and-forget
+    // ("no-cors"), so a GET right after it could race and momentarily
+    // show pre-write data. Also collapse any duplicate term TEXT here
+    // (defensive display-level dedupe) — a couple of older entries may
+    // still have two Index_Terms rows for the same normalized term
+    // from before the bulk endpoint below existed to prevent that race.
     const staleIds = new Set(stale.map(t => t.index_id));
     const keptExisting = existing.filter(t => !staleIds.has(t.index_id));
     const existingNormalized = new Set(keptExisting.map(t => String(t.term).trim().toLowerCase()));
@@ -2636,8 +2673,111 @@ async function syncAndRenderScopedIndex() {
         .filter(t => !existingNormalized.has(t.term.trim().toLowerCase()))
         .map(t => ({ term: t.term, id: t.id, source_type: "content" }));
 
-    currentScopedIndexTerms = [...keptExisting, ...newlyAdded];
+    const combined = [...keptExisting, ...newlyAdded];
+    const seenNormalized = new Set();
+    currentScopedIndexTerms = combined.filter(t => {
+        const key = String(t.term).trim().toLowerCase();
+        if (seenNormalized.has(key)) return false;
+        seenNormalized.add(key);
+        return true;
+    });
     renderScopedIndexList(document.getElementById("index-search-input")?.value.trim().toLowerCase() || "");
+
+    // Only actually hit the network if this exact {{}} term set for this
+    // node hasn't already been synced this session, and there's
+    // something to send.
+    const signature = [...autoNormalized].sort().join("|");
+    const alreadySyncedThisSession = syncedTermSignatureByNode.get(nodeId) === signature;
+
+    if (!alreadySyncedThisSession && (stale.length || newlyAdded.length)) {
+        syncedTermSignatureByNode.set(nodeId, signature);
+        syncIndexTermsBulkToRegistry(
+            nodeId,
+            newlyAdded.map(t => ({ term: t.term, source_type: "content" })),
+            stale.map(t => t.term)
+        );
+    }
+}
+
+// Fire-and-forget bulk write — one HTTP round trip for a whole topic's
+// {{}} term set (create/link new ones + unlink stale ones together),
+// instead of one request per term. See sync_index_terms_bulk in
+// Code.gs for why this replaced the old per-term loop.
+//
+// Reliability: the write itself is still "no-cors" fire-and-forget (the
+// response can never be read) — that architecture is unchanged. What's
+// added is a check AFTER the fact: wait briefly, re-fetch this node's
+// terms fresh from the server, and compare against what was just
+// requested. Silent on success. One mismatch is retried once (it may
+// just have been a slow write); still mismatched after that gets a
+// small non-blocking warning — see showIndexSyncWarning(). Nothing here
+// ever shows a blocking alert for normal operation.
+async function syncIndexTermsBulkToRegistry(nodeId, terms, unlinkTerms, attempt = 1) {
+    if (!terms.length && !unlinkTerms.length) return;
+
+    try {
+        await fetch(GOOGLE_SHEET_API, {
+            method: "POST",
+            mode: "no-cors",
+            body: JSON.stringify({ action: "sync_index_terms_bulk", node_id: nodeId, terms, unlink: unlinkTerms })
+        });
+        invalidateIndexCache();
+        verifyIndexSyncForNode(nodeId, terms.map(t => t.term), unlinkTerms, attempt);
+    } catch (error) {
+        console.error("Bulk index term sync failed:", error);
+    }
+}
+
+// Confirms a just-fired bulk write actually landed. There's no other
+// signal for this (the write is fire-and-forget), so: wait briefly,
+// re-fetch this node's terms, diff against what was just requested.
+async function verifyIndexSyncForNode(nodeId, expectedAdded, expectedRemoved, attempt) {
+    await new Promise(resolve => setTimeout(resolve, 1200));
+
+    // The user may have already moved to a different topic by the time
+    // this fires — checking/retrying against the node they left would
+    // be pointless, and a retry could even re-add a term to the wrong
+    // context if they'd meanwhile unmarked it there.
+    if (!selectedTopicNode || selectedTopicNode.id !== nodeId) return;
+
+    const current = await fetchIndexTermsForNode(nodeId);
+    const currentNormalized = new Set(current.map(t => String(t.term).trim().toLowerCase()));
+
+    const stillMissing = expectedAdded.filter(t => !currentNormalized.has(String(t).trim().toLowerCase()));
+    const stillLinked = expectedRemoved.filter(t => currentNormalized.has(String(t).trim().toLowerCase()));
+
+    if (!stillMissing.length && !stillLinked.length) return; // landed — done, silently
+
+    if (attempt === 1) {
+        syncIndexTermsBulkToRegistry(
+            nodeId,
+            stillMissing.map(t => ({ term: t, source_type: "content" })),
+            stillLinked,
+            2
+        );
+        return;
+    }
+
+    showIndexSyncWarning();
+}
+
+// One small, self-dismissing, non-blocking corner note — shown only
+// when a bulk index-term write still hasn't landed after a retry.
+// Never requires dismissal and never interrupts what the user's doing.
+let indexSyncWarningEl = null;
+function showIndexSyncWarning() {
+    if (indexSyncWarningEl) return; // one at a time — don't stack
+
+    const el = document.createElement("div");
+    el.className = "index-sync-warning";
+    el.textContent = "Some index terms for this topic may not have saved. They'll sync next time you open it.";
+    document.body.appendChild(el);
+    indexSyncWarningEl = el;
+
+    setTimeout(() => {
+        el.remove();
+        indexSyncWarningEl = null;
+    }, 5000);
 }
 
 // Pure fetch, no side effects on currentScopedIndexTerms/the UI — used
@@ -2660,19 +2800,6 @@ async function fetchIndexTermsForNode(nodeId) {
 // uses — the response is never read (Apps Script webapp POST responses
 // aren't reliably readable cross-origin), so the backend's sync_index_term
 // action does the find-or-create AND the link in one call server-side.
-async function syncIndexTermToRegistry(term, nodeId, sourceType) {
-    try {
-        await fetch(GOOGLE_SHEET_API, {
-            method: "POST",
-            mode: "no-cors",
-            body: JSON.stringify({ action: "sync_index_term", term, node_id: nodeId, source_type: sourceType })
-        });
-        invalidateIndexCache(); // global A-Z glossary should pick up the new link too
-    } catch (error) {
-        console.error("Index term sync failed:", term, error);
-    }
-}
-
 async function unlinkIndexTermFromRegistry(term, nodeId) {
     try {
         await fetch(GOOGLE_SHEET_API, {

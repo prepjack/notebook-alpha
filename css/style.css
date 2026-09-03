@@ -831,6 +831,114 @@ body.index-directory-resizing .index-directory-workspace {
     letter-spacing: .04em;
 }
 
+/* ALPHA-PLUS — INDEX DIRECTORY: manual refresh, since this page's
+   study data is only ever fetched once, on load (see index-directory.js) */
+.index-directory-refresh-btn {
+    margin-top: 12px;
+    padding: 8px 10px;
+    width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fff;
+    color: var(--green);
+    font: 700 11.5px Arial, sans-serif;
+    cursor: pointer;
+}
+.index-directory-refresh-btn:hover { background: var(--green-soft); }
+.index-directory-refresh-btn:disabled { opacity: .6; cursor: default; }
+.index-directory-refresh-note {
+    margin: 6px 2px 0;
+    color: var(--muted);
+    font-size: 10.5px;
+    line-height: 1.4;
+}
+
+/* ALPHA-PLUS — INDEX DIRECTORY: refresh icon button + sort toggle,
+   grouped together in the right panel's top-right corner */
+.index-directory-right-controls { display: flex; align-items: center; gap: 8px; }
+#index-directory-refresh.index-directory-refresh-btn {
+    margin-top: 0;
+    width: auto;
+    padding: 6px 10px;
+    font-size: 14px;
+    line-height: 1;
+}
+
+/* ALPHA-PLUS — INDEX DIRECTORY: "Add a term" mini-form (left panel,
+   where the old Refresh button used to sit) */
+.index-directory-add { margin-top: 12px; padding-top: 14px; border-top: 1px solid var(--line); }
+.index-add-row { display: flex; gap: 6px; margin-top: 6px; }
+.index-add-row .index-search-input { flex: 1; }
+.index-add-btn {
+    padding: 0 12px;
+    border: 1px solid var(--green);
+    border-radius: 8px;
+    background: var(--green);
+    color: #fff;
+    font: 700 11.5px Arial, sans-serif;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.index-add-btn:hover { opacity: .9; }
+.index-add-btn:disabled { opacity: .5; cursor: default; }
+
+/* ALPHA-PLUS — INDEX DIRECTORY: per-row delete ("×") */
+.index-term-row { display: flex; align-items: center; gap: 6px; }
+.index-term-row .index-term-name { cursor: pointer; }
+.index-term-row .index-term-alias-of { cursor: pointer; }
+.index-term-delete-btn {
+    margin-left: auto;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    opacity: 0;
+}
+.index-term-row:hover .index-term-delete-btn { opacity: 1; }
+.index-term-delete-btn:hover { background: #fbe4e4; color: #b5423e; }
+
+.index-sort-toggle { display: flex; gap: 6px; background: #f1f4ee; border-radius: 8px; padding: 3px; }
+.index-sort-btn {
+    padding: 6px 10px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--muted);
+    font: 700 11px Arial, sans-serif;
+    cursor: pointer;
+}
+.index-sort-btn.active { background: #fff; color: var(--green); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+
+/* ALPHA-PLUS — INDEX DIRECTORY: "By Subject" hierarchy view —
+   Subject → Course → Unit → Chapter → Topic, indented, only
+   branches that actually have a term anywhere below them render. */
+.index-directory-hierarchy { padding: 4px 2px 24px; }
+.index-hierarchy-node { margin: 4px 0; }
+.index-hierarchy-heading {
+    color: #354239;
+    font: 700 13px Arial, sans-serif;
+}
+.index-hierarchy-depth-0 > .index-hierarchy-heading { font-size: 15px; color: var(--green); margin-top: 18px; }
+.index-hierarchy-depth-1 > .index-hierarchy-heading { font-size: 14px; }
+.index-hierarchy-depth-2 > .index-hierarchy-heading,
+.index-hierarchy-depth-3 > .index-hierarchy-heading,
+.index-hierarchy-depth-4 > .index-hierarchy-heading { font-size: 12.5px; font-weight: 600; color: #4a564c; }
+.index-hierarchy-node .index-hierarchy-node { margin-left: 18px; border-left: 2px solid var(--line); padding-left: 10px; }
+.index-hierarchy-terms { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 6px; }
+.index-hierarchy-term-chip {
+    padding: 3px 9px;
+    background: var(--green-soft);
+    color: var(--green);
+    border-radius: 999px;
+    font: 500 11.5px Arial, sans-serif;
+    cursor: pointer;
+}
+.index-hierarchy-term-chip:hover { background: #cfe0d1; }
+
 .index-directory-more {
     margin-top: auto;
     padding-top: 16px;
@@ -961,6 +1069,8 @@ body.index-directory-resizing .index-directory-workspace {
 .index-picker-list{margin-top:8px}
 .index-picker-option{width:100%;box-sizing:border-box;margin-top:6px;padding:9px 10px;border:1px solid var(--line);border-radius:7px;background:#fff;color:#354239;cursor:pointer;text-align:left;font:12px Arial,sans-serif}
 .index-picker-option:hover{background:var(--green-soft);color:var(--green)}
+.index-picker-option-title{display:block;font-weight:600}
+.index-picker-option-path{display:block;margin-top:3px;color:var(--muted);font-size:10.5px;font-style:italic}
 
 /* ALPHA-PLUS — Markdown upload / empty-content state */
 .empty-content-block{max-width:520px;margin:26px auto 0;padding:22px;border:1px dashed var(--line);border-radius:10px;text-align:center;background:#fafaf6}
@@ -3362,3 +3472,30 @@ body.index-directory-resizing .index-directory-workspace {
 .mcq-collection-notes { margin:0 0 12px; }
 .mcq-collection-note { display:flex; flex-wrap:wrap; align-items:center; gap:7px; padding:7px 10px; margin-bottom:6px; border:1px solid #d8dfd8; border-radius:7px; font-size:12px; }
 .mcq-collection-link { border:0; background:transparent; padding:0; cursor:pointer; text-decoration:underline; font:inherit; }
+
+/* =========================================================
+   ALPHA-PLUS — INDEX TERMS: verify-after-write warning
+   Small, self-dismissing, non-blocking corner note — see
+   showIndexSyncWarning() in js/app.js. Never needs a close
+   button; it removes itself after a few seconds.
+   ========================================================= */
+.index-sync-warning {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 1200;
+    max-width: 280px;
+    padding: 9px 12px;
+    background: #fff8e6;
+    border: 1px solid #e6cf8a;
+    color: #6b5a1f;
+    border-radius: 8px;
+    font-size: 12px;
+    line-height: 1.4;
+    box-shadow: 0 2px 10px rgba(28, 38, 31, 0.15);
+    animation: index-sync-warning-in 0.2s ease-out;
+}
+@keyframes index-sync-warning-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}

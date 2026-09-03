@@ -226,14 +226,42 @@ function renderIndexColumns(filterText = "") {
                 ${group.matches.length > 1
                     ? `<span class="index-term-alias-of">${group.matches.length} topics</span>`
                     : ""}
+                <button type="button" class="index-term-delete-btn" title="Delete this term" aria-label="Delete this term">×</button>
             `;
 
-            row.addEventListener("click", () => handleIndexGroupClick(group));
+            row.querySelector(".index-term-name").addEventListener("click", () => handleIndexGroupClick(group));
+            row.querySelector(".index-term-alias-of")?.addEventListener("click", () => handleIndexGroupClick(group));
+            row.querySelector(".index-term-delete-btn").addEventListener("click", (event) => {
+                event.stopPropagation();
+                deleteIndexTerm(group);
+            });
             letterGroup.appendChild(row);
         });
 
         container.appendChild(letterGroup);
     });
+}
+
+function findPathToNode(nodes, targetId, path = []) {
+    for (const node of nodes || []) {
+        const nextPath = [...path, node];
+        if (node.id === targetId) return nextPath;
+
+        const found = findPathToNode(node.children, targetId, nextPath);
+        if (found) return found;
+    }
+    return null;
+}
+
+// Full Subject → ... → Topic breadcrumb for one match, so a term that
+// appears in more than one place can actually be told apart in the
+// picker below — a bare leaf title (e.g. two different "Introduction"
+// topics under different subjects) isn't enough on its own.
+function breadcrumbForNode(nodeId) {
+    const path = findPathToNode(window.__studyData?.subjects || [], nodeId);
+    return path && path.length
+        ? path.map(n => n.title).filter(Boolean).join(" → ")
+        : null;
 }
 
 function handleIndexGroupClick(group) {
@@ -244,8 +272,12 @@ function handleIndexGroupClick(group) {
     }
 }
 
+// Opens the main notebook in a NEW tab (not location.href) so the
+// Index directory page itself stays open — a student browsing several
+// terms in a row shouldn't lose their place/scroll position here every
+// time they follow one to the notebook.
 function goToNodeInNotebook(nodeId) {
-    window.location.href = `index.html?openNode=${encodeURIComponent(nodeId)}`;
+    window.open(`index.html?openNode=${encodeURIComponent(nodeId)}`, "_blank");
 }
 
 function showIndexPicker(group) {
@@ -259,10 +291,14 @@ function showIndexPicker(group) {
             <h3>${escapeHtml(group.term)}</h3>
             <p>This term appears in more than one place. Choose the topic you meant:</p>
             <div class="index-picker-list">
-                ${group.matches.map(m => `
+                ${group.matches.map(m => {
+                    const breadcrumb = breadcrumbForNode(m.nodeId);
+                    return `
                     <button type="button" class="index-picker-option" data-node-id="${escapeHtml(m.nodeId)}">
-                        ${escapeHtml(m.nodeTitle)}
-                    </button>`).join("")}
+                        <span class="index-picker-option-title">${escapeHtml(m.nodeTitle)}</span>
+                        ${breadcrumb ? `<span class="index-picker-option-path">${escapeHtml(breadcrumb)}</span>` : ""}
+                    </button>`;
+                }).join("")}
             </div>
             <div class="structure-dialog-actions">
                 <button type="button" id="index-picker-cancel">Cancel</button>
@@ -278,9 +314,280 @@ function showIndexPicker(group) {
     });
 }
 
-document.getElementById("index-directory-search")?.addEventListener("input", event => {
-    renderIndexColumns(event.target.value.trim().toLowerCase());
+/* -----------------------------------------------------
+   ADD / DELETE — manual glossary management from this page.
+   Add: a concept-only term (find-or-create, no link) — useful
+   for pre-registering a term before its topic content exists.
+   Delete: removes the Index_Terms row AND every Index_Node link
+   to it (cascade) — this is a full delete, not an unlink from
+   one topic (that's what "Unmark as index term" in the main
+   notebook is for).
+   ----------------------------------------------------- */
+
+document.getElementById("index-add-btn")?.addEventListener("click", addIndexTermFromDirectory);
+document.getElementById("index-add-input")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") addIndexTermFromDirectory();
 });
+
+async function addIndexTermFromDirectory() {
+    const input = document.getElementById("index-add-input");
+    const btn = document.getElementById("index-add-btn");
+    const term = input?.value.trim();
+    if (!term) return;
+
+    btn.disabled = true;
+    try {
+        await fetch(GOOGLE_SHEET_API, {
+            method: "POST",
+            mode: "no-cors",
+            body: JSON.stringify({ action: "add_index_term_standalone", term })
+        });
+
+        input.value = "";
+
+        // Optimistic: this new row has no real index_id yet (we can't
+        // read the no-cors response), so give it a temporary local one
+        // purely so it renders immediately — a Refresh afterwards will
+        // replace it with the real server row.
+        window.__studyData.indexTerms = window.__studyData.indexTerms || [];
+        window.__studyData.indexTerms.push({
+            index_id: `local-pending:${Date.now()}`,
+            term,
+            normalized_term: normalizeTerm(term)
+        });
+        invalidateIndexRegistry();
+
+        const query = document.getElementById("index-directory-search")?.value.trim().toLowerCase() || "";
+        if (indexDirectorySort === "hierarchy") renderIndexHierarchy(query); else renderIndexColumns(query);
+    } catch (error) {
+        console.error("Adding index term failed:", error);
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function deleteIndexTerm(group) {
+    const confirmed = window.confirm(
+        `Delete "${group.term}" from the index?\n\nThis removes it everywhere (all ${group.matches.length || 0} linked topic${group.matches.length === 1 ? "" : "s"}), not just here. This cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    try {
+        await fetch(GOOGLE_SHEET_API, {
+            method: "POST",
+            mode: "no-cors",
+            body: JSON.stringify({ action: "delete_index_term", index_id: group.indexId })
+        });
+
+        // Optimistic removal — strip it from this page's own snapshot
+        // so it disappears immediately without waiting on a refresh.
+        window.__studyData.indexTerms = (window.__studyData.indexTerms || [])
+            .filter(row => String(row.index_id) !== String(group.indexId));
+        window.__studyData.indexLinks = (window.__studyData.indexLinks || [])
+            .filter(row => String(row.index_id) !== String(group.indexId));
+        invalidateIndexRegistry();
+
+        const query = document.getElementById("index-directory-search")?.value.trim().toLowerCase() || "";
+        if (indexDirectorySort === "hierarchy") renderIndexHierarchy(query); else renderIndexColumns(query);
+    } catch (error) {
+        console.error("Deleting index term failed:", error);
+    }
+}
+
+document.getElementById("index-directory-search")?.addEventListener("input", event => {
+    const query = event.target.value.trim().toLowerCase();
+    if (indexDirectorySort === "hierarchy") {
+        renderIndexHierarchy(query);
+    } else {
+        renderIndexColumns(query);
+    }
+});
+
+/* -----------------------------------------------------
+   SORT TOGGLE — A–Z (existing) vs By Subject (new): groups
+   every term under its actual Subject → Course → Unit →
+   Chapter → Topic location instead of alphabetically, so a
+   student can browse the index the same way they browse the
+   syllabus tree on the left of the main notebook.
+   ----------------------------------------------------- */
+
+let indexDirectorySort = "az";
+
+function initIndexDirectorySort() {
+    document.querySelectorAll(".index-sort-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+            indexDirectorySort = btn.dataset.indexSort;
+            document.querySelectorAll(".index-sort-btn").forEach(b => b.classList.toggle("active", b === btn));
+
+            document.getElementById("index-directory-columns").hidden = indexDirectorySort !== "az";
+            document.getElementById("index-directory-hierarchy").hidden = indexDirectorySort !== "hierarchy";
+
+            const query = document.getElementById("index-directory-search")?.value.trim().toLowerCase() || "";
+            if (indexDirectorySort === "hierarchy") {
+                renderIndexHierarchy(query);
+            } else {
+                renderIndexColumns(query);
+            }
+        });
+    });
+}
+
+// node_id -> [term, term, ...] linked to that exact node (a term with
+// several matches contributes to several nodes, same registry data
+// the A-Z view and the picker already use — just re-grouped).
+function buildTermsByNode(filterText) {
+    const groups = filterIndexRegistry(filterText);
+    const termsByNode = new Map();
+
+    groups.forEach(g => {
+        g.matches.forEach(m => {
+            if (!termsByNode.has(m.nodeId)) termsByNode.set(m.nodeId, []);
+            termsByNode.get(m.nodeId).push(g.term);
+        });
+    });
+
+    return termsByNode;
+}
+
+// A branch (subject/course/unit/chapter) is only worth rendering if
+// SOMETHING under it (itself or any descendant) actually has a term —
+// otherwise most of the syllabus tree would render as empty headings.
+function nodeHasTermsDeep(node, termsByNode, cache) {
+    if (cache.has(node.id)) return cache.get(node.id);
+
+    let has = (termsByNode.get(node.id) || []).length > 0;
+    (node.children || []).forEach(child => {
+        if (nodeHasTermsDeep(child, termsByNode, cache)) has = true;
+    });
+
+    cache.set(node.id, has);
+    return has;
+}
+
+function renderIndexHierarchy(filterText = "") {
+    const container = document.getElementById("index-directory-hierarchy");
+    const countEl = document.getElementById("index-directory-count");
+    if (!container) return;
+
+    const termsByNode = buildTermsByNode(filterText);
+    const cache = new Map();
+    const roots = window.__studyData?.subjects || [];
+
+    container.innerHTML = "";
+    let totalTerms = 0;
+    termsByNode.forEach(list => { totalTerms += list.length; });
+
+    if (countEl) {
+        countEl.textContent = `${totalTerms} term${totalTerms === 1 ? "" : "s"}`;
+    }
+
+    if (!totalTerms) {
+        container.innerHTML = `<p class="index-empty-note">${
+            filterText ? "No index entries match your search." : "No index entries yet."
+        }</p>`;
+        return;
+    }
+
+    roots.forEach(node => renderHierarchyBranch(node, 0, termsByNode, cache, container));
+}
+
+function renderHierarchyBranch(node, depth, termsByNode, cache, container) {
+    if (!nodeHasTermsDeep(node, termsByNode, cache)) return;
+
+    const wrap = document.createElement("div");
+    wrap.className = `index-hierarchy-node index-hierarchy-depth-${Math.min(depth, 4)}`;
+
+    const heading = document.createElement("div");
+    heading.className = "index-hierarchy-heading";
+    heading.textContent = node.title || "(untitled)";
+    wrap.appendChild(heading);
+
+    const terms = [...new Set(termsByNode.get(node.id) || [])].sort((a, b) =>
+        a.localeCompare(b, undefined, { sensitivity: "base" })
+    );
+
+    if (terms.length) {
+        const list = document.createElement("div");
+        list.className = "index-hierarchy-terms";
+        terms.forEach(term => {
+            const row = document.createElement("span");
+            row.className = "index-hierarchy-term-chip";
+            row.textContent = term;
+            // Already know exactly which node this term belongs to here —
+            // no ambiguity/picker needed, go straight there.
+            row.addEventListener("click", () => goToNodeInNotebook(node.id));
+            list.appendChild(row);
+        });
+        wrap.appendChild(list);
+    }
+
+    (node.children || []).forEach(child => renderHierarchyBranch(child, depth + 1, termsByNode, cache, wrap));
+    container.appendChild(wrap);
+}
+
+/* -----------------------------------------------------
+   REFRESH — this page's window.__studyData (and therefore
+   getIndexRegistry()'s cache) is only ever fetched once, when
+   the page first loads. A term added/edited in the main
+   notebook AFTER that won't appear here until this re-fetches.
+   ----------------------------------------------------- */
+
+document.getElementById("index-directory-refresh")?.addEventListener("click", async (event) => {
+    const btn = event.currentTarget;
+    const originalText = btn.textContent;
+    btn.textContent = "Refreshing…";
+    btn.disabled = true;
+
+    try {
+        // Lightweight refresh — just the two index sheets, not the
+        // whole Nodes/Content/Resources structure (loadStudyData()
+        // would work too, just slower for what's actually needed here).
+        const response = await fetch(`${GOOGLE_SHEET_API}?action=get_index_registry`);
+        const data = await response.json();
+
+        if (data && data.success) {
+            window.__studyData = window.__studyData || {};
+            window.__studyData.indexTerms = data.index_terms || [];
+            window.__studyData.indexLinks = data.index_links || [];
+            invalidateIndexRegistry();
+
+            const query = document.getElementById("index-directory-search")?.value.trim().toLowerCase() || "";
+            if (indexDirectorySort === "hierarchy") {
+                renderIndexHierarchy(query);
+            } else {
+                renderIndexColumns(query);
+            }
+        }
+    } catch (error) {
+        console.error("Index directory refresh failed:", error);
+    } finally {
+        btn.textContent = originalText;
+        btn.disabled = false;
+    }
+});
+
+/* -----------------------------------------------------
+   BOOT
+   ----------------------------------------------------- */
+
+async function initIndexDirectory() {
+    const data = await loadStudyData();
+
+    if (!data) {
+        const container = document.getElementById("index-directory-columns");
+        if (container) {
+            container.innerHTML =
+                `<p class="index-empty-note">Index data could not be loaded.</p>`;
+        }
+        return;
+    }
+
+    window.__studyData = data;
+    initIndexDirectorySort();
+    renderIndexColumns();
+}
+
+initIndexDirectory();
 
 /* -----------------------------------------------------
    LEFT PANEL — drag-to-resize + collapse, same mechanism
