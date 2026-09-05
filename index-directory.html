@@ -42,30 +42,46 @@
 
                 <div id="index-directory-count" class="index-directory-count"></div>
 
-                <!-- Reserved space for future index tools (filters,
-                     bookmarks, recently viewed terms, etc). -->
+                <!-- MORE TOOLS is the umbrella section for this panel —
+                     each tool inside it (starting with Browse & Filter)
+                     is its own collapsible block, so future tools can
+                     be added here without the panel growing unbounded. -->
                 <div class="index-directory-more">
                     <div class="index-directory-more-title">MORE TOOLS</div>
-                    <div class="index-sort-toggle" role="tablist" aria-label="Index sort order">
-                        <button type="button" class="index-sort-btn active" data-index-sort="az">A–Z</button>
-                        <button type="button" class="index-sort-btn" data-index-sort="hierarchy">By Subject</button>
-                    </div>
 
-                    <div class="index-scope-filter">
-                        <div class="index-scope-filter-title">Browse by Subject</div>
-                        <select id="scope-subject" class="index-scope-select">
-                            <option value="">Subject…</option>
-                        </select>
-                        <select id="scope-course" class="index-scope-select" disabled>
-                            <option value="">Course…</option>
-                        </select>
-                        <select id="scope-unit" class="index-scope-select" disabled>
-                            <option value="">Unit…</option>
-                        </select>
-                        <select id="scope-chapter" class="index-scope-select" disabled>
-                            <option value="">Chapter…</option>
-                        </select>
-                        <button type="button" id="scope-clear-btn" class="index-scope-clear-btn" hidden>Clear scope</button>
+                    <div class="index-tool-accordion">
+                        <button type="button" id="browse-filter-toggle" class="index-tool-accordion-header"
+                                aria-expanded="true" aria-controls="browse-filter-body">
+                            <span class="index-tool-accordion-chevron" aria-hidden="true">▾</span>
+                            <span>Browse &amp; Filter</span>
+                        </button>
+                        <div id="browse-filter-body" class="index-tool-accordion-body">
+                            <div class="index-sort-toggle" role="tablist" aria-label="Index sort order">
+                                <button type="button" class="index-sort-btn active" data-index-sort="az">A–Z</button>
+                                <button type="button" class="index-sort-btn" data-index-sort="hierarchy">By Subject</button>
+                            </div>
+
+                            <div class="index-scope-filter">
+                                <div class="index-scope-filter-title">Browse by Subject</div>
+                                <select id="scope-subject" class="index-scope-select">
+                                    <option value="">Subject…</option>
+                                </select>
+                                <select id="scope-course" class="index-scope-select" disabled>
+                                    <option value="">Course…</option>
+                                </select>
+                                <select id="scope-unit" class="index-scope-select" disabled>
+                                    <option value="">Unit…</option>
+                                </select>
+                                <select id="scope-chapter" class="index-scope-select" disabled>
+                                    <option value="">Chapter…</option>
+                                </select>
+                                <div class="index-scope-actions">
+                                    <button type="button" id="scope-view-tree-btn" class="index-scope-clear-btn" hidden>View in Tree</button>
+                                    <button type="button" id="scope-clear-btn" class="index-scope-clear-btn" hidden>Clear scope</button>
+                                </div>
+                                <div id="scope-term-count" class="index-scope-count"></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </aside>

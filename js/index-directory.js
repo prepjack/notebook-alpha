@@ -431,6 +431,20 @@ function initIndexDirectorySort() {
     });
 }
 
+// Generic collapsible header for tool blocks inside MORE TOOLS — one
+// pattern reused for every tool this panel gets going forward, not
+// something specific to Browse & Filter.
+function initToolAccordion(headerId, bodyId) {
+    const header = document.getElementById(headerId);
+    const body = document.getElementById(bodyId);
+    if (!header || !body) return;
+    header.addEventListener("click", () => {
+        const expanded = header.getAttribute("aria-expanded") === "true";
+        header.setAttribute("aria-expanded", String(!expanded));
+        body.hidden = expanded;
+    });
+}
+
 const SCOPE_LEVELS = [
     { select: "scope-subject", label: "Subject" },
     { select: "scope-course", label: "Course" },
@@ -474,17 +488,44 @@ function currentScopeNodeId() {
     return null;
 }
 
-// "Jump": switch to the By Subject tree (the only view a branch can be
-// scrolled to) and flash the selected branch into view — paired with
-// the "filter" applyScopeToGroups() already narrows both views to.
-function jumpToScopeBranch(nodeId) {
-    indexDirectorySort = "hierarchy";
-    document.querySelectorAll(".index-sort-btn").forEach(b =>
-        b.classList.toggle("active", b.dataset.indexSort === "hierarchy"));
-    document.getElementById("index-directory-columns").hidden = true;
-    document.getElementById("index-directory-hierarchy").hidden = false;
+// Live "N terms in <selected level>" label, right under the dropdowns —
+// updates on every scope change so the user sees the total for whatever
+// level (Subject/Course/Unit/Chapter) they've drilled into, without
+// having to also look at the right panel's own count.
+function updateScopeCountLabel() {
+    const el = document.getElementById("scope-term-count");
+    if (!el) return;
 
-    rerenderCurrentIndexView();
+    if (!scopeFilterNodeId) {
+        el.textContent = "";
+        return;
+    }
+
+    const node = findNodeById(window.__studyData?.subjects || [], scopeFilterNodeId);
+    const count = applyScopeToGroups(filterIndexRegistry("")).length;
+    el.textContent = `${count} term${count === 1 ? "" : "s"} in ${node ? node.title : "this scope"}`;
+}
+
+function updateScopeButtonsVisibility() {
+    const clearBtn = document.getElementById("scope-clear-btn");
+    const viewTreeBtn = document.getElementById("scope-view-tree-btn");
+    if (clearBtn) clearBtn.hidden = !scopeFilterNodeId;
+    if (viewTreeBtn) viewTreeBtn.hidden = !scopeFilterNodeId;
+}
+
+// Explicit, opt-in "jump": scrolls to and briefly flashes the branch
+// the scope dropdowns currently point to, inside the By Subject tree.
+// Only ever runs when the user clicks "View in Tree" — narrowing the
+// scope via the dropdowns themselves never triggers this on its own.
+function viewScopeInTree(nodeId) {
+    if (indexDirectorySort !== "hierarchy") {
+        indexDirectorySort = "hierarchy";
+        document.querySelectorAll(".index-sort-btn").forEach(b =>
+            b.classList.toggle("active", b.dataset.indexSort === "hierarchy"));
+        document.getElementById("index-directory-columns").hidden = true;
+        document.getElementById("index-directory-hierarchy").hidden = false;
+        rerenderCurrentIndexView();
+    }
 
     requestAnimationFrame(() => {
         const el = [...document.querySelectorAll(".index-hierarchy-node")]
@@ -509,22 +550,22 @@ function initScopeFilter() {
             }
 
             scopeFilterNodeId = currentScopeNodeId();
-            const clearBtn = document.getElementById("scope-clear-btn");
-            if (clearBtn) clearBtn.hidden = !scopeFilterNodeId;
-
-            if (scopeFilterNodeId) {
-                jumpToScopeBranch(scopeFilterNodeId);
-            } else {
-                rerenderCurrentIndexView();
-            }
+            updateScopeButtonsVisibility();
+            updateScopeCountLabel();
+            rerenderCurrentIndexView();
         });
+    });
+
+    document.getElementById("scope-view-tree-btn")?.addEventListener("click", () => {
+        if (scopeFilterNodeId) viewScopeInTree(scopeFilterNodeId);
     });
 
     document.getElementById("scope-clear-btn")?.addEventListener("click", () => {
         scopeFilterNodeId = null;
         resetScopeLevelsFrom(0);
         populateScopeLevel(0, null);
-        document.getElementById("scope-clear-btn").hidden = true;
+        updateScopeButtonsVisibility();
+        updateScopeCountLabel();
         rerenderCurrentIndexView();
     });
 }
@@ -681,6 +722,7 @@ async function initIndexDirectory() {
     window.__studyData = data;
     initIndexDirectorySort();
     initScopeFilter();
+    initToolAccordion("browse-filter-toggle", "browse-filter-body");
     renderIndexColumns();
 }
 
