@@ -872,12 +872,11 @@ body.index-directory-resizing .index-directory-workspace {
 .index-scope-select{width:100%;box-sizing:border-box;padding:7px 8px;border:1px solid var(--line);border-radius:7px;font:12px Arial,sans-serif;background:#fff;color:#354239}
 .index-scope-select:disabled{opacity:.5;cursor:not-allowed;background:#f5f5f3}
 .index-scope-clear-btn{align-self:flex-start;margin-top:2px;padding:5px 10px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--green);cursor:pointer;font:700 10.5px Arial,sans-serif}
-.index-scope-actions{display:flex;gap:6px;flex-wrap:wrap}
 .index-scope-clear-btn:hover{background:var(--green-soft)}
-.index-scope-count{font:700 12px Arial,sans-serif;color:var(--green);margin-top:2px}
 .index-sort-caption{margin:4px 0 0;font:11px Arial,sans-serif;color:var(--muted);line-height:1.35}
-.index-hierarchy-node-flash{animation:index-hierarchy-flash 1.6s ease}
-@keyframes index-hierarchy-flash{0%{background:var(--green-soft)}100%{background:transparent}}
+.index-scope-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.index-scope-chip{display:inline-flex;align-items:center;gap:5px;padding:4px 5px 4px 10px;border:1px solid var(--green);border-radius:999px;background:var(--green-soft);color:var(--green);font:700 11px Arial,sans-serif}
+.index-scope-chip button{border:none;background:transparent;color:var(--green);font:700 14px Arial,sans-serif;line-height:1;cursor:pointer;padding:0 3px}
 .index-add-row { display: flex; gap: 6px; margin-top: 6px; }
 .index-add-row .index-search-input { flex: 1; }
 .index-add-btn {

@@ -178,15 +178,17 @@ function convertApiDataToStudyData(apiData) {
    ----------------------------------------------------- */
 
 /* -----------------------------------------------------
-   SCOPE FILTER — Subject > Course > Unit > Chapter cascading
-   dropdowns (left panel, MORE TOOLS). Selecting a level narrows
-   BOTH the A-Z list and the By Subject tree down to that branch
-   (filter) and switches to/scrolls the By Subject tree to it
-   (jump) — the same node.id set is reused by both list renderers
-   below, no separate filtering logic per view.
+   SCOPE FILTER — Subject / Course / Unit / Chapter, each an
+   independent "add" picker (left panel, MORE TOOLS). Picking a
+   value in ANY of the four dropdowns adds it to the active scope
+   set as its own removable chip — the four levels are NOT a
+   cascade here (picking a Subject does not require or restrict
+   which Course you can also pick); a term shows in the list if
+   ANY of its matches falls under ANY selected node (itself or a
+   descendant) — a union across everything currently selected.
    ----------------------------------------------------- */
 
-let scopeFilterNodeId = null;
+let activeScopeNodes = []; // [{ id, title }, ...]
 
 function findNodeById(nodes, targetId) {
     for (const node of nodes || []) {
@@ -205,14 +207,15 @@ function collectNodeAndDescendantIds(node, set = new Set()) {
 }
 
 // Applied after filterIndexRegistry() in both list renderers below —
-// a term stays in the list if ANY of its matches falls inside the
-// active scope (itself or a descendant), same many-to-many registry
-// data every other view already reads.
+// a term stays in the list if ANY of its matches falls inside ANY
+// active scope node (itself or a descendant) — union, not intersection,
+// across every chip currently selected.
 function applyScopeToGroups(groups) {
-    if (!scopeFilterNodeId) return groups;
-    const node = findNodeById(window.__studyData?.subjects || [], scopeFilterNodeId);
-    if (!node) return groups;
-    const scopeIds = collectNodeAndDescendantIds(node);
+    if (!activeScopeNodes.length) return groups;
+    const scopeIds = new Set();
+    activeScopeNodes.forEach(entry => {
+        collectNodeAndDescendantIds(findNodeById(window.__studyData?.subjects || [], entry.id), scopeIds);
+    });
     return groups.filter(g => g.matches.some(m => scopeIds.has(m.nodeId)));
 }
 
@@ -464,120 +467,101 @@ function scopeLevelSelect(i) {
     return document.getElementById(SCOPE_LEVELS[i].select);
 }
 
-function populateScopeLevel(i, parentNode) {
-    const select = scopeLevelSelect(i);
-    if (!select) return;
-    const children = parentNode ? (parentNode.children || []) : (window.__studyData?.subjects || []);
-    select.innerHTML = `<option value="">${SCOPE_LEVELS[i].label}…</option>` +
-        children.map(n => `<option value="${escapeHtml(n.id)}">${escapeHtml(n.title || "(untitled)")}</option>`).join("");
-    select.disabled = children.length === 0;
-    select.value = "";
+// Every node at a given tree depth, anywhere in the tree — Course/Unit/
+// Chapter dropdowns are NOT restricted to a chosen Subject (multi-select
+// means the four levels are independent), so each option also shows its
+// immediate parent's title in parentheses to tell apart same-named
+// nodes living under different subjects/courses.
+function collectNodesAtDepth(nodes, depth, targetDepth, parentTitle = null, out = []) {
+    (nodes || []).forEach(n => {
+        if (depth === targetDepth) {
+            out.push({ node: n, parentTitle });
+        } else {
+            collectNodesAtDepth(n.children, depth + 1, targetDepth, n.title, out);
+        }
+    });
+    return out;
 }
 
-function resetScopeLevelsFrom(i) {
-    for (let j = i; j < SCOPE_LEVELS.length; j++) {
-        const select = scopeLevelSelect(j);
-        if (!select) continue;
-        select.innerHTML = `<option value="">${SCOPE_LEVELS[j].label}…</option>`;
+function populateFlatScopeDropdowns() {
+    SCOPE_LEVELS.forEach((level, i) => {
+        const select = scopeLevelSelect(i);
+        if (!select) return;
+        const entries = collectNodesAtDepth(window.__studyData?.subjects || [], 0, i);
+        select.innerHTML = `<option value="">${level.label}…</option>` +
+            entries.map(({ node: n, parentTitle }) => {
+                const label = parentTitle ? `${n.title} (${parentTitle})` : (n.title || "(untitled)");
+                return `<option value="${escapeHtml(n.id)}">${escapeHtml(label)}</option>`;
+            }).join("");
+        select.disabled = entries.length === 0;
         select.value = "";
-        select.disabled = true;
-    }
-}
-
-// The active scope is always whichever level's dropdown has the
-// deepest current selection — a shallower level left blank (e.g. user
-// picked a Subject but no Course yet) still counts, it just scopes to
-// a wider branch.
-function currentScopeNodeId() {
-    for (let i = SCOPE_LEVELS.length - 1; i >= 0; i--) {
-        const val = scopeLevelSelect(i)?.value;
-        if (val) return val;
-    }
-    return null;
-}
-
-// Live "N terms in <selected level>" label, right under the dropdowns —
-// updates on every scope change so the user sees the total for whatever
-// level (Subject/Course/Unit/Chapter) they've drilled into, without
-// having to also look at the right panel's own count.
-function updateScopeCountLabel() {
-    const el = document.getElementById("scope-term-count");
-    if (!el) return;
-
-    if (!scopeFilterNodeId) {
-        el.textContent = "";
-        return;
-    }
-
-    const node = findNodeById(window.__studyData?.subjects || [], scopeFilterNodeId);
-    const count = applyScopeToGroups(filterIndexRegistry("")).length;
-    el.textContent = `${count} term${count === 1 ? "" : "s"} in ${node ? node.title : "this scope"}`;
-}
-
-function updateScopeButtonsVisibility() {
-    const clearBtn = document.getElementById("scope-clear-btn");
-    const viewTreeBtn = document.getElementById("scope-view-tree-btn");
-    if (clearBtn) clearBtn.hidden = !scopeFilterNodeId;
-    if (viewTreeBtn) viewTreeBtn.hidden = !scopeFilterNodeId;
-}
-
-// Explicit, opt-in "jump": scrolls to and briefly flashes the branch
-// the scope dropdowns currently point to, inside the By Subject tree.
-// Only ever runs when the user clicks "View in Tree" — narrowing the
-// scope via the dropdowns themselves never triggers this on its own.
-function viewScopeInTree(nodeId) {
-    if (indexDirectorySort !== "hierarchy") {
-        indexDirectorySort = "hierarchy";
-        document.querySelectorAll(".index-sort-btn").forEach(b =>
-            b.classList.toggle("active", b.dataset.indexSort === "hierarchy"));
-        const caption = document.getElementById("index-sort-caption");
-        if (caption) caption.textContent = INDEX_SORT_CAPTIONS.hierarchy;
-        document.getElementById("index-directory-columns").hidden = true;
-        document.getElementById("index-directory-hierarchy").hidden = false;
-        rerenderCurrentIndexView();
-    }
-
-    requestAnimationFrame(() => {
-        const el = [...document.querySelectorAll(".index-hierarchy-node")]
-            .find(n => n.dataset.nodeId === nodeId);
-        if (!el) return;
-        el.scrollIntoView({ behavior: "smooth", block: "start" });
-        el.classList.add("index-hierarchy-node-flash");
-        setTimeout(() => el.classList.remove("index-hierarchy-node-flash"), 1600);
     });
 }
 
+// One small removable chip per selected node, regardless of which
+// level it came from — e-commerce-style "applied filters" list.
+// Removing a chip only removes that one selection; every other
+// selected node (same level or different) stays active.
+function renderActiveScopeChips() {
+    const container = document.getElementById("scope-active-chips");
+    if (!container) return;
+    container.innerHTML = "";
+
+    activeScopeNodes.forEach(entry => {
+        const chip = document.createElement("span");
+        chip.className = "index-scope-chip";
+        chip.innerHTML = `${escapeHtml(entry.title)} <button type="button" aria-label="Remove ${escapeHtml(entry.title)} filter">×</button>`;
+        chip.querySelector("button").addEventListener("click", () => {
+            activeScopeNodes = activeScopeNodes.filter(e => e.id !== entry.id);
+            updateScopeAffordances();
+            rerenderCurrentIndexView();
+        });
+        container.appendChild(chip);
+    });
+}
+
+// The search box placeholder and the Clear-all button's visibility are
+// the only other UI bits that change with the scope — everything
+// else (chips, filtering itself) is handled above/below.
+function updateScopeAffordances() {
+    const searchInput = document.getElementById("index-directory-search");
+    const clearBtn = document.getElementById("scope-clear-btn");
+
+    if (clearBtn) clearBtn.hidden = activeScopeNodes.length === 0;
+    renderActiveScopeChips();
+
+    searchInput.placeholder = activeScopeNodes.length
+        ? `Search within ${activeScopeNodes.map(e => e.title).join(", ")}...`
+        : "Search the index... e.g. bibli";
+}
+
+function clearScopeFilter() {
+    activeScopeNodes = [];
+    updateScopeAffordances();
+    rerenderCurrentIndexView();
+}
+
 function initScopeFilter() {
-    populateScopeLevel(0, null);
+    populateFlatScopeDropdowns();
 
     SCOPE_LEVELS.forEach((level, i) => {
         const select = scopeLevelSelect(i);
         select?.addEventListener("change", () => {
-            resetScopeLevelsFrom(i + 1);
+            const value = select.value;
+            if (!value) return;
 
-            if (select.value && i + 1 < SCOPE_LEVELS.length) {
-                populateScopeLevel(i + 1, findNodeById(window.__studyData?.subjects || [], select.value));
+            if (!activeScopeNodes.some(entry => entry.id === value)) {
+                const label = select.options[select.selectedIndex]?.textContent || value;
+                activeScopeNodes.push({ id: value, title: label });
             }
 
-            scopeFilterNodeId = currentScopeNodeId();
-            updateScopeButtonsVisibility();
-            updateScopeCountLabel();
+            select.value = ""; // reset so the same dropdown can add another
+            updateScopeAffordances();
             rerenderCurrentIndexView();
         });
     });
 
-    document.getElementById("scope-view-tree-btn")?.addEventListener("click", () => {
-        if (scopeFilterNodeId) viewScopeInTree(scopeFilterNodeId);
-    });
-
-    document.getElementById("scope-clear-btn")?.addEventListener("click", () => {
-        scopeFilterNodeId = null;
-        resetScopeLevelsFrom(0);
-        populateScopeLevel(0, null);
-        updateScopeButtonsVisibility();
-        updateScopeCountLabel();
-        rerenderCurrentIndexView();
-    });
+    document.getElementById("scope-clear-btn")?.addEventListener("click", clearScopeFilter);
 }
 // several matches contributes to several nodes, same registry data
 // the A-Z view and the picker already use — just re-grouped).

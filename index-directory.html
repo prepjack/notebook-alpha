@@ -78,11 +78,8 @@
                                 <select id="scope-chapter" class="index-scope-select" disabled>
                                     <option value="">Chapter…</option>
                                 </select>
-                                <div class="index-scope-actions">
-                                    <button type="button" id="scope-view-tree-btn" class="index-scope-clear-btn" hidden>View in Tree</button>
-                                    <button type="button" id="scope-clear-btn" class="index-scope-clear-btn" hidden>Clear scope</button>
-                                </div>
-                                <div id="scope-term-count" class="index-scope-count"></div>
+                                <button type="button" id="scope-clear-btn" class="index-scope-clear-btn" hidden>Clear scope</button>
+                                <div id="scope-active-chips" class="index-scope-chips"></div>
                             </div>
                         </div>
                     </div>
@@ -92,7 +89,7 @@
             <!-- RIGHT: every index term, multi-column, scrollable -->
             <section id="index-directory-right-panel" class="panel index-directory-right">
                 <div class="panel-heading-row">
-                    <div class="panel-heading">ALL INDEX TERMS</div>
+                    <div class="panel-heading" id="index-directory-right-heading">ALL INDEX TERMS</div>
                     <div class="index-directory-right-controls">
                         <button type="button" id="index-directory-refresh" class="index-directory-refresh-btn"
                                 title="Refresh index" aria-label="Refresh index">⟳</button>
