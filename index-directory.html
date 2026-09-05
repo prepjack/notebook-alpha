@@ -42,29 +42,31 @@
 
                 <div id="index-directory-count" class="index-directory-count"></div>
 
-                <div class="index-directory-add">
-                    <div class="index-directory-more-title">ADD A TERM</div>
-                    <div class="index-add-row">
-                        <input type="text" id="index-add-input" class="index-search-input"
-                               placeholder="New glossary term..." autocomplete="off">
-                        <button type="button" id="index-add-btn" class="index-add-btn">+ Add</button>
-                    </div>
-                    <p class="index-directory-refresh-note">
-                        Adds a concept-only entry (not linked to any topic yet) —
-                        useful for a term you want in the glossary before its
-                        topic exists. Use {{Term}} in a .md file, or right-click
-                        marking in the notebook, to link a term to a topic.
-                    </p>
-                </div>
-
                 <!-- Reserved space for future index tools (filters,
                      bookmarks, recently viewed terms, etc). -->
                 <div class="index-directory-more">
                     <div class="index-directory-more-title">MORE TOOLS</div>
-                    <p class="index-directory-more-note">
-                        Additional index tools (filters, bookmarks and similar)
-                        will appear here.
-                    </p>
+                    <div class="index-sort-toggle" role="tablist" aria-label="Index sort order">
+                        <button type="button" class="index-sort-btn active" data-index-sort="az">A–Z</button>
+                        <button type="button" class="index-sort-btn" data-index-sort="hierarchy">By Subject</button>
+                    </div>
+
+                    <div class="index-scope-filter">
+                        <div class="index-scope-filter-title">Browse by Subject</div>
+                        <select id="scope-subject" class="index-scope-select">
+                            <option value="">Subject…</option>
+                        </select>
+                        <select id="scope-course" class="index-scope-select" disabled>
+                            <option value="">Course…</option>
+                        </select>
+                        <select id="scope-unit" class="index-scope-select" disabled>
+                            <option value="">Unit…</option>
+                        </select>
+                        <select id="scope-chapter" class="index-scope-select" disabled>
+                            <option value="">Chapter…</option>
+                        </select>
+                        <button type="button" id="scope-clear-btn" class="index-scope-clear-btn" hidden>Clear scope</button>
+                    </div>
                 </div>
             </aside>
 
@@ -75,10 +77,6 @@
                     <div class="index-directory-right-controls">
                         <button type="button" id="index-directory-refresh" class="index-directory-refresh-btn"
                                 title="Refresh index" aria-label="Refresh index">⟳</button>
-                        <div class="index-sort-toggle" role="tablist" aria-label="Index sort order">
-                            <button type="button" class="index-sort-btn active" data-index-sort="az">A–Z</button>
-                            <button type="button" class="index-sort-btn" data-index-sort="hierarchy">By Subject</button>
-                        </div>
                     </div>
                 </div>
                 <div id="index-directory-columns" class="index-directory-columns"></div>

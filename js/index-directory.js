@@ -177,12 +177,56 @@ function convertApiDataToStudyData(apiData) {
    the right panel's CSS columns.
    ----------------------------------------------------- */
 
+/* -----------------------------------------------------
+   SCOPE FILTER — Subject > Course > Unit > Chapter cascading
+   dropdowns (left panel, MORE TOOLS). Selecting a level narrows
+   BOTH the A-Z list and the By Subject tree down to that branch
+   (filter) and switches to/scrolls the By Subject tree to it
+   (jump) — the same node.id set is reused by both list renderers
+   below, no separate filtering logic per view.
+   ----------------------------------------------------- */
+
+let scopeFilterNodeId = null;
+
+function findNodeById(nodes, targetId) {
+    for (const node of nodes || []) {
+        if (node.id === targetId) return node;
+        const found = findNodeById(node.children, targetId);
+        if (found) return found;
+    }
+    return null;
+}
+
+function collectNodeAndDescendantIds(node, set = new Set()) {
+    if (!node) return set;
+    set.add(node.id);
+    (node.children || []).forEach(child => collectNodeAndDescendantIds(child, set));
+    return set;
+}
+
+// Applied after filterIndexRegistry() in both list renderers below —
+// a term stays in the list if ANY of its matches falls inside the
+// active scope (itself or a descendant), same many-to-many registry
+// data every other view already reads.
+function applyScopeToGroups(groups) {
+    if (!scopeFilterNodeId) return groups;
+    const node = findNodeById(window.__studyData?.subjects || [], scopeFilterNodeId);
+    if (!node) return groups;
+    const scopeIds = collectNodeAndDescendantIds(node);
+    return groups.filter(g => g.matches.some(m => scopeIds.has(m.nodeId)));
+}
+
+function rerenderCurrentIndexView() {
+    const query = document.getElementById("index-directory-search")?.value.trim().toLowerCase() || "";
+    if (indexDirectorySort === "hierarchy") renderIndexHierarchy(query); else renderIndexColumns(query);
+}
+
 function renderIndexColumns(filterText = "") {
     const container = document.getElementById("index-directory-columns");
     const countEl = document.getElementById("index-directory-count");
     if (!container) return;
 
-    const groups = filterIndexRegistry(filterText);
+    const groups = applyScopeToGroups(filterIndexRegistry(filterText));
 
     if (countEl) {
         countEl.textContent = `${groups.length} term${groups.length === 1 ? "" : "s"}`;
@@ -224,7 +268,7 @@ function renderIndexColumns(filterText = "") {
                     ? `<span class="index-term-alias-of">see ${escapeHtml(singleMatch.nodeTitle)}</span>`
                     : ""}
                 ${group.matches.length > 1
-                    ? `<span class="index-term-alias-of">${group.matches.length} topics</span>`
+                    ? `<span class="index-term-alias-of">${group.matches.length} locations</span>`
                     : ""}
                 <button type="button" class="index-term-delete-btn" title="Delete this term" aria-label="Delete this term">×</button>
             `;
@@ -315,56 +359,11 @@ function showIndexPicker(group) {
 }
 
 /* -----------------------------------------------------
-   ADD / DELETE — manual glossary management from this page.
-   Add: a concept-only term (find-or-create, no link) — useful
-   for pre-registering a term before its topic content exists.
-   Delete: removes the Index_Terms row AND every Index_Node link
-   to it (cascade) — this is a full delete, not an unlink from
-   one topic (that's what "Unmark as index term" in the main
-   notebook is for).
+   DELETE — manual glossary management from this page.
+   Removes the Index_Terms row AND every Index_Node link to it
+   (cascade) — this is a full delete, not an unlink from one topic
+   (that's what "Unmark as index term" in the main notebook is for).
    ----------------------------------------------------- */
-
-document.getElementById("index-add-btn")?.addEventListener("click", addIndexTermFromDirectory);
-document.getElementById("index-add-input")?.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") addIndexTermFromDirectory();
-});
-
-async function addIndexTermFromDirectory() {
-    const input = document.getElementById("index-add-input");
-    const btn = document.getElementById("index-add-btn");
-    const term = input?.value.trim();
-    if (!term) return;
-
-    btn.disabled = true;
-    try {
-        await fetch(GOOGLE_SHEET_API, {
-            method: "POST",
-            mode: "no-cors",
-            body: JSON.stringify({ action: "add_index_term_standalone", term })
-        });
-
-        input.value = "";
-
-        // Optimistic: this new row has no real index_id yet (we can't
-        // read the no-cors response), so give it a temporary local one
-        // purely so it renders immediately — a Refresh afterwards will
-        // replace it with the real server row.
-        window.__studyData.indexTerms = window.__studyData.indexTerms || [];
-        window.__studyData.indexTerms.push({
-            index_id: `local-pending:${Date.now()}`,
-            term,
-            normalized_term: normalizeTerm(term)
-        });
-        invalidateIndexRegistry();
-
-        const query = document.getElementById("index-directory-search")?.value.trim().toLowerCase() || "";
-        if (indexDirectorySort === "hierarchy") renderIndexHierarchy(query); else renderIndexColumns(query);
-    } catch (error) {
-        console.error("Adding index term failed:", error);
-    } finally {
-        btn.disabled = false;
-    }
-}
 
 async function deleteIndexTerm(group) {
     const confirmed = window.confirm(
@@ -432,11 +431,107 @@ function initIndexDirectorySort() {
     });
 }
 
-// node_id -> [term, term, ...] linked to that exact node (a term with
+const SCOPE_LEVELS = [
+    { select: "scope-subject", label: "Subject" },
+    { select: "scope-course", label: "Course" },
+    { select: "scope-unit", label: "Unit" },
+    { select: "scope-chapter", label: "Chapter" }
+];
+
+function scopeLevelSelect(i) {
+    return document.getElementById(SCOPE_LEVELS[i].select);
+}
+
+function populateScopeLevel(i, parentNode) {
+    const select = scopeLevelSelect(i);
+    if (!select) return;
+    const children = parentNode ? (parentNode.children || []) : (window.__studyData?.subjects || []);
+    select.innerHTML = `<option value="">${SCOPE_LEVELS[i].label}…</option>` +
+        children.map(n => `<option value="${escapeHtml(n.id)}">${escapeHtml(n.title || "(untitled)")}</option>`).join("");
+    select.disabled = children.length === 0;
+    select.value = "";
+}
+
+function resetScopeLevelsFrom(i) {
+    for (let j = i; j < SCOPE_LEVELS.length; j++) {
+        const select = scopeLevelSelect(j);
+        if (!select) continue;
+        select.innerHTML = `<option value="">${SCOPE_LEVELS[j].label}…</option>`;
+        select.value = "";
+        select.disabled = true;
+    }
+}
+
+// The active scope is always whichever level's dropdown has the
+// deepest current selection — a shallower level left blank (e.g. user
+// picked a Subject but no Course yet) still counts, it just scopes to
+// a wider branch.
+function currentScopeNodeId() {
+    for (let i = SCOPE_LEVELS.length - 1; i >= 0; i--) {
+        const val = scopeLevelSelect(i)?.value;
+        if (val) return val;
+    }
+    return null;
+}
+
+// "Jump": switch to the By Subject tree (the only view a branch can be
+// scrolled to) and flash the selected branch into view — paired with
+// the "filter" applyScopeToGroups() already narrows both views to.
+function jumpToScopeBranch(nodeId) {
+    indexDirectorySort = "hierarchy";
+    document.querySelectorAll(".index-sort-btn").forEach(b =>
+        b.classList.toggle("active", b.dataset.indexSort === "hierarchy"));
+    document.getElementById("index-directory-columns").hidden = true;
+    document.getElementById("index-directory-hierarchy").hidden = false;
+
+    rerenderCurrentIndexView();
+
+    requestAnimationFrame(() => {
+        const el = [...document.querySelectorAll(".index-hierarchy-node")]
+            .find(n => n.dataset.nodeId === nodeId);
+        if (!el) return;
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+        el.classList.add("index-hierarchy-node-flash");
+        setTimeout(() => el.classList.remove("index-hierarchy-node-flash"), 1600);
+    });
+}
+
+function initScopeFilter() {
+    populateScopeLevel(0, null);
+
+    SCOPE_LEVELS.forEach((level, i) => {
+        const select = scopeLevelSelect(i);
+        select?.addEventListener("change", () => {
+            resetScopeLevelsFrom(i + 1);
+
+            if (select.value && i + 1 < SCOPE_LEVELS.length) {
+                populateScopeLevel(i + 1, findNodeById(window.__studyData?.subjects || [], select.value));
+            }
+
+            scopeFilterNodeId = currentScopeNodeId();
+            const clearBtn = document.getElementById("scope-clear-btn");
+            if (clearBtn) clearBtn.hidden = !scopeFilterNodeId;
+
+            if (scopeFilterNodeId) {
+                jumpToScopeBranch(scopeFilterNodeId);
+            } else {
+                rerenderCurrentIndexView();
+            }
+        });
+    });
+
+    document.getElementById("scope-clear-btn")?.addEventListener("click", () => {
+        scopeFilterNodeId = null;
+        resetScopeLevelsFrom(0);
+        populateScopeLevel(0, null);
+        document.getElementById("scope-clear-btn").hidden = true;
+        rerenderCurrentIndexView();
+    });
+}
 // several matches contributes to several nodes, same registry data
 // the A-Z view and the picker already use — just re-grouped).
 function buildTermsByNode(filterText) {
-    const groups = filterIndexRegistry(filterText);
+    const groups = applyScopeToGroups(filterIndexRegistry(filterText));
     const termsByNode = new Map();
 
     groups.forEach(g => {
@@ -496,6 +591,7 @@ function renderHierarchyBranch(node, depth, termsByNode, cache, container) {
 
     const wrap = document.createElement("div");
     wrap.className = `index-hierarchy-node index-hierarchy-depth-${Math.min(depth, 4)}`;
+    wrap.dataset.nodeId = node.id;
 
     const heading = document.createElement("div");
     heading.className = "index-hierarchy-heading";
@@ -584,6 +680,7 @@ async function initIndexDirectory() {
 
     window.__studyData = data;
     initIndexDirectorySort();
+    initScopeFilter();
     renderIndexColumns();
 }
 
@@ -659,25 +756,3 @@ initIndexDirectory();
         toggle.title = !collapsed ? "Expand search panel" : "Collapse search panel";
     });
 })();
-
-/* -----------------------------------------------------
-   BOOT
-   ----------------------------------------------------- */
-
-async function initIndexDirectory() {
-    const data = await loadStudyData();
-
-    if (!data) {
-        const container = document.getElementById("index-directory-columns");
-        if (container) {
-            container.innerHTML =
-                `<p class="index-empty-note">Index data could not be loaded.</p>`;
-        }
-        return;
-    }
-
-    window.__studyData = data;
-    renderIndexColumns();
-}
-
-initIndexDirectory();

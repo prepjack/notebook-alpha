@@ -2466,7 +2466,7 @@ function renderIndexAZList(filterText = "") {
                     ? `<span class="index-term-alias-of">see ${escapeHtml(singleMatch.nodeTitle)}</span>`
                     : ""}
                 ${group.matches.length > 1
-                    ? `<span class="index-term-alias-of">${group.matches.length} topics</span>`
+                    ? `<span class="index-term-alias-of">${group.matches.length} locations</span>`
                     : ""}
             `;
 
@@ -3091,7 +3091,7 @@ function renderIndexSuggestions(query) {
                 ? (group.matches[0].isAlias
                     ? `<span class="index-suggestion-path">see ${escapeHtml(group.matches[0].nodeTitle)}</span>`
                     : "")
-                : `<span class="index-suggestion-path">${group.matches.length} topics</span>`}
+                : `<span class="index-suggestion-path">${group.matches.length} locations</span>`}
         </div>
     `).join("");
 
