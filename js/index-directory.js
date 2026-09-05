@@ -412,11 +412,19 @@ document.getElementById("index-directory-search")?.addEventListener("input", eve
 
 let indexDirectorySort = "az";
 
+const INDEX_SORT_CAPTIONS = {
+    az: "Terms listed alphabetically, A to Z.",
+    hierarchy: "Terms grouped by Subject → Course → Unit → Chapter."
+};
+
 function initIndexDirectorySort() {
     document.querySelectorAll(".index-sort-btn").forEach(btn => {
         btn.addEventListener("click", () => {
             indexDirectorySort = btn.dataset.indexSort;
             document.querySelectorAll(".index-sort-btn").forEach(b => b.classList.toggle("active", b === btn));
+
+            const caption = document.getElementById("index-sort-caption");
+            if (caption) caption.textContent = INDEX_SORT_CAPTIONS[indexDirectorySort] || "";
 
             document.getElementById("index-directory-columns").hidden = indexDirectorySort !== "az";
             document.getElementById("index-directory-hierarchy").hidden = indexDirectorySort !== "hierarchy";
@@ -522,6 +530,8 @@ function viewScopeInTree(nodeId) {
         indexDirectorySort = "hierarchy";
         document.querySelectorAll(".index-sort-btn").forEach(b =>
             b.classList.toggle("active", b.dataset.indexSort === "hierarchy"));
+        const caption = document.getElementById("index-sort-caption");
+        if (caption) caption.textContent = INDEX_SORT_CAPTIONS.hierarchy;
         document.getElementById("index-directory-columns").hidden = true;
         document.getElementById("index-directory-hierarchy").hidden = false;
         rerenderCurrentIndexView();
