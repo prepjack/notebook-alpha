@@ -124,7 +124,8 @@ body {
 
 /* Middle placeholder */
 #topic-content {
-    max-width: 820px;
+    width: 100%;
+    max-width: 1200px;
     margin: 0 auto;
 }
 
@@ -444,7 +445,8 @@ body.resizing-panels .workspace {
    ========================================================= */
 
 .topic-content-inner {
-    max-width: 820px;
+    width: 100%;
+    max-width: 1200px;
     margin: 0 auto;
     text-align: left;
 }
