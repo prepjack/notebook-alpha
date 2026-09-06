@@ -224,16 +224,40 @@ function rerenderCurrentIndexView() {
     if (indexDirectorySort === "hierarchy") renderIndexHierarchy(query); else renderIndexColumns(query);
 }
 
+// Shared by both views so they can never drift apart again: a primary
+// "N terms" line (unique terms — matches the A-Z list length exactly),
+// plus a muted second line for "N topic locations" — only shown when
+// it differs from the term count, i.e. only when it actually tells the
+// user something new (some terms here are cross-linked to more than
+// one topic).
+function updateTermCountDisplay(groups) {
+    const countEl = document.getElementById("index-directory-count");
+    const subEl = document.getElementById("index-directory-count-sub");
+    if (!countEl) return;
+
+    const termCount = groups.length;
+    let locationCount = 0;
+    groups.forEach(g => { locationCount += g.matches.length; });
+
+    countEl.textContent = `${termCount} term${termCount === 1 ? "" : "s"}`;
+
+    if (subEl) {
+        if (locationCount > termCount) {
+            subEl.hidden = false;
+            subEl.textContent = `linked across ${locationCount} location${locationCount === 1 ? "" : "s"}`;
+        } else {
+            subEl.hidden = true;
+            subEl.textContent = "";
+        }
+    }
+}
+
 function renderIndexColumns(filterText = "") {
     const container = document.getElementById("index-directory-columns");
-    const countEl = document.getElementById("index-directory-count");
     if (!container) return;
 
     const groups = applyScopeToGroups(filterIndexRegistry(filterText));
-
-    if (countEl) {
-        countEl.textContent = `${groups.length} term${groups.length === 1 ? "" : "s"}`;
-    }
+    updateTermCountDisplay(groups);
 
     container.innerHTML = "";
 
@@ -469,15 +493,16 @@ function scopeLevelSelect(i) {
 
 // Every node at a given tree depth, anywhere in the tree — Course/Unit/
 // Chapter dropdowns are NOT restricted to a chosen Subject (multi-select
-// means the four levels are independent), so each option also shows its
-// immediate parent's title in parentheses to tell apart same-named
-// nodes living under different subjects/courses.
-function collectNodesAtDepth(nodes, depth, targetDepth, parentTitle = null, out = []) {
+// means the four levels are independent), so each option also carries
+// its FULL ancestor chain (breadcrumb), not just its immediate parent —
+// this is what makes the dropdown itself unambiguous when picking,
+// without needing that same length inside a chip.
+function collectNodesAtDepth(nodes, depth, targetDepth, breadcrumb = [], out = []) {
     (nodes || []).forEach(n => {
         if (depth === targetDepth) {
-            out.push({ node: n, parentTitle });
+            out.push({ node: n, breadcrumb });
         } else {
-            collectNodesAtDepth(n.children, depth + 1, targetDepth, n.title, out);
+            collectNodesAtDepth(n.children, depth + 1, targetDepth, [...breadcrumb, n.title], out);
         }
     });
     return out;
@@ -489,9 +514,10 @@ function populateFlatScopeDropdowns() {
         if (!select) return;
         const entries = collectNodesAtDepth(window.__studyData?.subjects || [], 0, i);
         select.innerHTML = `<option value="">${level.label}…</option>` +
-            entries.map(({ node: n, parentTitle }) => {
-                const label = parentTitle ? `${n.title} (${parentTitle})` : (n.title || "(untitled)");
-                return `<option value="${escapeHtml(n.id)}">${escapeHtml(label)}</option>`;
+            entries.map(({ node: n, breadcrumb }) => {
+                const title = n.title || "(untitled)";
+                const label = breadcrumb.length ? `${title} — ${breadcrumb.join(" ▸ ")}` : title;
+                return `<option value="${escapeHtml(n.id)}" data-title="${escapeHtml(title)}">${escapeHtml(label)}</option>`;
             }).join("");
         select.disabled = entries.length === 0;
         select.value = "";
@@ -499,9 +525,12 @@ function populateFlatScopeDropdowns() {
 }
 
 // One small removable chip per selected node, regardless of which
-// level it came from — e-commerce-style "applied filters" list.
-// Removing a chip only removes that one selection; every other
-// selected node (same level or different) stays active.
+// level it came from — e-commerce-style "applied filters" list. Kept
+// short on purpose: a level tag (Subject/Course/Unit/Chapter) plus the
+// node's own title only — the full ancestor breadcrumb is what the
+// dropdown option already showed while picking it, so it isn't
+// repeated here (that's what made chips balloon in length before).
+// Long titles get an ellipsis with the full text in a hover title.
 function renderActiveScopeChips() {
     const container = document.getElementById("scope-active-chips");
     if (!container) return;
@@ -510,7 +539,11 @@ function renderActiveScopeChips() {
     activeScopeNodes.forEach(entry => {
         const chip = document.createElement("span");
         chip.className = "index-scope-chip";
-        chip.innerHTML = `${escapeHtml(entry.title)} <button type="button" aria-label="Remove ${escapeHtml(entry.title)} filter">×</button>`;
+        chip.title = entry.title;
+        chip.innerHTML =
+            `<span class="index-scope-chip-level">${escapeHtml(entry.level)}</span>` +
+            `<span class="index-scope-chip-title">${escapeHtml(entry.title)}</span>` +
+            `<button type="button" aria-label="Remove ${escapeHtml(entry.title)} filter">×</button>`;
         chip.querySelector("button").addEventListener("click", () => {
             activeScopeNodes = activeScopeNodes.filter(e => e.id !== entry.id);
             updateScopeAffordances();
@@ -551,8 +584,9 @@ function initScopeFilter() {
             if (!value) return;
 
             if (!activeScopeNodes.some(entry => entry.id === value)) {
-                const label = select.options[select.selectedIndex]?.textContent || value;
-                activeScopeNodes.push({ id: value, title: label });
+                const option = select.options[select.selectedIndex];
+                const title = option?.dataset.title || option?.textContent || value;
+                activeScopeNodes.push({ id: value, title, level: level.label });
             }
 
             select.value = ""; // reset so the same dropdown can add another
@@ -596,20 +630,17 @@ function nodeHasTermsDeep(node, termsByNode, cache) {
 
 function renderIndexHierarchy(filterText = "") {
     const container = document.getElementById("index-directory-hierarchy");
-    const countEl = document.getElementById("index-directory-count");
     if (!container) return;
+
+    const groups = applyScopeToGroups(filterIndexRegistry(filterText));
+    updateTermCountDisplay(groups);
 
     const termsByNode = buildTermsByNode(filterText);
     const cache = new Map();
     const roots = window.__studyData?.subjects || [];
 
     container.innerHTML = "";
-    let totalTerms = 0;
-    termsByNode.forEach(list => { totalTerms += list.length; });
-
-    if (countEl) {
-        countEl.textContent = `${totalTerms} term${totalTerms === 1 ? "" : "s"}`;
-    }
+    const totalTerms = groups.length;
 
     if (!totalTerms) {
         container.innerHTML = `<p class="index-empty-note">${

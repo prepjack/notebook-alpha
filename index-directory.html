@@ -41,6 +41,7 @@
                 </div>
 
                 <div id="index-directory-count" class="index-directory-count"></div>
+                <div id="index-directory-count-sub" class="index-directory-count-sub" hidden></div>
 
                 <!-- MORE TOOLS is the umbrella section for this panel —
                      each tool inside it (starting with Browse & Filter)
@@ -53,19 +54,12 @@
                         <button type="button" id="browse-filter-toggle" class="index-tool-accordion-header"
                                 aria-expanded="true" aria-controls="browse-filter-body">
                             <span class="index-tool-accordion-chevron" aria-hidden="true">▾</span>
-                            <span>Browse &amp; Filter</span>
+                            <span>Filter</span>
                         </button>
                         <div id="browse-filter-body" class="index-tool-accordion-body">
-                            <div class="index-sort-toggle" role="tablist" aria-label="Index sort order">
-                                <button type="button" class="index-sort-btn active" data-index-sort="az"
-                                        title="List every term alphabetically">A-Z View</button>
-                                <button type="button" class="index-sort-btn" data-index-sort="hierarchy"
-                                        title="Group terms by Subject → Course → Unit → Chapter">Tree View</button>
-                            </div>
-                            <p id="index-sort-caption" class="index-sort-caption">Terms listed alphabetically, A to Z.</p>
-
+                            <div id="scope-active-chips" class="index-scope-chips"></div>
                             <div class="index-scope-filter">
-                                <div class="index-scope-filter-title">Browse by Subject</div>
+                                <p class="index-scope-filter-subtext">Narrow the list by Subject, Course, Unit, or Chapter — pick one or more.</p>
                                 <select id="scope-subject" class="index-scope-select">
                                     <option value="">Subject…</option>
                                 </select>
@@ -79,7 +73,6 @@
                                     <option value="">Chapter…</option>
                                 </select>
                                 <button type="button" id="scope-clear-btn" class="index-scope-clear-btn" hidden>Clear scope</button>
-                                <div id="scope-active-chips" class="index-scope-chips"></div>
                             </div>
                         </div>
                     </div>
@@ -89,12 +82,19 @@
             <!-- RIGHT: every index term, multi-column, scrollable -->
             <section id="index-directory-right-panel" class="panel index-directory-right">
                 <div class="panel-heading-row">
-                    <div class="panel-heading" id="index-directory-right-heading">ALL INDEX TERMS</div>
+                    <div class="panel-heading" id="index-directory-right-heading">INDEX TERMS</div>
                     <div class="index-directory-right-controls">
+                        <div class="index-sort-toggle" role="tablist" aria-label="Index sort order">
+                            <button type="button" class="index-sort-btn active" data-index-sort="az"
+                                    title="List every term alphabetically">A-Z View</button>
+                            <button type="button" class="index-sort-btn" data-index-sort="hierarchy"
+                                    title="Group terms by Subject → Course → Unit → Chapter">Tree View</button>
+                        </div>
                         <button type="button" id="index-directory-refresh" class="index-directory-refresh-btn"
                                 title="Refresh index" aria-label="Refresh index">⟳</button>
                     </div>
                 </div>
+                <p id="index-sort-caption" class="index-sort-caption">Terms listed alphabetically, A to Z.</p>
                 <div id="index-directory-columns" class="index-directory-columns"></div>
                 <div id="index-directory-hierarchy" class="index-directory-hierarchy" hidden></div>
             </section>
