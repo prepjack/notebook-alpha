@@ -487,16 +487,19 @@ const SCOPE_LEVELS = [
     { select: "scope-chapter", label: "Chapter" }
 ];
 
-function scopeLevelSelect(i) {
+function comboInput(i) {
     return document.getElementById(SCOPE_LEVELS[i].select);
 }
 
+function comboList(i) {
+    return document.getElementById(`${SCOPE_LEVELS[i].select}-list`);
+}
+
 // Every node at a given tree depth, anywhere in the tree — Course/Unit/
-// Chapter dropdowns are NOT restricted to a chosen Subject (multi-select
+// Chapter combos are NOT restricted to a chosen Subject (multi-select
 // means the four levels are independent), so each option also carries
-// its FULL ancestor chain (breadcrumb), not just its immediate parent —
-// this is what makes the dropdown itself unambiguous when picking,
-// without needing that same length inside a chip.
+// its FULL ancestor chain (breadcrumb) — this is what makes picking
+// unambiguous, without needing that same length inside a chip.
 function collectNodesAtDepth(nodes, depth, targetDepth, breadcrumb = [], out = []) {
     (nodes || []).forEach(n => {
         if (depth === targetDepth) {
@@ -508,29 +511,97 @@ function collectNodesAtDepth(nodes, depth, targetDepth, breadcrumb = [], out = [
     return out;
 }
 
-function populateFlatScopeDropdowns() {
-    SCOPE_LEVELS.forEach((level, i) => {
-        const select = scopeLevelSelect(i);
-        if (!select) return;
-        const entries = collectNodesAtDepth(window.__studyData?.subjects || [], 0, i);
-        select.innerHTML = `<option value="">${level.label}…</option>` +
-            entries.map(({ node: n, breadcrumb }) => {
-                const title = n.title || "(untitled)";
-                const label = breadcrumb.length ? `${title} — ${breadcrumb.join(" ▸ ")}` : title;
-                return `<option value="${escapeHtml(n.id)}" data-title="${escapeHtml(title)}">${escapeHtml(label)}</option>`;
-            }).join("");
-        select.disabled = entries.length === 0;
-        select.value = "";
+// scopeLevelEntries[i] = every node at that depth, each carrying its
+// ancestor chain as { label, title } pairs — built once when the study
+// data loads, then just filtered client-side as the user types.
+let scopeLevelEntries = [];
+
+function buildScopeLevelEntries() {
+    scopeLevelEntries = SCOPE_LEVELS.map((level, i) => {
+        const raw = collectNodesAtDepth(window.__studyData?.subjects || [], 0, i);
+        return raw.map(({ node, breadcrumb }) => ({
+            node,
+            crumbs: breadcrumb.map((title, j) => ({ label: SCOPE_LEVELS[j].label, title }))
+        }));
     });
+}
+
+// Renders the filtered, formatted item list below a combo input — each
+// item shows every ancestor as its own "Label: Title" line (muted),
+// ending with this level's own "Label: Title" line (emphasized) — e.g.
+// picking in the Chapter box shows Subject / Course / Unit / Chapter,
+// one per line, so it's unambiguous which exact branch you're adding.
+// The list is `position: fixed` (not `absolute`) specifically so no
+// ancestor's `overflow: hidden`/`auto` (the accordion box, a scrolling
+// panel, etc.) can clip it — its position is computed here from the
+// input's actual on-screen position instead of relying on CSS flow.
+function positionComboList(i) {
+    const input = comboInput(i);
+    const list = comboList(i);
+    if (!input || !list) return;
+    const rect = input.getBoundingClientRect();
+    list.style.left = `${rect.left}px`;
+    list.style.top = `${rect.bottom + 3}px`;
+    list.style.width = `${rect.width}px`;
+}
+
+function repositionOpenComboLists() {
+    SCOPE_LEVELS.forEach((level, i) => {
+        const list = comboList(i);
+        if (list && !list.hidden) positionComboList(i);
+    });
+}
+
+function renderComboList(i, query) {
+    const list = comboList(i);
+    if (!list) return;
+
+    const q = query.trim().toLowerCase();
+    const entries = scopeLevelEntries[i] || [];
+    const matches = (q ? entries.filter(e => (e.node.title || "").toLowerCase().includes(q)) : entries).slice(0, 200);
+
+    if (!matches.length) {
+        list.innerHTML = `<div class="index-scope-combo-empty">No matches</div>`;
+        positionComboList(i);
+        list.hidden = false;
+        return;
+    }
+
+    list.innerHTML = matches.map(({ node, crumbs }) => {
+        const crumbLines = crumbs.map(c =>
+            `<div class="index-scope-combo-item-crumb">${escapeHtml(c.label)}: ${escapeHtml(c.title)}</div>`
+        ).join("");
+        const title = node.title || "(untitled)";
+        const mainLine = `<div class="index-scope-combo-item-main">${escapeHtml(SCOPE_LEVELS[i].label)}: ${escapeHtml(title)}</div>`;
+        return `<div class="index-scope-combo-item" data-id="${escapeHtml(node.id)}" data-title="${escapeHtml(title)}">${crumbLines}${mainLine}</div>`;
+    }).join("");
+    positionComboList(i);
+    list.hidden = false;
+}
+
+function hideComboList(i) {
+    const list = comboList(i);
+    if (list) list.hidden = true;
+}
+
+function selectComboItem(i, id, title) {
+    if (!activeScopeNodes.some(entry => entry.id === id)) {
+        activeScopeNodes.push({ id, title, level: SCOPE_LEVELS[i].label });
+    }
+    const input = comboInput(i);
+    if (input) input.value = "";
+    hideComboList(i);
+    updateScopeAffordances();
+    rerenderCurrentIndexView();
 }
 
 // One small removable chip per selected node, regardless of which
 // level it came from — e-commerce-style "applied filters" list. Kept
 // short on purpose: a level tag (Subject/Course/Unit/Chapter) plus the
 // node's own title only — the full ancestor breadcrumb is what the
-// dropdown option already showed while picking it, so it isn't
-// repeated here (that's what made chips balloon in length before).
-// Long titles get an ellipsis with the full text in a hover title.
+// combo list already showed while picking it, so it isn't repeated
+// here (that's what made chips balloon in length before). Long titles
+// get an ellipsis with the full text in a hover title.
 function renderActiveScopeChips() {
     const container = document.getElementById("scope-active-chips");
     if (!container) return;
@@ -575,25 +646,41 @@ function clearScopeFilter() {
 }
 
 function initScopeFilter() {
-    populateFlatScopeDropdowns();
+    buildScopeLevelEntries();
 
     SCOPE_LEVELS.forEach((level, i) => {
-        const select = scopeLevelSelect(i);
-        select?.addEventListener("change", () => {
-            const value = select.value;
-            if (!value) return;
+        const input = comboInput(i);
+        const list = comboList(i);
+        if (!input || !list) return;
 
-            if (!activeScopeNodes.some(entry => entry.id === value)) {
-                const option = select.options[select.selectedIndex];
-                const title = option?.dataset.title || option?.textContent || value;
-                activeScopeNodes.push({ id: value, title, level: level.label });
-            }
+        input.addEventListener("focus", () => renderComboList(i, input.value));
+        input.addEventListener("input", () => renderComboList(i, input.value));
+        input.addEventListener("keydown", (e) => {
+            if (e.key === "Escape") { hideComboList(i); input.blur(); }
+        });
 
-            select.value = ""; // reset so the same dropdown can add another
-            updateScopeAffordances();
-            rerenderCurrentIndexView();
+        // mousedown (not click) so this fires before the input's own
+        // blur-triggered list-hide would otherwise swallow the click.
+        list.addEventListener("mousedown", (e) => {
+            const item = e.target.closest(".index-scope-combo-item");
+            if (!item) return;
+            e.preventDefault();
+            selectComboItem(i, item.dataset.id, item.dataset.title);
         });
     });
+
+    document.addEventListener("click", (e) => {
+        SCOPE_LEVELS.forEach((level, i) => {
+            const wrap = comboInput(i)?.closest(".index-scope-combo");
+            if (wrap && !wrap.contains(e.target)) hideComboList(i);
+        });
+    });
+
+    // capture:true so this also fires for scrolling inside a nested
+    // scrollable ancestor (e.g. the left panel itself), not just the
+    // window/document scrolling.
+    window.addEventListener("scroll", repositionOpenComboLists, true);
+    window.addEventListener("resize", repositionOpenComboLists);
 
     document.getElementById("scope-clear-btn")?.addEventListener("click", clearScopeFilter);
 }

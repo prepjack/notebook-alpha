@@ -59,19 +59,32 @@
                         <div id="browse-filter-body" class="index-tool-accordion-body">
                             <div id="scope-active-chips" class="index-scope-chips"></div>
                             <div class="index-scope-filter">
-                                <p class="index-scope-filter-subtext">Narrow the list by Subject, Course, Unit, or Chapter — pick one or more.</p>
-                                <select id="scope-subject" class="index-scope-select">
-                                    <option value="">Subject…</option>
-                                </select>
-                                <select id="scope-course" class="index-scope-select" disabled>
-                                    <option value="">Course…</option>
-                                </select>
-                                <select id="scope-unit" class="index-scope-select" disabled>
-                                    <option value="">Unit…</option>
-                                </select>
-                                <select id="scope-chapter" class="index-scope-select" disabled>
-                                    <option value="">Chapter…</option>
-                                </select>
+                                <p class="index-scope-filter-subtext">Narrow the list by Subject, Course, Unit, or Chapter — pick one or more. Type to search.</p>
+
+                                <div class="index-scope-combo" data-level-index="0">
+                                    <input type="text" id="scope-subject" class="index-scope-combo-input"
+                                           placeholder="Subject..." autocomplete="off">
+                                    <div id="scope-subject-list" class="index-scope-combo-list" hidden></div>
+                                </div>
+
+                                <div class="index-scope-combo" data-level-index="1">
+                                    <input type="text" id="scope-course" class="index-scope-combo-input"
+                                           placeholder="Course..." autocomplete="off">
+                                    <div id="scope-course-list" class="index-scope-combo-list" hidden></div>
+                                </div>
+
+                                <div class="index-scope-combo" data-level-index="2">
+                                    <input type="text" id="scope-unit" class="index-scope-combo-input"
+                                           placeholder="Unit..." autocomplete="off">
+                                    <div id="scope-unit-list" class="index-scope-combo-list" hidden></div>
+                                </div>
+
+                                <div class="index-scope-combo" data-level-index="3">
+                                    <input type="text" id="scope-chapter" class="index-scope-combo-input"
+                                           placeholder="Chapter..." autocomplete="off">
+                                    <div id="scope-chapter-list" class="index-scope-combo-list" hidden></div>
+                                </div>
+
                                 <button type="button" id="scope-clear-btn" class="index-scope-clear-btn" hidden>Clear scope</button>
                             </div>
                         </div>
