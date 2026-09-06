@@ -1214,6 +1214,20 @@ async function removeTopicContent() {
 
         clearMarkdownCacheForNode(selectedTopicNode.id);
 
+        // FIX (2026-09-07): removing all content used to leave this
+        // node's index-term links (both {{}} auto and manual) pointing
+        // at now-empty content forever, since nothing else ever cleans
+        // them up. Fire-and-forget, same pattern as the content clears
+        // above — non-blocking, no-cors.
+        fetch(GOOGLE_SHEET_API, {
+            method: "POST",
+            mode: "no-cors",
+            body: JSON.stringify({
+                action: "unlink_all_terms_for_node",
+                node_id: selectedTopicNode.id
+            })
+        }).catch(err => console.warn("Index link cleanup on content removal failed:", err));
+
         const c = selectedTopicNode.content || {};
         selectedTopicNode.content = {
             definition: "", explanation: "", example: "", keyPoints: [], diagram: "", md_file: "",
@@ -2942,6 +2956,28 @@ function showIndexContextMenu(x, y, ctx) {
     menu.className = "index-context-menu";
     menu.style.left = `${x}px`;
     menu.style.top = `${y}px`;
+
+    // FIX (2026-09-07): a content-sourced ({{Term}}) span can't be
+    // permanently unmarked from here — the {{}} auto-detect pass would
+    // just silently re-add it on the next render. Rather than offer a
+    // button that only works temporarily, show a disabled info line
+    // pointing at the one place removal actually sticks: the .md
+    // source. Manual (right-click-marked) spans are unaffected — they
+    // still get a normal, fully-working "Unmark" button.
+    const isContentSourced = ctx.mode === "unmark" && ctx.existingSpan && !ctx.existingSpan.classList.contains("manual");
+
+    if (isContentSourced) {
+        const info = document.createElement("div");
+        info.className = "index-context-menu-item index-context-menu-info";
+        info.textContent = "Auto-detected — remove {{ }} in content.md to delete";
+        menu.appendChild(info);
+        document.body.appendChild(menu);
+        indexContextMenuEl = menu;
+        const rect = menu.getBoundingClientRect();
+        if (rect.right > window.innerWidth) menu.style.left = `${x - rect.width}px`;
+        if (rect.bottom > window.innerHeight) menu.style.top = `${y - rect.height}px`;
+        return;
+    }
 
     const option = document.createElement("button");
     option.type = "button";

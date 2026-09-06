@@ -1098,6 +1098,8 @@ body.index-directory-resizing .index-directory-workspace {
 .index-context-menu{position:absolute;z-index:1000;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 28px rgba(0,0,0,.18);padding:4px;min-width:180px}
 .index-context-menu-item{display:block;width:100%;box-sizing:border-box;text-align:left;padding:8px 10px;border:none;background:transparent;border-radius:6px;font:12.5px Arial,sans-serif;color:#354239;cursor:pointer}
 .index-context-menu-item:hover{background:var(--green-soft);color:var(--green)}
+.index-context-menu-info{cursor:default;color:#8a938c;font-style:italic;max-width:220px;white-space:normal;line-height:1.4}
+.index-context-menu-info:hover{background:transparent;color:#8a938c}
 
 .index-search-wrap{position:relative;margin-bottom:14px}
 .index-search-input{width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid var(--line);border-radius:7px;font:12px Arial,sans-serif;background:#fff;color:var(--text)}
