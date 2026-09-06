@@ -535,14 +535,33 @@ function buildScopeLevelEntries() {
 // ancestor's `overflow: hidden`/`auto` (the accordion box, a scrolling
 // panel, etc.) can clip it — its position is computed here from the
 // input's actual on-screen position instead of relying on CSS flow.
+// It also flips to open UPWARD, and caps its own height to whatever
+// space is actually available, whenever there isn't enough room below
+// the input (e.g. a Chapter combo near the bottom of the screen) — so
+// it can never render partly or fully off-screen, on any viewport size.
 function positionComboList(i) {
     const input = comboInput(i);
     const list = comboList(i);
     if (!input || !list) return;
+
     const rect = input.getBoundingClientRect();
+    const margin = 6;
+    const spaceBelow = window.innerHeight - rect.bottom - margin;
+    const spaceAbove = rect.top - margin;
+    const openBelow = spaceBelow >= 120 || spaceBelow >= spaceAbove;
+
     list.style.left = `${rect.left}px`;
-    list.style.top = `${rect.bottom + 3}px`;
     list.style.width = `${rect.width}px`;
+
+    if (openBelow) {
+        list.style.top = `${rect.bottom + 3}px`;
+        list.style.bottom = "auto";
+        list.style.maxHeight = `${Math.max(100, Math.min(220, spaceBelow))}px`;
+    } else {
+        list.style.top = "auto";
+        list.style.bottom = `${window.innerHeight - rect.top + 3}px`;
+        list.style.maxHeight = `${Math.max(100, Math.min(220, spaceAbove))}px`;
+    }
 }
 
 function repositionOpenComboLists() {
