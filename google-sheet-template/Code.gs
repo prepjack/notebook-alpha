@@ -243,36 +243,14 @@ function doPost(e) {
       return jsonResponse_(result);
     }
 
-    // ALPHA-PLUS — INDEX TERMS: batched version of the above — one
-    // topic's whole {{}} term set (often 10-15+ terms) in ONE HTTP
-    // round trip instead of one-per-term. This matters for two
-    // reasons: (1) each browser->Apps Script round trip is slow, and
-    // firing a dozen nearly simultaneously made it easy for two
-    // requests for the SAME new term to both read "not found" and
-    // both insert a row (a genuine duplicate — findOrCreateIndexTerm_
-    // has no lock); (2) it used to count as a dozen separate writes
-    // against checkIndexWriteRateLimit_() below, so a single busy
-    // topic could burn most of the per-minute budget by itself.
-    if (data.action === "sync_index_terms_bulk") {
-      if (!checkIndexWriteRateLimit_()) {
-        return jsonResponse_({ success: false, error: "Rate limit exceeded. Please slow down." });
-      }
-      const result = syncIndexTermsBulk_(data.node_id, data.terms, data.unlink);
-      return jsonResponse_(result);
-    }
-
-    // ALPHA-PLUS — INDEX TERMS: standalone add (index-directory.html's
-    // "Add a term") — a concept-only entry with no topic link yet.
-    // Legitimate per the registry's own design (a term with zero
-    // Index_Node links just has nothing to navigate to until it's
-    // linked later, from a topic).
-    if (data.action === "add_index_term_standalone") {
-      if (!checkIndexWriteRateLimit_()) {
-        return jsonResponse_({ success: false, error: "Rate limit exceeded. Please slow down." });
-      }
-      const result = findOrCreateIndexTerm_(data.term);
-      return jsonResponse_({ success: true, index_id: result.index_id, term: result.term });
-    }
+    // REMOVED (2026-09-06): "add_index_term_standalone" — this served
+    // index-directory.html's old "Add a term" (standalone, no topic
+    // link) button. That UI was removed from the frontend earlier;
+    // this backend path became dead/unreachable code and has been
+    // deleted along with it. findOrCreateIndexTerm_ itself is still
+    // used elsewhere (migrateIndexTerms, syncIndexTerm_,
+    // fixDuplicateIndexTermIds) — only this one unreachable API
+    // action was removed.
 
     // ALPHA-PLUS — INDEX TERMS: full delete (index-directory.html's
     // "×" per row) — removes the Index_Terms row AND every Index_Node
@@ -295,6 +273,25 @@ function doPost(e) {
         return jsonResponse_({ success: false, error: "Rate limit exceeded. Please slow down." });
       }
       const result = unlinkIndexTermByTerm_(data.term, data.node_id);
+      return jsonResponse_(result);
+    }
+
+    // FIX (2026-09-07): called by removeTopicContent() in app.js right
+    // after it wipes a topic's content — cleans up every index link
+    // that pointed at this node, since the content those terms were
+    // found in no longer exists.
+    if (data.action === "unlink_all_terms_for_node") {
+      if (!checkIndexWriteRateLimit_()) {
+        return jsonResponse_({ success: false, error: "Rate limit exceeded. Please slow down." });
+      }
+      const nodeLock = LockService.getScriptLock();
+      nodeLock.waitLock(10000);
+      let result;
+      try {
+        result = unlinkAllTermsForNode_(data.node_id);
+      } finally {
+        nodeLock.releaseLock();
+      }
       return jsonResponse_(result);
     }
 
@@ -1661,38 +1658,6 @@ function linkIndexTerm_(indexId, nodeId, sourceType) {
   return { success: true, action: "linked", index_id: indexId, node_id: nodeId };
 }
 
-// ALPHA-PLUS — INDEX TERMS: bulk find-or-create + link (+ unlink),
-// one Lock-protected pass per call instead of N separate HTTP round
-// trips. Reuses the same per-term primitives below — just called in
-// a loop, inside ONE request — so an entire topic's {{}} term set
-// syncs as a single atomic-ish unit and only counts once against the
-// rate limiter, instead of the previous one-request-per-term design
-// which both wasted the write budget AND, being N near-simultaneous
-// unlocked requests, could race and create a duplicate Index_Terms
-// row for the same new term (two requests both seeing "not found").
-function syncIndexTermsBulk_(nodeId, syncTerms, unlinkTerms) {
-  if (!nodeId) throw new Error("node_id is required.");
-
-  const lock = LockService.getScriptLock();
-  lock.waitLock(10000);
-
-  try {
-    const synced = (syncTerms || []).map(function (t) {
-      const termResult = findOrCreateIndexTerm_(t.term);
-      const linkResult = linkIndexTerm_(termResult.index_id, nodeId, t.source_type || "manual");
-      return { term: t.term, index_id: termResult.index_id, link_action: linkResult.action };
-    });
-
-    const unlinked = (unlinkTerms || []).map(function (term) {
-      return unlinkIndexTermByTerm_(term, nodeId);
-    });
-
-    return { success: true, synced_count: synced.length, unlinked_count: unlinked.length };
-  } finally {
-    lock.releaseLock();
-  }
-}
-
 // ALPHA-PLUS — INDEX TERMS: full delete — the Index_Terms row itself
 // AND every Index_Node row linking it to any topic (cascade). Used by
 // index-directory.html's per-row "×" — a deliberate, different action
@@ -1732,6 +1697,44 @@ function deleteIndexTermCascade_(indexId) {
   return { success: true, deleted, unlinked_count: unlinkedCount };
 }
 
+// FIX (2026-09-07): when a topic's content is completely removed
+// (removeTopicContent() in app.js), every index-term link pointing at
+// that node stops making sense — the text those terms were found or
+// marked in no longer exists there. Nothing previously called this on
+// content removal, so those links (both "content" and "manual"
+// source_type) were silently orphaned forever, pointing the Index
+// Directory at a now-empty topic. This removes ALL Index_Node rows
+// for one node_id, regardless of source_type. It does NOT delete the
+// Index_Terms rows themselves — if a term is still linked elsewhere
+// (a different topic), it stays; if this was its only location, it
+// simply becomes a 0-location entry like any other orphan (same as
+// what unlink_index_term already allows).
+function unlinkAllTermsForNode_(nodeId) {
+  if (!nodeId) throw new Error("node_id is required.");
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const { linksSheet } = ensureIndexSheets_(ss);
+
+  const values = linksSheet.getDataRange().getValues();
+  const headers = values[0];
+  const nodeIdx = headers.indexOf("node_id");
+
+  const kept = [headers];
+  let removed = 0;
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][nodeIdx]) === String(nodeId)) {
+      removed++;
+    } else {
+      kept.push(values[i]);
+    }
+  }
+
+  linksSheet.getRange(1, 1, values.length, headers.length).clearContent();
+  linksSheet.getRange(1, 1, kept.length, headers.length).setValues(kept);
+
+  return { success: true, links_removed: removed };
+}
+
 // ALPHA-PLUS — INDEX TERMS: combined find-or-create + link, for the
 // public sync_index_term write path (see doPost). Wraps the two
 // existing primitives so the client never needs a readable POST
@@ -1739,16 +1742,31 @@ function deleteIndexTermCascade_(indexId) {
 function syncIndexTerm_(term, nodeId, sourceType) {
   if (!nodeId) throw new Error("node_id is required.");
 
-  const termResult = findOrCreateIndexTerm_(term);
-  const linkResult = linkIndexTerm_(termResult.index_id, nodeId, sourceType || "manual");
+  // FIX (2026-09-06): this single-term path used to call
+  // findOrCreateIndexTerm_ WITHOUT a lock, unlike syncIndexTermsBulk_.
+  // Two near-simultaneous right-click "Mark as index term" calls for
+  // two DIFFERENT terms could both read the same "current max ID"
+  // before either wrote, and both mint the same new index_id for two
+  // different terms — a real bug that produced duplicate-ID rows
+  // (e.g. one ID shared by 2-4 unrelated terms). Wrapping this in the
+  // same script lock as the bulk path closes that race.
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
 
-  return {
-    success: true,
-    index_id: termResult.index_id,
-    term: termResult.term,
-    term_action: termResult.action,
-    link_action: linkResult.action
-  };
+  try {
+    const termResult = findOrCreateIndexTerm_(term);
+    const linkResult = linkIndexTerm_(termResult.index_id, nodeId, sourceType || "manual");
+
+    return {
+      success: true,
+      index_id: termResult.index_id,
+      term: termResult.term,
+      term_action: termResult.action,
+      link_action: linkResult.action
+    };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // ALPHA-PLUS — INDEX TERMS: removes the Index_Node row linking this
@@ -1856,10 +1874,10 @@ function slugifyIndexTermServer_(term) {
 // (save_core, save_resource, save_structure, etc. are all wide open)
 // — if that's a real concern, the same helper can be reused there.
 function checkIndexWriteRateLimit_() {
-  const WRITES_PER_WINDOW = 40; // bumped from 20 now that a whole topic's
-  // {{}} term set is ONE bulk write instead of one-per-term (see
-  // sync_index_terms_bulk above) — this budget is about guarding
-  // against a runaway script/bot, not normal editorial use.
+  const WRITES_PER_WINDOW = 40; // budget kept at 40 (raised from 20 when
+  // bulk auto-sync existed; only single-term writes happen now, but
+  // 40 is still harmless) — this budget is about guarding against a
+  // runaway script/bot, not normal editorial use.
   const WINDOW_SECONDS = 60;
   const cache = CacheService.getScriptCache();
   const key = "idxWriteCount_" + Math.floor(Date.now() / (WINDOW_SECONDS * 1000));
@@ -1888,22 +1906,16 @@ function migrateIndexTerms() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   ensureIndexSheets_(ss);
 
-  const nodes = getSheetData(ss, "Nodes");
+  // NOTE: tree-title scanning (Nodes -> source_type "tree") was
+  // deliberately removed. Subject/Course/Unit/Chapter titles are
+  // structural TOC labels, not conceptual index entries, and were
+  // cluttering the Index Terms directory. See
+  // cleanupTreeSourcedIndexTerms() for the one-time removal of the
+  // rows this used to create.
   const contentRows = getSheetData(ss, "Content_Core");
 
   let termsCreated = 0;
   let linksCreated = 0;
-
-  nodes.forEach(function(node) {
-    const title = String(node.title || "").trim();
-    if (!title) return;
-
-    const termResult = findOrCreateIndexTerm_(title);
-    if (termResult.action === "created") termsCreated++;
-
-    const linkResult = linkIndexTerm_(termResult.index_id, node.node_id, "tree");
-    if (linkResult.action === "linked") linksCreated++;
-  });
 
   contentRows
     .filter(function(row) { return row.content_type === "index_terms" && row.content; })
@@ -1923,7 +1935,6 @@ function migrateIndexTerms() {
 
   const summary = {
     success: true,
-    nodes_scanned: nodes.length,
     content_rows_scanned: contentRows.length,
     terms_created: termsCreated,
     links_created: linksCreated
@@ -2420,3 +2431,86 @@ function testSaveMcqsBulk() {
 
   Logger.log(result.getContent());
 }
+
+// ONE-TIME CLEANUP — removes every Index_Node link that was created
+// with source_type = "tree" (i.e. added by migrateIndexTerms()'s old
+// Nodes-sheet scan), then deletes any Index_Terms row that has ZERO
+// remaining links after that removal. A term that also has a
+// "content" or "manual" link on some node is left alone — only the
+// tree-sourced link is removed from it.
+// (Already run once against the live sheet as of this file version —
+// safe to re-run any time, it's idempotent: a second run reports 0.)
+function cleanupTreeSourcedIndexTerms() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const { termsSheet, linksSheet } = ensureIndexSheets_(ss);
+
+  const linkValues = linksSheet.getDataRange().getValues();
+  const linkHeaders = linkValues[0];
+  const srcIdx = linkHeaders.indexOf("source_type");
+  const idIdx = linkHeaders.indexOf("index_id");
+
+  const keptLinks = [linkHeaders];
+  let linksRemoved = 0;
+  for (let i = 1; i < linkValues.length; i++) {
+    if (String(linkValues[i][srcIdx]) === "tree") {
+      linksRemoved++;
+    } else {
+      keptLinks.push(linkValues[i]);
+    }
+  }
+
+  linksSheet.getRange(1, 1, linkValues.length, linkHeaders.length).clearContent();
+  linksSheet.getRange(1, 1, keptLinks.length, linkHeaders.length).setValues(keptLinks);
+
+  const stillLinked = new Set();
+  for (let i = 1; i < keptLinks.length; i++) {
+    stillLinked.add(String(keptLinks[i][idIdx]));
+  }
+
+  const termValues = termsSheet.getDataRange().getValues();
+  const termHeaders = termValues[0];
+  const tIdIdx = termHeaders.indexOf("index_id");
+
+  const keptTerms = [termHeaders];
+  let termsDeleted = 0;
+  for (let i = 1; i < termValues.length; i++) {
+    const indexId = String(termValues[i][tIdIdx]);
+    if (stillLinked.has(indexId)) {
+      keptTerms.push(termValues[i]);
+    } else {
+      termsDeleted++;
+    }
+  }
+
+  termsSheet.getRange(1, 1, termValues.length, termHeaders.length).clearContent();
+  termsSheet.getRange(1, 1, keptTerms.length, termHeaders.length).setValues(keptTerms);
+
+  const summary = {
+    success: true,
+    links_removed: linksRemoved,
+    terms_deleted_as_orphans: termsDeleted
+  };
+
+  Logger.log(JSON.stringify(summary));
+  return summary;
+}
+
+// ONE-TIME FIX — repairs duplicate index_id rows in Index_Terms
+// (caused by the pre-fix race condition in syncIndexTerm_ /
+// add_index_term_standalone: two concurrent requests for two
+// DIFFERENT terms could mint the same "next" ID before either wrote).
+//
+// For each index_id shared by 2+ different terms: the FIRST row
+// found keeps that id untouched (and keeps whatever Index_Node links
+// already point to that id). Every OTHER row with that same id gets
+// a fresh, genuinely-unique id instead.
+//
+// IMPORTANT: Index_Node only stores (index_id, node_id) — it does not
+// record which specific term a link was for. So the existing links on
+// a collided id cannot be split apart; they all stay with whichever
+// term kept the original id. Terms that get a NEW id in this pass
+// will have zero links until you re-mark them (right-click -> "Mark
+// as index term") on their actual topic page.
+//
+// Run this ONCE from the Apps Script editor (select
+// fixDuplicateIndexTermIds in the function dropdown, then Run).

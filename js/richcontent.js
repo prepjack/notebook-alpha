@@ -32,15 +32,17 @@
     const liveLottieInstances = new Set();
 
     /* =========================================================
-       ALPHA-PLUS — INDEX TERMS: {{Term}} auto-detection
+       ALPHA-PLUS — INDEX TERMS: {{Term}} visual-only suggestion
        Runs BEFORE marked.parse()/DOMPurify, on the exact text that is
        about to be rendered (i.e. already split to the current
        language + depth block by app.js). A term is spanned only at
        its FIRST occurrence within that block; later repeats of the
        same term fall back to plain **bold** so no duplicate DOM id
-       is ever created. Returned alongside the rewritten text so the
-       caller (renderRichContent) can hand the term list to app.js
-       for the subtopic-scoped Index tab.
+       is ever created. {{Term}} spans are a visual hint only — they
+       do NOT create any backend Index link by themselves; only a
+       real right-click "Mark as index term" does. The term list is
+       still returned so app.js can display it, but nothing here
+       triggers a sync.
        ========================================================= */
 
     function slugifyIndexTerm(term) {
@@ -63,8 +65,9 @@
     }
 
     // Returns { text, terms } — text has every {{Term}} replaced (first
-    // occurrence -> <span>, repeats -> **bold**), terms is
-    // [{ term, id }] in first-seen order, ready to sync/list.
+    // occurrence -> <span class="rc-index-suggestion">, repeats ->
+    // **bold**), terms is [{ term, id }] in first-seen order. This is a
+    // pure text transformation — no backend calls happen here.
     function extractIndexTerms(rawText) {
         const seenNormalized = new Map(); // normalizedTerm -> id
         const usedIds = new Set();
@@ -91,7 +94,7 @@
             seenNormalized.set(normalized, id);
             terms.push({ term, id });
 
-            return `<span class="rc-index-term" data-term="${escapeIndexAttr(term)}" id="${id}">${term}</span>`;
+            return `<span class="rc-index-suggestion" data-term="${escapeIndexAttr(term)}" id="${id}">${term}</span>`;
         });
 
         return { text, terms };
@@ -636,10 +639,12 @@
             return;
         }
 
-        // {{Term}} -> <span class="rc-index-term" ...> (first occurrence
-        // only). window.lastRenderedIndexTerms is read by app.js right
-        // after this call to sync/list terms for the subtopic-scoped
-        // Index tab — see ALPHA-PLUS INDEX TERMS in app.js.
+        // {{Term}} -> <span class="rc-index-suggestion" ...> (first
+        // occurrence only) — a visual-only suggestion marker, not a link.
+        // window.lastRenderedIndexTerms is kept for any future/external
+        // reader of the raw {{}} term list; app.js itself no longer reads
+        // it (its old auto-reconciliation consumer was removed in the
+        // manual-only refactor, step 3).
         const { text, terms } = extractIndexTerms(resolvedText);
         window.lastRenderedIndexTerms = terms;
 

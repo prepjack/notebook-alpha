@@ -855,7 +855,7 @@ function renderCurrentLanguageBlock(container) {
     if (window.ReadingTools) window.ReadingTools.onContentRendered();
     scheduleContentScrollRestore();
     buildContentTocPanel();
-    syncAndRenderScopedIndex();
+    refreshScopedIndexForCurrentNode();
 }
 
 function renderAlphaContentDiagnostic(container) {
@@ -2619,11 +2619,6 @@ function cssEscapeId(id) {
 
 let indexTabScope = "topic"; // "topic" | "global"
 let currentScopedIndexTerms = []; // [{ index_id, term, id, source_type }]
-// nodeId -> signature of the {{}} term set last successfully sent to
-// sync_index_terms_bulk THIS session — skips re-sending an unchanged
-// set (e.g. just toggling EN/HI/depth re-renders the same {{}} terms
-// every time; no need to hit the network again for identical data).
-const syncedTermSignatureByNode = new Map();
 
 function initIndexScopeToggle() {
     document.querySelectorAll(".index-scope-btn").forEach(btn => {
@@ -2647,15 +2642,12 @@ function initIndexScopeToggle() {
 }
 
 // Called right after every content render (renderCurrentLanguageBlock).
-// The current render's {{}} extraction is the ONLY source of truth for
-// which auto terms exist in this node's content RIGHT NOW — so this
-// also RECONCILES the registry: any previously-synced "content" term
-// that this render no longer contains (removed from the .md, or the
-// .md itself was swapped out/regenerated) gets unlinked, so it stops
-// showing up as a dead, unclickable entry in the Index tab. Manual
-// (right-click) terms are never touched by this reconciliation — only
-// "content"-sourced links are ever added or removed automatically.
-async function syncAndRenderScopedIndex() {
+// Everything is manual-only now — this just fetches this node's actual
+// linked terms from the registry and renders them into the Index tab.
+// No {{}} extraction, no diffing, no auto add/remove: the manual
+// mark/unmark actions (markSelectionAsIndexTerm, unmarkIndexTermSpan)
+// are the only things that ever change what's linked.
+async function refreshScopedIndexForCurrentNode() {
     const node = selectedTopicNode;
     if (!node) {
         currentScopedIndexTerms = [];
@@ -2663,141 +2655,15 @@ async function syncAndRenderScopedIndex() {
         return;
     }
 
-    const nodeId = node.id;
-    const autoTerms = window.lastRenderedIndexTerms || [];
-    const autoNormalized = new Set(autoTerms.map(t => t.term.trim().toLowerCase()));
-
-    const existing = await fetchIndexTermsForNode(nodeId);
-
-    const stale = existing.filter(t =>
-        t.source_type === "content" && !autoNormalized.has(String(t.term).trim().toLowerCase())
-    );
-
-    // Build the displayed list from what we just computed rather than
-    // re-fetching immediately — the bulk write below is fire-and-forget
-    // ("no-cors"), so a GET right after it could race and momentarily
-    // show pre-write data. Also collapse any duplicate term TEXT here
-    // (defensive display-level dedupe) — a couple of older entries may
-    // still have two Index_Terms rows for the same normalized term
-    // from before the bulk endpoint below existed to prevent that race.
-    const staleIds = new Set(stale.map(t => t.index_id));
-    const keptExisting = existing.filter(t => !staleIds.has(t.index_id));
-    const existingNormalized = new Set(keptExisting.map(t => String(t.term).trim().toLowerCase()));
-    const newlyAdded = autoTerms
-        .filter(t => !existingNormalized.has(t.term.trim().toLowerCase()))
-        .map(t => ({ term: t.term, id: t.id, source_type: "content" }));
-
-    const combined = [...keptExisting, ...newlyAdded];
-    const seenNormalized = new Set();
-    currentScopedIndexTerms = combined.filter(t => {
-        const key = String(t.term).trim().toLowerCase();
-        if (seenNormalized.has(key)) return false;
-        seenNormalized.add(key);
-        return true;
-    });
+    currentScopedIndexTerms = await fetchIndexTermsForNode(node.id);
     renderScopedIndexList(document.getElementById("index-search-input")?.value.trim().toLowerCase() || "");
-
-    // Only actually hit the network if this exact {{}} term set for this
-    // node hasn't already been synced this session, and there's
-    // something to send.
-    const signature = [...autoNormalized].sort().join("|");
-    const alreadySyncedThisSession = syncedTermSignatureByNode.get(nodeId) === signature;
-
-    if (!alreadySyncedThisSession && (stale.length || newlyAdded.length)) {
-        syncedTermSignatureByNode.set(nodeId, signature);
-        syncIndexTermsBulkToRegistry(
-            nodeId,
-            newlyAdded.map(t => ({ term: t.term, source_type: "content" })),
-            stale.map(t => t.term)
-        );
-    }
-}
-
-// Fire-and-forget bulk write — one HTTP round trip for a whole topic's
-// {{}} term set (create/link new ones + unlink stale ones together),
-// instead of one request per term. See sync_index_terms_bulk in
-// Code.gs for why this replaced the old per-term loop.
-//
-// Reliability: the write itself is still "no-cors" fire-and-forget (the
-// response can never be read) — that architecture is unchanged. What's
-// added is a check AFTER the fact: wait briefly, re-fetch this node's
-// terms fresh from the server, and compare against what was just
-// requested. Silent on success. One mismatch is retried once (it may
-// just have been a slow write); still mismatched after that gets a
-// small non-blocking warning — see showIndexSyncWarning(). Nothing here
-// ever shows a blocking alert for normal operation.
-async function syncIndexTermsBulkToRegistry(nodeId, terms, unlinkTerms, attempt = 1) {
-    if (!terms.length && !unlinkTerms.length) return;
-
-    try {
-        await fetch(GOOGLE_SHEET_API, {
-            method: "POST",
-            mode: "no-cors",
-            body: JSON.stringify({ action: "sync_index_terms_bulk", node_id: nodeId, terms, unlink: unlinkTerms })
-        });
-        invalidateIndexCache();
-        verifyIndexSyncForNode(nodeId, terms.map(t => t.term), unlinkTerms, attempt);
-    } catch (error) {
-        console.error("Bulk index term sync failed:", error);
-    }
-}
-
-// Confirms a just-fired bulk write actually landed. There's no other
-// signal for this (the write is fire-and-forget), so: wait briefly,
-// re-fetch this node's terms, diff against what was just requested.
-async function verifyIndexSyncForNode(nodeId, expectedAdded, expectedRemoved, attempt) {
-    await new Promise(resolve => setTimeout(resolve, 1200));
-
-    // The user may have already moved to a different topic by the time
-    // this fires — checking/retrying against the node they left would
-    // be pointless, and a retry could even re-add a term to the wrong
-    // context if they'd meanwhile unmarked it there.
-    if (!selectedTopicNode || selectedTopicNode.id !== nodeId) return;
-
-    const current = await fetchIndexTermsForNode(nodeId);
-    const currentNormalized = new Set(current.map(t => String(t.term).trim().toLowerCase()));
-
-    const stillMissing = expectedAdded.filter(t => !currentNormalized.has(String(t).trim().toLowerCase()));
-    const stillLinked = expectedRemoved.filter(t => currentNormalized.has(String(t).trim().toLowerCase()));
-
-    if (!stillMissing.length && !stillLinked.length) return; // landed — done, silently
-
-    if (attempt === 1) {
-        syncIndexTermsBulkToRegistry(
-            nodeId,
-            stillMissing.map(t => ({ term: t, source_type: "content" })),
-            stillLinked,
-            2
-        );
-        return;
-    }
-
-    showIndexSyncWarning();
-}
-
-// One small, self-dismissing, non-blocking corner note — shown only
-// when a bulk index-term write still hasn't landed after a retry.
-// Never requires dismissal and never interrupts what the user's doing.
-let indexSyncWarningEl = null;
-function showIndexSyncWarning() {
-    if (indexSyncWarningEl) return; // one at a time — don't stack
-
-    const el = document.createElement("div");
-    el.className = "index-sync-warning";
-    el.textContent = "Some index terms for this topic may not have saved. They'll sync next time you open it.";
-    document.body.appendChild(el);
-    indexSyncWarningEl = el;
-
-    setTimeout(() => {
-        el.remove();
-        indexSyncWarningEl = null;
-    }, 5000);
+    reapplyManualIndexHighlights(document.getElementById("rc-explanation"), currentScopedIndexTerms);
 }
 
 // Pure fetch, no side effects on currentScopedIndexTerms/the UI — used
-// by syncAndRenderScopedIndex() above to read the PRE-reconciliation
-// state for whichever node id is passed in (never the stale, possibly
-// different-topic, currentScopedIndexTerms left over from before).
+// by refreshScopedIndexForCurrentNode() above to read the current
+// linked-term state for whichever node id is passed in (never the stale,
+// possibly different-topic, currentScopedIndexTerms left over from before).
 async function fetchIndexTermsForNode(nodeId) {
     try {
         const url = `${GOOGLE_SHEET_API}?action=get_index_terms_for_node&node_id=${encodeURIComponent(nodeId)}`;
@@ -2808,6 +2674,126 @@ async function fetchIndexTermsForNode(nodeId) {
         console.error("Fetching scoped index terms failed:", error);
         return [];
     }
+}
+
+// FIX (2026-09): manually-marked terms used to lose their green highlight
+// on reload/topic-switch. {{}} suggestion spans survive re-render because
+// {{}} is literally present in the raw markdown every time richcontent.js
+// re-parses it — but a manual (right-click) mark has no such marker in
+// the raw text; the span was only ever a one-time DOM mutation done at
+// the moment of marking (markSelectionAsIndexTerm), so a fresh render has
+// no memory of it. This re-wraps every term the backend has linked to
+// this node (currentScopedIndexTerms, any source_type — older data may
+// still say "content"/"tree"/"alias" from before this refactor, all of
+// it should still be highlighted) into #rc-explanation's freshly-rendered
+// content, restoring the highlight without a re-click. Called every time
+// content re-renders (see refreshScopedIndexForCurrentNode above), so it
+// must be safe to run repeatedly without double-wrapping — it always
+// re-checks the live DOM for an existing .rc-index-term match before
+// wrapping, rather than tracking state of its own.
+function reapplyManualIndexHighlights(container, terms) {
+    if (!container || !terms || !terms.length) return;
+
+    // Terms already represented by a real link span in THIS render (from
+    // an earlier call this same render, or a term the user just marked)
+    // — never wrapped again.
+    const alreadyLinkedNormalized = new Set(
+        [...container.querySelectorAll(".rc-index-term")]
+            .map(el => (el.dataset.term || el.textContent).trim().toLowerCase())
+    );
+
+    const existingIds = new Set(
+        [...container.querySelectorAll("[id]")].map(el => el.id)
+    );
+
+    terms.forEach(t => {
+        const term = String(t.term || "").trim();
+        if (!term) return;
+
+        const normalized = term.trim().toLowerCase();
+        if (alreadyLinkedNormalized.has(normalized)) return;
+
+        // Prefer upgrading an exact-match {{}} suggestion span in place —
+        // cleaner than nesting a fresh span inside it, and matches what
+        // the user would expect to see turn green.
+        const suggestionMatch = [...container.querySelectorAll(".rc-index-suggestion")]
+            .find(el => el.textContent.trim().toLowerCase() === normalized);
+
+        if (suggestionMatch) {
+            suggestionMatch.classList.remove("rc-index-suggestion");
+            suggestionMatch.classList.add("rc-index-term", "manual");
+            suggestionMatch.dataset.term = term;
+            if (!suggestionMatch.id) {
+                suggestionMatch.id = uniqueManualHighlightId(term, existingIds);
+                existingIds.add(suggestionMatch.id);
+            }
+            alreadyLinkedNormalized.add(normalized);
+            return;
+        }
+
+        const match = findFirstUnlinkedTermTextMatch(container, term);
+        if (!match) return; // term's text isn't present in this rendered block at all
+
+        const { textNode, index } = match;
+        const range = document.createRange();
+        range.setStart(textNode, index);
+        range.setEnd(textNode, index + term.length);
+
+        const span = document.createElement("span");
+        span.className = "rc-index-term manual";
+        span.dataset.term = term;
+        span.id = uniqueManualHighlightId(term, existingIds);
+        existingIds.add(span.id);
+
+        try {
+            range.surroundContents(span);
+        } catch (error) {
+            // Mirrors markSelectionAsIndexTerm's fallback — shouldn't
+            // normally trigger for a single-text-node match, but a
+            // range spanning element boundaries can't be wrapped safely.
+            span.textContent = range.toString();
+            range.deleteContents();
+            range.insertNode(span);
+        }
+
+        alreadyLinkedNormalized.add(normalized);
+    });
+}
+
+// Same id-slugging + collision-suffix approach as markSelectionAsIndexTerm,
+// factored out so both call sites stay consistent.
+function uniqueManualHighlightId(term, existingIds) {
+    let id = window.slugifyIndexTerm ? window.slugifyIndexTerm(term) : `term-${Date.now()}`;
+    let suffix = 2;
+    while (existingIds.has(id)) {
+        id = `${window.slugifyIndexTerm(term)}-${suffix++}`;
+    }
+    return id;
+}
+
+// Walks text nodes inside `container`, skipping any already inside an
+// .rc-index-term (real link) or .rc-index-suggestion ({{}} marker) span,
+// and returns the first case-insensitive match of `term` as
+// { textNode, index } (index into that text node's data), or null if the
+// term's text doesn't appear anywhere unwrapped in this container.
+function findFirstUnlinkedTermTextMatch(container, term) {
+    const normalized = term.trim().toLowerCase();
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+            if (!node.data || !node.data.trim()) return NodeFilter.FILTER_REJECT;
+            if (node.parentElement?.closest(".rc-index-term, .rc-index-suggestion")) {
+                return NodeFilter.FILTER_REJECT;
+            }
+            return NodeFilter.FILTER_ACCEPT;
+        }
+    });
+
+    let node;
+    while ((node = walker.nextNode())) {
+        const index = node.data.toLowerCase().indexOf(normalized);
+        if (index !== -1) return { textNode: node, index };
+    }
+    return null;
 }
 
 // Fire-and-forget, same "no-cors" pattern every other write in this file
@@ -2886,10 +2872,16 @@ function scrollToScopedIndexTerm(termEntry) {
 /* =========================================================
    ALPHA-PLUS — INDEX TERMS: manual right-click marking
    Custom context menu on the content panel — no browser default.
-   Selecting text -> "Mark as index term" wraps it in the same
-   .rc-index-term span the {{}} auto-detection produces (source_type
-   "manual" server-side) so both kinds of terms behave identically
-   everywhere else (Index tab list, click-to-scroll, styling).
+   Selecting text -> "Mark as index term" wraps it in a
+   .rc-index-term.manual span (source_type "manual" server-side).
+   NOTE (2026-09): {{}} content markers now render as
+   .rc-index-suggestion (js/richcontent.js), a separate class — they
+   are no longer .rc-index-term. findEnclosingIndexTermSpan below only
+   matches .rc-index-term, so right-clicking inside a .rc-index-suggestion
+   span always falls through to "mark" mode, same as plain text; the
+   isContentSourced branch in showIndexContextMenu is accordingly
+   unreachable for now (left in place — this whole block is revisited
+   in step 6, not here).
    ========================================================= */
 
 let indexContextMenuEl = null;

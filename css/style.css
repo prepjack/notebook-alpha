@@ -1083,11 +1083,14 @@ body.index-directory-resizing .index-directory-workspace {
 .index-scope-btn.active{background:#fff;color:var(--green);box-shadow:0 1px 3px rgba(0,0,0,.12)}
 .index-scoped-list{font-family:Arial,sans-serif}
 
-/* ALPHA-PLUS — INDEX TERMS: {{}} auto-detected + manually marked spans
-   inside rendered content (js/richcontent.js + js/app.js manual marking) */
+/* ALPHA-PLUS — INDEX TERMS: real linked-term spans (manually marked via
+   right-click, js/app.js) vs {{}} visual-only suggestion spans
+   (js/richcontent.js) — structurally different classes so the two never
+   look alike in code or on screen. */
 .rc-index-term{background:var(--green-soft);color:var(--green);border-radius:4px;padding:0 3px;cursor:default;border-bottom:2px solid rgba(90,140,110,.35)}
 .rc-index-term.manual{border-bottom-style:dashed}
 .rc-index-term-flash{animation:rcIndexTermFlash 1.6s ease}
+.rc-index-suggestion{border-bottom:1px dotted var(--muted);cursor:default}
 @keyframes rcIndexTermFlash{
     0%{background:#ffe9a8}
     100%{background:var(--green-soft)}
