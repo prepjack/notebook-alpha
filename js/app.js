@@ -459,7 +459,7 @@ function rememberBeforeContentVariantSwitch() {
 }
 
 function prepareTopicScrollRestore(node) {
-    const state = node ? contentScrollMemory.get(contentScrollKey(node.id, "EN", "FULL")) : null;
+    const state = node ? contentScrollMemory.get(contentScrollKey(node.id, "EN", "DETAILED")) : null;
     // The exact topic/language/depth key is resolved once the new .md file
     // has been parsed. Until then, a new topic starts at the top.
     pendingScrollRestore = { mode: "topic", topicId: node ? node.id : null };
@@ -583,7 +583,7 @@ function renderContentLayer() {
 
             ${!hasContent ? `
                 <div class="empty-content-block">
-                    <p>No content available for this topic. Create a content package in this topic's Google Drive folder, then link the <strong>folder</strong> here. The folder can contain Markdown, images, Mermaid diagrams, charts and Lottie animations.</p>
+                    <p>No content available for this topic. Create a content package in this topic's Google Drive folder, then link the <strong>folder</strong> here. The folder can contain Markdown, images, Mermaid diagrams, and charts.</p>
                     <button class="content-action" data-action="add-content-link">🔗 Add Content Folder</button>
                 </div>` : ""}
 
@@ -681,7 +681,7 @@ async function loadAndRenderMdFileContent(node, mdLink, container, token) {
             // ALPHA-PLUS — CONTENT LINK: folder mode. When the saved
             // link points at a Drive FOLDER (not a single .md file),
             // get_markdown also returns an {filename: url} map for every
-            // other file in that folder (images, ```lottie animation
+            // other file in that folder (images, diagrams, or any other
             // .json files, ...) — see google-sheet-template/Code.gs
             // handleGetContentFolder_(). A single-file link always
             // returns assets: {}, so this is a no-op for the older flow.
@@ -725,9 +725,9 @@ async function loadAndRenderMdFileContent(node, mdLink, container, token) {
 }
 
 /* =========================================================
-   CONTENT-LANGUAGE TOGGLE (EN / HI / HINGLISH) — content panel
+   CONTENT-LANGUAGE TOGGLE (EN / HI / AI) — content panel
    only. Splits raw markdown on top-level
-     <!-- ===LANG:EN=== -->  <!-- ===LANG:HI=== -->  <!-- ===LANG:HINGLISH=== -->
+     <!-- ===LANG:EN=== -->  <!-- ===LANG:HI=== -->  <!-- ===LANG:AI=== -->
    marker lines (each must sit alone on its own line). A file
    with none of these markers is treated as a single EN block —
    today's behavior, completely unchanged. Nothing here touches
@@ -736,19 +736,19 @@ async function loadAndRenderMdFileContent(node, mdLink, container, token) {
    that's already fetched/cached.
    ========================================================= */
 
-const LANG_MARKER_RE = /^[ \t]*<!--\s*===LANG:(EN|HI|HINGLISH)===\s*-->[ \t]*$/gm;
-const DEPTH_MARKER_RE = /^[ \t]*<!--\s*===DEPTH:(FULL|HALF|MINI)===\s*-->[ \t]*$/gm;
+const LANG_MARKER_RE = /^[ \t]*<!--\s*===LANG:(EN|HI|AI)===\s*-->[ \t]*$/gm;
+const DEPTH_MARKER_RE = /^[ \t]*<!--\s*===DEPTH:(DETAILED|BRIEF)===\s*-->[ \t]*$/gm;
 
 function splitContentByLanguage(rawMarkdown) {
     const text = String(rawMarkdown || "");
     const matches = [...text.matchAll(LANG_MARKER_RE)];
 
     if (!matches.length) {
-        return { en: text, hi: null, hinglish: null, hasLanguageMarkers: false };
+        return { en: text, hi: null, ai: null, hasLanguageMarkers: false };
     }
 
-    const result = { en: null, hi: null, hinglish: null, hasLanguageMarkers: true };
-    const keyByTag = { EN: "en", HI: "hi", HINGLISH: "hinglish" };
+    const result = { en: null, hi: null, ai: null, hasLanguageMarkers: true };
+    const keyByTag = { EN: "en", HI: "hi", AI: "ai" };
 
     matches.forEach((match, i) => {
         const tag = keyByTag[match[1]];
@@ -768,10 +768,10 @@ function splitContentByLanguage(rawMarkdown) {
 let currentLanguageSplit = null;
 let currentContentLanguage = "EN";
 let currentDepthSplit = null;
-let currentContentDepth = "FULL";
+let currentContentDepth = "DETAILED";
 // ALPHA-PLUS — CONTENT LINK: folder mode. {filename: url} for whatever
 // content is currently loaded — {} for legacy/single-file content, or
-// the folder's other files (images/lottie) when loaded via
+// the folder's other files (images/diagrams) when loaded via
 // loadAndRenderMdFileContent(). See richcontent.js resolveAssetRefs().
 let currentContentAssets = {};
 let currentContentAssetData = {};
@@ -790,11 +790,11 @@ function splitLayerByDepth(languageBlockText) {
     const matches = [...text.matchAll(DEPTH_MARKER_RE)];
 
     if (!matches.length) {
-        return { full: text, half: null, mini: null, hasDepthMarkers: false };
+        return { detailed: text, brief: null, hasDepthMarkers: false };
     }
 
-    const result = { full: null, half: null, mini: null, hasDepthMarkers: true };
-    const keyByTag = { FULL: "full", HALF: "half", MINI: "mini" };
+    const result = { detailed: null, brief: null, hasDepthMarkers: true };
+    const keyByTag = { DETAILED: "detailed", BRIEF: "brief" };
 
     matches.forEach((match, i) => {
         const tag = keyByTag[match[1]];
@@ -822,9 +822,9 @@ function applyMdTextToContentPanel(rawText, container, assets, assetData) {
     currentContentLanguage = languageBlockFor(preferred, currentLanguageSplit) ? preferred : "EN";
 
     const depthKey = selectedTopicNode ? `${selectedTopicNode.id}::${currentContentLanguage}` : null;
-    const preferredDepth = (depthKey && lastDepthPerTopicLanguage.get(depthKey)) || "FULL";
+    const preferredDepth = (depthKey && lastDepthPerTopicLanguage.get(depthKey)) || "DETAILED";
     currentDepthSplit = splitLayerByDepth(languageBlockFor(currentContentLanguage, currentLanguageSplit) || "");
-    currentContentDepth = depthBlockFor(preferredDepth, currentDepthSplit) ? preferredDepth : "FULL";
+    currentContentDepth = depthBlockFor(preferredDepth, currentDepthSplit) ? preferredDepth : "DETAILED";
 
     renderCurrentLanguageBlock(container);
     updateLanguageToggleUI();
@@ -834,15 +834,14 @@ function applyMdTextToContentPanel(rawText, container, assets, assetData) {
 function languageBlockFor(lang, split) {
     if (!split) return null;
     if (lang === "HI") return split.hi;
-    if (lang === "HINGLISH") return split.hinglish;
+    if (lang === "AI") return split.ai;
     return split.en;
 }
 
 function depthBlockFor(depth, split) {
     if (!split) return null;
-    if (depth === "HALF") return split.half;
-    if (depth === "MINI") return split.mini;
-    return split.full;
+    if (depth === "BRIEF") return split.brief;
+    return split.detailed;
 }
 
 function renderCurrentLanguageBlock(container) {
@@ -867,8 +866,8 @@ function renderAlphaContentDiagnostic(container) {
 // content-toggle-row. Each language remembers its own last-used depth via
 // lastDepthPerTopicLanguage, so every segment's dropdown reflects that
 // language's own Full/Half/Mini choice independently of the others.
-const CONTENT_LANGUAGES = ["EN", "HI", "HINGLISH"];
-const LANG_SEGMENT_SUFFIX = { EN: "en", HI: "hi", HINGLISH: "hinglish" };
+const CONTENT_LANGUAGES = ["EN", "HI", "AI"];
+const LANG_SEGMENT_SUFFIX = { EN: "en", HI: "hi", AI: "ai" };
 
 // Picking a depth from a language's own dropdown switches to that language
 // (if not already active) AND applies that depth, in one action.
@@ -1016,9 +1015,9 @@ function switchContentLanguage(lang, forceDepth) {
     const depthSplit = splitLayerByDepth(languageText);
     // A depth picked directly from this language's own dropdown (selectLanguageDepth)
     // wins over the remembered last-used depth for that language.
-    const preferredDepth = forceDepth || (depthKey && lastDepthPerTopicLanguage.get(depthKey)) || "FULL";
+    const preferredDepth = forceDepth || (depthKey && lastDepthPerTopicLanguage.get(depthKey)) || "DETAILED";
     currentDepthSplit = depthSplit;
-    currentContentDepth = depthBlockFor(preferredDepth, depthSplit) ? preferredDepth : "FULL";
+    currentContentDepth = depthBlockFor(preferredDepth, depthSplit) ? preferredDepth : "DETAILED";
     if (selectedTopicNode && depthKey) lastDepthPerTopicLanguage.set(depthKey, currentContentDepth);
 
     const container = document.getElementById("rc-explanation");
@@ -1070,7 +1069,7 @@ function updateLanguageToggleUI() {
     const langButtons = {
         EN: document.getElementById("lang-toggle-en"),
         HI: document.getElementById("lang-toggle-hi"),
-        HINGLISH: document.getElementById("lang-toggle-hinglish")
+        AI: document.getElementById("lang-toggle-ai")
     };
 
     CONTENT_LANGUAGES.forEach(lang => {
@@ -1103,12 +1102,11 @@ function updateDepthToggleUI() {
         const depthKey = selectedTopicNode ? `${selectedTopicNode.id}::${lang}` : null;
         const shownDepth = lang === currentContentLanguage
             ? currentContentDepth
-            : ((depthKey && lastDepthPerTopicLanguage.get(depthKey)) || "FULL");
+            : ((depthKey && lastDepthPerTopicLanguage.get(depthKey)) || "DETAILED");
 
         const buttons = {
-            FULL: document.getElementById(`depth-toggle-full-${suffix}`),
-            HALF: document.getElementById(`depth-toggle-half-${suffix}`),
-            MINI: document.getElementById(`depth-toggle-mini-${suffix}`)
+            DETAILED: document.getElementById(`depth-toggle-detailed-${suffix}`),
+            BRIEF: document.getElementById(`depth-toggle-brief-${suffix}`)
         };
 
         Object.keys(buttons).forEach(depth => {
@@ -1126,7 +1124,7 @@ function updateDepthToggleUI() {
 function hideLanguageToggleRow() {
     currentLanguageSplit = null;
     currentDepthSplit = null;
-    currentContentDepth = "FULL";
+    currentContentDepth = "DETAILED";
     const row = document.getElementById("content-toggle-row");
     if (row) row.hidden = true;
     closeAllLangDepthDropdowns();
@@ -1259,9 +1257,10 @@ function clearMarkdownCacheForNode(nodeId) {
    and no file is uploaded through the browser here.
    ========================================================= */
 
-const CONTENT_LINK_AI_PROMPT = `You are helping me create a complete study-content package for Notebook Alpha / Project Alpha, an AI-powered exam-preparation website.
+const CONTENT_LINK_AI_PROMPT = `You are helping me create a complete, self-contained study-content ZIP package for Notebook Alpha / Project Alpha, an AI-powered exam-preparation website.
 
-The website uses ONE Google Drive FOLDER as a self-contained content package for this topic. I will place your generated Markdown file and every related asset inside that same folder, then link the FOLDER to the website.
+ENVIRONMENT PRECONDITION — READ FIRST:
+This workflow expects an AI environment with real file-creation and ZIP-packaging capability (e.g. code execution / computer use — such as Claude or ChatGPT with code execution enabled). Actually create content.md and every referenced asset as real files inside one folder, then package that folder as a ZIP.
 
 SOURCE MATERIAL:
 I will attach or paste a PDF (or other source material) in this same chat. Treat it as authoritative. Follow SOURCE FIDELITY below.
@@ -1276,39 +1275,24 @@ Topic:
 ====================================================
 CONTENT PACKAGE ARCHITECTURE — CRITICAL
 ====================================================
-Create content intended for one self-contained folder:
+Build one self-contained folder, then ZIP it:
 
 Topic Folder/
 ├── content.md
-├── image-1.png                 (genuinely useful)
-├── diagram-1.png               (genuinely useful)
-├── animation-1.json            (genuinely useful)
-└── other supported assets
+├── image-1.png                 (genuinely useful, actually generated)
+├── diagram-1.png               (genuinely useful, actually generated)
+└── other genuinely required assets, actually generated
 
-The main Markdown file may have any filename ending in .md. All referenced assets must be placed in the SAME folder.
+The main Markdown file may have any filename ending in .md. Every asset referenced in the Markdown must be a real file that actually exists in the same folder — never a placeholder, a made-up filename, or an asset you intended to create but didn't.
 
-Use only relative plain filenames for local assets.
-
-Correct image reference:
+Use only relative plain filenames for local assets. Correct image reference:
 ![Information Lifecycle](information-lifecycle.png)
-
-Correct Lottie block:
-\`\`\`lottie
-{
-  "src": "study-process.json",
-  "autoplay": true,
-  "loop": true,
-  "height": 220
-}
-\`\`\`
-
-Incorrect Lottie syntax:
-\`\`\`lottie
-study-process.json
-\`\`\`
 
 Do NOT use made-up external URLs or Google Drive URLs inside the Markdown.
 Every filename referenced in Markdown must exactly match a real asset filename in the same folder.
+Do not reference an asset that was not actually generated. Do not generate an asset that is not referenced.
+
+When you are finished, package the folder as a single ZIP file and deliver that ZIP.
 
 ====================================================
 MARKDOWN + VISUAL SUPPORT
@@ -1323,30 +1307,43 @@ The file is rendered using marked.js (GitHub-flavored Markdown). Use:
 - Mermaid diagrams
 - Chart blocks
 - Markdown images
-- Lottie animations using the exact JSON configuration format above
 - {{Term}} double-curly-brace wrapping for key terminologies, concepts,
-  and definitions that belong in a glossary/index — see INDEX TERM
-  MARKING below for how to use this
+  and definitions worth flagging as glossary/index candidates — see
+  INDEX TERM MARKING below for how to use this (note: this only marks a
+  term as a suggestion on the site, it does not add it to the index by
+  itself — see below)
+
+Do not use HTML. Do not use Lottie or any animation-file syntax — this content system has no animation layer. Where earlier drafts of this workflow used an animation to teach a process or sequence, use a static visual instead: a labelled diagram, a step-by-step visual, a Mermaid flowchart, or a process diagram.
 
 INDEX TERM MARKING:
 As you write, identify the important terminologies, key concepts, and
 definitions in this topic — the kind that would belong in a glossary
 or index for a student revising this chapter. Wrap each such term in
 double curly braces the FIRST time it appears WITHIN EACH depth
-section (Full/Half/Mini), e.g. {{Mental Processes}} — each depth
+section (Detailed/Brief), e.g. {{Mental Processes}} — each depth
 section is rendered on its own, so the "first occurrence" rule resets
-at the start of every FULL/HALF/MINI block, not just once for the
+at the start of every DETAILED/BRIEF block, not just once for the
 whole file. Do not wrap every bolded phrase — only wrap terms that
 are genuinely index-worthy standalone concepts, not general emphasis.
 Wrap a given term only once per depth section, at its first occurrence
 there; leave all later mentions of the same term in that same section
 as plain text (still use **bold** for emphasis on repeat mentions if
-needed). Keep the exact same set of terms wrapped across EN, HI, and
-HINGLISH versions of the same depth section, so the glossary stays
-consistent regardless of which language the student is reading. Aim
+needed). Keep the exact same set of terms wrapped across the EN, HI,
+and AI versions of the same depth section, so the suggestions stay
+consistent regardless of which version the student is reading. Aim
 for the natural set of key terms a student would want in a quick-
 reference glossary for this topic — typically a handful per depth
 section, not every noun phrase.
+
+IMPORTANT — {{}} does NOT auto-index anything: on the site, a {{Term}}
+you wrap here only renders as a visual suggestion (a dotted underline) —
+it is a candidate for the editor to consider, nothing more. It does NOT
+get added to the site's searchable index by itself. A human still has
+to right-click that text (or any other text) on the live page and
+choose "Mark as index term" for it to actually become a real, searchable
+index entry. So treat {{}} here purely as good-faith flagging of
+index-worthy terms for a human editor to review — not as the indexing
+action itself.
 
 MERMAID:
 Use \`\`\`mermaid fenced blocks for processes, hierarchies, cycles, relationships, flowcharts, or mind maps when they genuinely improve understanding.
@@ -1357,13 +1354,10 @@ Use \`\`\`chart blocks only when numerical/comparative visualization is useful. 
 {"type":"bar","labels":["Primary","Secondary"],"data":[40,35]}
 \`\`\`
 
-IMAGES:
-Use images only when they genuinely improve learning. Prefer Mermaid for structural diagrams that can be expressed directly in Markdown. Use simple lowercase-hyphenated filenames such as information-lifecycle.png.
+IMAGES — GENEROUS BUT PURPOSEFUL:
+Use substantially more visual support than a minimal notes file would need — but every single visual must earn its place. Possible visual types include: real-life illustrative images, labelled diagrams, process diagrams, step-by-step visuals, concept maps, comparison visuals, timelines, relationship diagrams, classification diagrams, cause-and-effect diagrams, visual summaries, scenario illustrations, before/after illustrations, concrete representations of abstract concepts, educational infographics, and memory-oriented visualizations.
 
-LOTTIE:
-Use a Lottie animation because it genuinely adds learning value. The .json animation file must be in the same folder and the Markdown block MUST contain a valid JSON configuration object with a "src" filename, as shown above.
-
-Do not add visuals merely for decoration.
+Before creating any visual, ask: "Will this help the learner understand, remember, distinguish, connect, or recall the concept?" If yes, create it. If no, skip it. Prefer one large, clear, readable visual over several small cluttered ones. Avoid visual clutter — do not add a visual just because the topic could technically support one. Use simple lowercase-hyphenated filenames such as information-lifecycle.png. Every referenced image must actually exist in the final package and must work when the folder/ZIP is linked to the website.
 
 ====================================================
 SCOPE AND EDUCATIONAL QUALITY
@@ -1382,135 +1376,155 @@ Create clear, serious, exam-oriented notes. Where relevant include:
 - quick revision points and concise summary where appropriate
 
 Do not use generic filler, excessive motivational language, decorative sections, or unnecessary repetition.
-Do not use HTML.
 
 ====================================================
 LANGUAGE + DEPTH ARCHITECTURE — CRITICAL
 ====================================================
 The website has TWO independent controls:
-1. Language: EN / HI / HINGLISH
-2. Content depth: Full Read / Half Read / Mini Read
+1. Version: EN / HI / AI (AI = the AI Learning Version — see AI LEARNING VERSION below)
+2. Content depth: Detailed / Brief
 
-Therefore generate THREE depth versions for EACH language in ONE .md file, using this exact marker order:
+Therefore generate TWO depth versions for EACH of the three version slots in ONE .md file — 6 blocks total, always — using this exact marker order:
 
 <!-- ===LANG:EN=== -->
-<!-- ===DEPTH:FULL=== -->
-...English Full Read...
-<!-- ===DEPTH:HALF=== -->
-...English Half Read...
-<!-- ===DEPTH:MINI=== -->
-...English Mini Read...
+<!-- ===DEPTH:DETAILED=== -->
+...English Detailed (source-faithful)...
+<!-- ===DEPTH:BRIEF=== -->
+...English Brief (source-faithful)...
 
 <!-- ===LANG:HI=== -->
-<!-- ===DEPTH:FULL=== -->
-...Hindi Full Read...
-<!-- ===DEPTH:HALF=== -->
-...Hindi Half Read...
-<!-- ===DEPTH:MINI=== -->
-...Hindi Mini Read...
+<!-- ===DEPTH:DETAILED=== -->
+...Hindi Detailed (source-faithful)...
+<!-- ===DEPTH:BRIEF=== -->
+...Hindi Brief (source-faithful)...
 
-<!-- ===LANG:HINGLISH=== -->
-<!-- ===DEPTH:FULL=== -->
-...Hinglish Full Read...
-<!-- ===DEPTH:HALF=== -->
-...Hinglish Half Read...
-<!-- ===DEPTH:MINI=== -->
-...Hinglish Mini Read...
+<!-- ===LANG:AI=== -->
+<!-- ===DEPTH:DETAILED=== -->
+...AI Learning Version, Detailed — see AI LEARNING VERSION below...
+<!-- ===DEPTH:BRIEF=== -->
+...AI Learning Version, Brief...
 
 MARKER RULES:
 - Copy every marker exactly.
 - Every marker must be alone on its own line.
 - Do not add spaces, punctuation, headings, or fences on marker lines.
-- Do not omit any of the nine depth sections.
-- Keep language order EN → HI → HINGLISH.
-- Keep depth order FULL → HALF → MINI inside every language.
-- Do not create separate files for languages or depths.
+- Do not omit any of the six depth sections.
+- Keep version order EN → HI → AI.
+- Keep depth order DETAILED → BRIEF inside every version.
+- Do not create separate files for versions or depths.
 
 SECTION NUMBERING FOR TOGGLE SYNC — CRITICAL:
-- Every ## heading in FULL must start with a strictly increasing major number: "1. Title", "2. Title", "3. Title".
-- HALF and MINI must reuse the same numbers for the same concepts; do not independently renumber.
+- Every ## heading in EN DETAILED must start with a strictly increasing major number: "1. Title", "2. Title", "3. Title".
+- BRIEF must reuse the same numbers as DETAILED for the same concepts; do not independently renumber.
+- HI and AI must reuse the exact same numbers, in the exact same order, as the corresponding EN concepts — this is what lets the site's toggle jump between EN/HI/AI and DETAILED/BRIEF without losing the reader's place.
 - If concepts are merged, keep the smaller original number.
-- Numbering must be identical concept-for-concept across EN, HI, and HINGLISH.
 - Never reuse one number for two different concepts.
 - ### headings may optionally use decimals such as 2.1, 2.2.
 
-DEPTH RULES:
+DEPTH RULES (apply to EN and HI — source-faithful versions):
 
-FULL READ:
+DETAILED:
 - Most complete and authoritative version.
 - Preserve important source structure, sequence, terminology, definitions, examples, classifications, relationships, and exam-relevant detail.
 - Explain concepts clearly rather than listing keywords.
 - Add useful clarification, analogies, cross-links, or "why it matters" notes only when genuinely helpful and not factually invented.
 
-HALF READ:
-- Keep the same major heading order and conceptual coverage as FULL.
-- Roughly half the reading time of FULL.
-- Compress repetition and secondary detail while retaining definitions, core concepts, classifications, relationships, key examples, and exam-relevant facts.
-- Must stand alone; never say "see Full Read".
-
-MINI READ:
-- Fastest revision version.
-- Keep the same major heading order and numbering as FULL.
+BRIEF:
+- Fast revision version, roughly half the reading time of DETAILED.
+- Keep the same major heading order and numbering as DETAILED.
 - Reduce each section to essential recall points, short definitions, one-line explanations, comparisons, rules/formulas where relevant, and recall cues.
-- Roughly half the reading time of HALF.
-- Must stand alone; never say "see Full Read" or "see Half Read".
+- Must stand alone; never say "see Detailed".
 
-All depths must remain factually consistent. Do not introduce facts in HALF or MINI that are absent from FULL/source material.
+Both EN/HI depths must remain factually consistent. Do not introduce facts in BRIEF that are absent from DETAILED/source material.
+
+DEPTH RULES FOR THE AI LEARNING VERSION (LANG:AI):
+- AI DETAILED: the richest teaching pass — full analogies, multiple real-life examples, mnemonics where useful, connections between concepts, and active-recall prompts, covering every heading from EN DETAILED with full teaching depth.
+- AI BRIEF: fast teaching recall — same heading order and numbers, one crisp explanation and one example per concept, minimal mnemonics (only where they were already established in DETAILED), and at most one short recall prompt per major heading.
+- Both AI depths must stay teaching-focused (see AI LEARNING VERSION below), never degrade into a plain compressed copy of EN — that is what the EN Brief block is for.
 
 ====================================================
 LANGUAGE INSTRUCTIONS
 ====================================================
-EN:
+EN (source-faithful):
 Write natural, clear English suitable for exam preparation. Preserve important technical and standard terminology.
 
-HI:
+HI (source-faithful):
 Write fully in Hindi using Devanagari script. For important or difficult technical/academic terms, include the English term alongside the correct Hindi equivalent where useful, e.g. "सूचना संगठन (Information Organization)". Prefer terminology established in the source when available. Do not turn the section into Roman-script Hindi.
 
-HINGLISH:
-Don't add HINGLISH unless specifically told to do so.
-Write natural spoken Hinglish using Devanagari sentence structure for Hindi grammar/connectors while keeping subject-specific and technical English terms in Roman script. Do not write the whole section in Roman-script Hindi and do not mechanically translate every technical term.
-Example style:
+AI (AI Learning Version — teaching register):
+Write in natural spoken Hinglish: Devanagari script for Hindi grammar/connectors and sentence structure, while keeping subject-specific and technical English terms in Roman script. Do not write the whole section in Roman-script Hindi and do not mechanically translate every technical term. Example style:
 "Mental Processes का मतलब है कि हमारा दिमाग कैसे काम करता है — जैसे Thinking, Learning और Remembering जैसी चीज़ें इसमें आती हैं।"
+This register exists here to make the teaching voice feel like a person explaining things conversationally — not to duplicate the EN/HI source content in another language.
 
-Maintain the SAME underlying content, heading order, examples, classifications, numbering, and depth relationship across EN, HI, and HINGLISH. Only language/style should change.
+Maintain the SAME underlying concept identity, heading order, and numbering across EN, HI, and AI. Only language/style — and, for AI, teaching approach — should change.
 
 ====================================================
-SOURCE FIDELITY
+AI LEARNING VERSION — WHAT IT IS AND HOW TO WRITE IT
+====================================================
+The AI Learning Version (LANG:AI) is not a paraphrase or a shortened copy of the source content. Its job is to TEACH the material, the way a good teacher would explain it out loud — not to just restate it more casually.
+
+HEADINGS ARE ANCHORS:
+The identity, order, and numbering of major headings must match the EN/HI source-faithful versions exactly (see SECTION NUMBERING above). Inside each heading, you have broad creative freedom in how you teach it. Do not let creative teaching break the heading-to-heading mapping back to the source content — a reader must always be able to tell which AI section corresponds to which EN/HI section.
+
+Inside each heading, use whichever combination of the following genuinely helps that specific concept — not all of them, every time. This list is illustrative, not exhaustive: you have real creative freedom to reach for a teaching or visual-learning technique not listed here whenever it would genuinely serve understanding.
+
+- Simple Explanation — plain-language explanation of what the concept actually means and why it happens
+- Real-Life Connections — connect the concept to everyday situations, people, school, family, work, technology, society, or other things the learner already recognizes
+- Multiple Examples — use several genuinely different examples when they illuminate different aspects of the same concept, never merely to pad length
+- Mini Scenario / Story — a short situation in which the concept naturally plays out, so the learner sees it in action rather than just defined
+- Connection to Existing Knowledge — link the new idea to something the learner is likely to already understand, so it has something to attach to
+- Analogy — make an abstract idea concrete by comparing it to something familiar
+- Memory Hook / Mnemonic — a memorable mental association, acronym, phrase, or pattern — only when accurate, natural, and clearly distinguishable from factual content; never distort a concept to make it fit a mnemonic
+- Visual Explanation — a diagram, illustration, timeline, process visual, or comparison, when a picture would teach the idea faster than more prose (see IMAGES above for how to actually produce it)
+- Common Confusion — what students typically mix this concept up with, and how to tell them apart
+- Exam Trap — a specific distinction, wording, or detail that commonly costs marks, called out explicitly
+- Explain It Yourself — an active-recall prompt that makes the learner retrieve and explain the concept in their own words ("explain this in your own words," "give one real-life example," "how would you distinguish X from Y," "what would happen if...")
+
+Choose the combination like a skilled teacher would, not a template: one concept might need a simple explanation + one example + a diagram; another might need an analogy + a common confusion + a mnemonic; another might need almost no elaboration at all. Do not mechanically insert every technique into every section, and don't feel confined to this exact list — invent whatever genuinely helps.
+
+Style: natural, conversational, intuitive — like an excellent teacher sitting beside the learner — while remaining academically accurate. Simpler wording is preferred over academic phrasing whenever it communicates the idea equally well or better. This is not the same as making the content childish or imprecise.
+
+Web research: you may use external research when it would materially improve an explanation, example, analogy, or mnemonic in the AI Learning Version specifically. Use it to find clearer explanations, stronger real-life examples, useful analogies, or widely accepted framings — never to alter the EN/HI source-faithful content, never to introduce unsupported factual claims, and never to treat questionable internet content as fact. The AI Learning Version can be creative in *how* it teaches; it must stay responsible and accurate in *what* it claims.
+
+====================================================
+SOURCE FIDELITY (applies to EN and HI blocks)
 ====================================================
 - Treat the uploaded/original source material as authoritative.
 - Do not invent facts, dates, classifications, quotations, references, or source claims.
 - Preserve important terminology, names, numbers, headings, and ordering.
 - If a figure/table/diagram contains important information, represent it faithfully in Markdown, Mermaid, a chart, or a clearly specified asset where possible.
 - Do not silently replace source terminology with unrelated general-knowledge terminology.
-- Any explanatory analogy must be clearly educational and must not be presented as a source fact.
+- Any explanatory analogy in EN/HI must be clearly educational and must not be presented as a source fact.
+- Write the content naturally, as direct study material. Do not pepper the text with phrases like "according to the source," "as per the material," "the author states," or "in the provided PDF." Source fidelity is a constraint on what you write, not something to keep telling the learner about. Only use such phrasing if it is itself genuinely part of the source content and must be reproduced.
 
 ====================================================
-FINAL ZIP FOLDER OUTPUT RULES
+FINAL PACKAGE OUTPUT RULES
 ====================================================
-- Return ONLY the Markdown content for the main .md file.
-- Do not wrap the entire answer in a \`\`\`markdown fence.
-- Do not add a preface, commentary, or "Here is your file" text.
-- Keep the marker lines exactly intact.
-- If you reference external assets by filename, after all Markdown content add a short plain section titled exactly:
+- Create the actual content.md file and every actual asset file, in a single topic folder, then package that folder as one ZIP file.
+- Every asset filename referenced in the Markdown must match a real file you created in the same folder — no exceptions.
+- Do not wrap the Markdown content itself in a \`\`\`markdown fence inside content.md.
+- Keep the marker lines exactly intact inside content.md.
+- After creating the package, output a short plain manifest titled exactly:
 
-Files needed in this folder:
+Package Manifest:
 
-List every required filename and what it should contain. This list is an instruction for assembling the folder and is NOT part of any language/depth block.
+List every file actually included in the ZIP (content.md plus every asset), so I can quickly verify what was generated. This is a confirmation of what exists, not an instruction list for me to act on.
 
 Before finishing, verify:
-- all 9 language/depth blocks exist if Hinglish is requested otherwise 6 language/depth blocks
-- marker order is exact
-- section numbering sync is preserved
+- all 6 LANG/DEPTH blocks exist (EN×2, HI×2, AI×2)
+- marker order is exact: EN → HI → AI, and DETAILED → BRIEF within each
+- section numbering is synchronized concept-for-concept across EN, HI, and AI
 - Markdown references are valid
 - Mermaid syntax is valid
 - chart JSON is valid
-- every image filename is consistent
-- every Lottie block contains valid JSON configuration, not a bare filename
-- every referenced asset filename is listed in "Files needed in this folder:"
+- every image filename referenced in the Markdown matches a real file actually included in the ZIP, and vice versa
 - no unnecessary external URLs are used
-- {{}} is used only for genuine glossary-worthy terms, once per depth section, and the same terms are wrapped consistently across EN/HI/HINGLISH
+- {{}} is used only for genuine glossary-worthy terms, once per depth section, consistently across EN/HI/AI
+- EN/HI content contains no unnecessary "according to the source"-style phrasing
+- the AI Learning Version teaches rather than merely paraphrasing, uses real-life examples purposefully, and keeps its headings/numbering mapped to EN/HI
+- the ZIP is complete and self-contained
 
-Create the complete Notebook Alpha study-content package for the topic and source material provided in zip folder.`;
+Create the complete Notebook Alpha study-content ZIP package for the topic and source material provided.`;
 
 function openAddContentLink() {
     if (!selectedTopicNode) return;
@@ -1528,8 +1542,8 @@ function openAddContentLink() {
                 <p class="add-resource-scope">Adding to: <strong>${escapeHtml(selectedTopicNode.title)}</strong></p>
 
                 <div class="content-folder-steps">
-                    <div class="content-folder-step"><span>1</span><div><strong>Copy the AI prompt</strong><small>Generate the Markdown and any images/animations needed for this topic.</small></div></div>
-                    <div class="content-folder-step"><span>2</span><div><strong>Open this topic's Google Drive folder</strong><small>Upload the generated <code>.md</code> file and all referenced assets into that same folder.</small></div></div>
+                    <div class="content-folder-step"><span>1</span><div><strong>Copy the AI prompt</strong><small>Generates a ZIP with the Markdown and any images needed for this topic.</small></div></div>
+                    <div class="content-folder-step"><span>2</span><div><strong>Open this topic's Google Drive folder</strong><small>Unzip the downloaded package, then drag the <code>.md</code> file and all assets into that same folder.</small></div></div>
                     <div class="content-folder-step"><span>3</span><div><strong>Share the folder and paste its link below</strong><small>Set the folder to <strong>Anyone with the link can view</strong>.</small></div></div>
                 </div>
 
@@ -1542,7 +1556,7 @@ function openAddContentLink() {
                 <input id="content-link-url" type="url" value="${escapeHtml(existingLink)}"
                        placeholder="https://drive.google.com/drive/folders/...">
                 <p class="drive-note"><strong>Paste the topic folder link here — not the individual .md file link.</strong><br>
-                    The folder should contain one <code>.md</code> file plus any images, Lottie <code>.json</code> files, or other assets referenced by that Markdown.</p>
+                    The folder should contain one <code>.md</code> file plus any images or other assets referenced by that Markdown.</p>
 
                 <details class="content-link-guide">
                     <summary>Supported content formats</summary>
@@ -1567,10 +1581,6 @@ A[Concept] --> B[Explanation]
 \`\`\`
 
 ![Caption](image-file.png)
-
-\`\`\`lottie
-{"src":"animation-file.json","autoplay":true,"loop":true,"height":220}
-\`\`\`
 
 All local filenames above must exist in the same linked folder.</pre>
                 </details>
@@ -1646,7 +1656,7 @@ function copyContentLinkAiPrompt() {
             }, 1800);
         }
 
-        alert("Prompt copied! Paste it into ChatGPT, Claude, Gemini, or any AI tool, then attach or paste the source PDF (or other material) in the same message.");
+        alert("Prompt copied! Paste it into an AI tool that can create and download files — like Claude or ChatGPT with code execution enabled — then attach or paste the source PDF (or other material) in the same message. It will generate a ZIP; unzip it and drag the files into your Drive folder.");
     };
 
     const manual = () => {
@@ -2676,6 +2686,26 @@ async function fetchIndexTermsForNode(nodeId) {
     }
 }
 
+// RELIABILITY (2026-09): sync_index_term / unlink_index_term are sent via
+// fetch(..., { mode: "no-cors" }) because a plain cross-origin POST to this
+// Apps Script Web App triggers a CORS preflight (OPTIONS) that Apps Script
+// doesn't handle, which the browser then blocks. no-cors avoids the
+// preflight but makes the response opaque — we can't tell success from
+// failure from the POST itself. A GET does NOT trigger a preflight and its
+// response IS readable (see fetchIndexTermsForNode above), so this is the
+// only reliable way to confirm a write actually landed: re-fetch this
+// node's linked terms and check whether `term` is present/absent as
+// expected. A short delay gives the Apps Script write a beat to land
+// before we check. Returns true if the backend state matches
+// `expectLinked`, false otherwise.
+async function verifyIndexTermLinkState(nodeId, term, expectLinked) {
+    await new Promise(resolve => setTimeout(resolve, 400));
+    const terms = await fetchIndexTermsForNode(nodeId);
+    const normalized = String(term || "").trim().toLowerCase();
+    const isLinked = terms.some(t => String(t.term || "").trim().toLowerCase() === normalized);
+    return isLinked === expectLinked;
+}
+
 // FIX (2026-09): manually-marked terms used to lose their green highlight
 // on reload/topic-switch. {{}} suggestion spans survive re-render because
 // {{}} is literally present in the raw markdown every time richcontent.js
@@ -2796,20 +2826,47 @@ function findFirstUnlinkedTermTextMatch(container, term) {
     return null;
 }
 
-// Fire-and-forget, same "no-cors" pattern every other write in this file
-// uses — the response is never read (Apps Script webapp POST responses
-// aren't reliably readable cross-origin), so the backend's sync_index_term
-// action does the find-or-create AND the link in one call server-side.
-async function unlinkIndexTermFromRegistry(term, nodeId) {
-    try {
+// Fires the no-cors unlink POST, then verifies it actually took effect
+// (see verifyIndexTermLinkState above) before trusting it. rollbackCtx
+// carries what unmarkIndexTermSpan needs to undo its optimistic DOM/state
+// change if the unlink turns out not to have happened server-side — one
+// automatic retry before we give up and tell the user, since a regular
+// user won't be checking devtools for the old silent-failure case.
+async function unlinkIndexTermFromRegistry(term, nodeId, rollbackCtx) {
+    const rollback = () => {
+        if (rollbackCtx?.placeholder?.parentNode) {
+            rollbackCtx.placeholder.replaceWith(rollbackCtx.spanEl);
+        }
+        if (rollbackCtx?.previousTerms) {
+            currentScopedIndexTerms = rollbackCtx.previousTerms;
+            renderScopedIndexList(document.getElementById("index-search-input")?.value.trim().toLowerCase() || "");
+        }
+    };
+
+    const attempt = async () => {
         await fetch(GOOGLE_SHEET_API, {
             method: "POST",
             mode: "no-cors",
             body: JSON.stringify({ action: "unlink_index_term", term, node_id: nodeId })
         });
-        invalidateIndexCache();
+        return verifyIndexTermLinkState(nodeId, term, false);
+    };
+
+    try {
+        let confirmed = await attempt();
+        if (!confirmed) confirmed = await attempt(); // one retry before giving up
+
+        if (confirmed) {
+            invalidateIndexCache();
+        } else {
+            console.error("Index term unlink could not be verified, rolling back:", term);
+            rollback();
+            alert(`Could not remove this index term — please try again. (Term: "${term}")`);
+        }
     } catch (error) {
         console.error("Index term unlink failed:", term, error);
+        rollback();
+        alert(`Could not remove this index term — please try again. (Term: "${term}")`);
     }
 }
 
@@ -2878,10 +2935,13 @@ function scrollToScopedIndexTerm(termEntry) {
    .rc-index-suggestion (js/richcontent.js), a separate class — they
    are no longer .rc-index-term. findEnclosingIndexTermSpan below only
    matches .rc-index-term, so right-clicking inside a .rc-index-suggestion
-   span always falls through to "mark" mode, same as plain text; the
-   isContentSourced branch in showIndexContextMenu is accordingly
-   unreachable for now (left in place — this whole block is revisited
-   in step 6, not here).
+   span always falls through to "mark" mode, same as plain text.
+   Everything else is manual-only now: the two callers that create
+   .rc-index-term spans (markSelectionAsIndexTerm here, and
+   reapplyManualIndexHighlights above) always add the .manual class, so
+   showIndexContextMenu below no longer needs a separate "content-sourced,
+   can't unmark from here" branch — every .rc-index-term span gets a
+   normal, working "Unmark" button.
    ========================================================= */
 
 let indexContextMenuEl = null;
@@ -2949,28 +3009,6 @@ function showIndexContextMenu(x, y, ctx) {
     menu.style.left = `${x}px`;
     menu.style.top = `${y}px`;
 
-    // FIX (2026-09-07): a content-sourced ({{Term}}) span can't be
-    // permanently unmarked from here — the {{}} auto-detect pass would
-    // just silently re-add it on the next render. Rather than offer a
-    // button that only works temporarily, show a disabled info line
-    // pointing at the one place removal actually sticks: the .md
-    // source. Manual (right-click-marked) spans are unaffected — they
-    // still get a normal, fully-working "Unmark" button.
-    const isContentSourced = ctx.mode === "unmark" && ctx.existingSpan && !ctx.existingSpan.classList.contains("manual");
-
-    if (isContentSourced) {
-        const info = document.createElement("div");
-        info.className = "index-context-menu-item index-context-menu-info";
-        info.textContent = "Auto-detected — remove {{ }} in content.md to delete";
-        menu.appendChild(info);
-        document.body.appendChild(menu);
-        indexContextMenuEl = menu;
-        const rect = menu.getBoundingClientRect();
-        if (rect.right > window.innerWidth) menu.style.left = `${x - rect.width}px`;
-        if (rect.bottom > window.innerHeight) menu.style.top = `${y - rect.height}px`;
-        return;
-    }
-
     const option = document.createElement("button");
     option.type = "button";
     option.className = "index-context-menu-item";
@@ -3026,23 +3064,55 @@ function markSelectionAsIndexTerm(term, range) {
     window.getSelection()?.removeAllRanges();
 
     // Optimistic UI: show it in the Index tab immediately, sync in the
-    // background, and roll back the DOM + list if the save fails.
+    // background, and roll back the DOM + list if the write can't be
+    // verified (see verifyIndexTermLinkState).
     const nodeId = selectedTopicNode.id;
+    const previousTerms = currentScopedIndexTerms;
     currentScopedIndexTerms = [...currentScopedIndexTerms, { term, id, source_type: "manual" }];
     renderScopedIndexList(document.getElementById("index-search-input")?.value.trim().toLowerCase() || "");
 
-    fetch(GOOGLE_SHEET_API, {
-        method: "POST",
-        mode: "no-cors",
-        body: JSON.stringify({ action: "sync_index_term", term, node_id: nodeId, source_type: "manual" })
-    })
-        .then(() => invalidateIndexCache())
-        .catch((error) => {
-            console.error("Marking index term failed, rolling back:", term, error);
+    syncMarkAndVerify(term, nodeId, span, id, previousTerms);
+}
+
+// Fires the no-cors sync POST for a freshly-marked term, then verifies it
+// actually took effect before trusting it (one automatic retry first).
+// Rolls back the optimistic span + Index tab entry and surfaces a visible
+// alert if the write still isn't confirmed — mirrors
+// unlinkIndexTermFromRegistry's verify/retry/rollback shape.
+async function syncMarkAndVerify(term, nodeId, span, id, previousTerms) {
+    const rollback = () => {
+        if (span.parentNode) {
             span.replaceWith(document.createTextNode(span.textContent));
-            currentScopedIndexTerms = currentScopedIndexTerms.filter(t => t.id !== id);
-            renderScopedIndexList(document.getElementById("index-search-input")?.value.trim().toLowerCase() || "");
+        }
+        currentScopedIndexTerms = previousTerms;
+        renderScopedIndexList(document.getElementById("index-search-input")?.value.trim().toLowerCase() || "");
+    };
+
+    const attempt = async () => {
+        await fetch(GOOGLE_SHEET_API, {
+            method: "POST",
+            mode: "no-cors",
+            body: JSON.stringify({ action: "sync_index_term", term, node_id: nodeId, source_type: "manual" })
         });
+        return verifyIndexTermLinkState(nodeId, term, true);
+    };
+
+    try {
+        let confirmed = await attempt();
+        if (!confirmed) confirmed = await attempt(); // one retry before giving up
+
+        if (confirmed) {
+            invalidateIndexCache();
+        } else {
+            console.error("Marking index term could not be verified, rolling back:", term);
+            rollback();
+            alert(`Could not save this index term — please try again. (Term: "${term}")`);
+        }
+    } catch (error) {
+        console.error("Marking index term failed, rolling back:", term, error);
+        rollback();
+        alert(`Could not save this index term — please try again. (Term: "${term}")`);
+    }
 }
 
 function unmarkIndexTermSpan(span) {
@@ -3051,13 +3121,18 @@ function unmarkIndexTermSpan(span) {
     const term = span.dataset.term || span.textContent;
     const id = span.id;
     const nodeId = selectedTopicNode.id;
+    const previousTerms = currentScopedIndexTerms;
 
-    span.replaceWith(document.createTextNode(span.textContent));
+    // Optimistic removal — keep the actual span (not just its text) so
+    // unlinkIndexTermFromRegistry can put it right back if the write turns
+    // out not to have taken effect.
+    const placeholder = document.createTextNode(span.textContent);
+    span.replaceWith(placeholder);
 
     currentScopedIndexTerms = currentScopedIndexTerms.filter(t => t.id !== id);
     renderScopedIndexList(document.getElementById("index-search-input")?.value.trim().toLowerCase() || "");
 
-    unlinkIndexTermFromRegistry(term, nodeId);
+    unlinkIndexTermFromRegistry(term, nodeId, { placeholder, spanEl: span, previousTerms });
 }
 
 function initIndexSearch() {

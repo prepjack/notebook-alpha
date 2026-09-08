@@ -392,31 +392,93 @@ function showIndexPicker(group) {
    (that's what "Unmark as index term" in the main notebook is for).
    ----------------------------------------------------- */
 
+// RELIABILITY (2026-09): delete_index_term is sent via
+// fetch(..., { mode: "no-cors" }) — same CORS-preflight-avoidance reason as
+// sync_index_term/unlink_index_term in the main notebook (js/app.js), and
+// the same consequence: the response is opaque, so a POST that never
+// actually reached/succeeded on the backend looked identical to one that
+// did. get_index_registry is a plain GET (no preflight, readable response
+// — this page's own refresh button already uses it), so it's used here to
+// confirm the delete actually removed the Index_Terms row before trusting
+// it. Returns { stillExists } on a successful check, or null if the check
+// itself couldn't be completed (network/parse failure) — those are kept
+// distinct so a failed *verification* is never reported as a failed
+// *delete*.
+async function verifyIndexTermDeleted(indexId) {
+    await new Promise(resolve => setTimeout(resolve, 400));
+    try {
+        const response = await fetch(`${GOOGLE_SHEET_API}?action=get_index_registry`);
+        const data = await response.json();
+        if (!data || !data.success) return null;
+        const stillExists = (data.index_terms || []).some(row => String(row.index_id) === String(indexId));
+        return { stillExists };
+    } catch (error) {
+        console.error("Verifying index term delete failed:", error);
+        return null;
+    }
+}
+
+function rerenderIndexDirectoryCurrentView() {
+    const query = document.getElementById("index-directory-search")?.value.trim().toLowerCase() || "";
+    if (indexDirectorySort === "hierarchy") renderIndexHierarchy(query); else renderIndexColumns(query);
+}
+
 async function deleteIndexTerm(group) {
     const confirmed = window.confirm(
         `Delete "${group.term}" from the index?\n\nThis removes it everywhere (all ${group.matches.length || 0} linked topic${group.matches.length === 1 ? "" : "s"}), not just here. This cannot be undone.`
     );
     if (!confirmed) return;
 
-    try {
+    // Optimistic removal — same pattern as mark/unmark in the main
+    // notebook — but kept reversible: if the delete can't be verified,
+    // roll this snapshot back and tell the user instead of silently
+    // leaving the term gone from this page while it's still on the
+    // backend (the original silent-failure bug this step fixes).
+    const previousTerms = window.__studyData.indexTerms || [];
+    const previousLinks = window.__studyData.indexLinks || [];
+
+    window.__studyData.indexTerms = previousTerms.filter(row => String(row.index_id) !== String(group.indexId));
+    window.__studyData.indexLinks = previousLinks.filter(row => String(row.index_id) !== String(group.indexId));
+    invalidateIndexRegistry();
+    rerenderIndexDirectoryCurrentView();
+
+    const rollback = () => {
+        window.__studyData.indexTerms = previousTerms;
+        window.__studyData.indexLinks = previousLinks;
+        invalidateIndexRegistry();
+        rerenderIndexDirectoryCurrentView();
+    };
+
+    const attempt = async () => {
         await fetch(GOOGLE_SHEET_API, {
             method: "POST",
             mode: "no-cors",
             body: JSON.stringify({ action: "delete_index_term", index_id: group.indexId })
         });
+        return verifyIndexTermDeleted(group.indexId);
+    };
 
-        // Optimistic removal — strip it from this page's own snapshot
-        // so it disappears immediately without waiting on a refresh.
-        window.__studyData.indexTerms = (window.__studyData.indexTerms || [])
-            .filter(row => String(row.index_id) !== String(group.indexId));
-        window.__studyData.indexLinks = (window.__studyData.indexLinks || [])
-            .filter(row => String(row.index_id) !== String(group.indexId));
-        invalidateIndexRegistry();
+    try {
+        let result = await attempt();
+        if (result && result.stillExists) result = await attempt(); // one retry before giving up
 
-        const query = document.getElementById("index-directory-search")?.value.trim().toLowerCase() || "";
-        if (indexDirectorySort === "hierarchy") renderIndexHierarchy(query); else renderIndexColumns(query);
+        if (result === null) {
+            // Couldn't confirm either way (registry check itself failed) —
+            // leave the optimistic removal in place rather than flashing
+            // it back, but don't claim success either.
+            console.error("Could not verify index term delete for:", group.term);
+            return;
+        }
+
+        if (result.stillExists) {
+            console.error("Index term delete could not be verified, rolling back:", group.term);
+            rollback();
+            alert(`Could not delete "${group.term}" from the index — please try again.`);
+        }
     } catch (error) {
         console.error("Deleting index term failed:", error);
+        rollback();
+        alert(`Could not delete "${group.term}" from the index — please try again.`);
     }
 }
 

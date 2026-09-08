@@ -138,29 +138,44 @@ Do not redesign the UI unless explicitly requested. Preserve the current hierarc
 ## Canonical node labels
 `Subject → Course → Unit → Chapter → Topic → Subtopic → Subtopic → …`. The visible classification label is derived from the node's depth in the tree (see `getNodeLevelLabel` in `js/app.js`), not from its stored `type` field. Subject, Course, Unit, Chapter and Topic must never be displayed as Subtopic.
 
-## Index Terms — {{}} auto-detection + manual marking + subtopic-scoped tab
+## Index Terms — manual-only marking ({{}} is a suggestion marker) + subtopic-scoped tab
 Builds on the existing "Index_Terms" / "Index_Node" registry above — this is
-the SAME two-sheet schema, not a new one. Two new ways terms get INTO that
-registry, plus a second UI lens onto it:
+the SAME two-sheet schema, not a new one. Manual right-click marking is the
+ONLY way a term gets INTO that registry (an earlier {{}}-auto-detection path
+was removed — see "Important product direction" below), plus a second UI
+lens onto it:
 
-- **Auto ({{}})**: authors wrap glossary-worthy terms in double curly braces
-  in the .md source (see the updated `CONTENT_LINK_AI_PROMPT` in `js/app.js`
-  — INDEX TERM MARKING section). `js/richcontent.js`'s `extractIndexTerms()`
-  turns the FIRST occurrence per rendered depth/language block into a
-  `<span class="rc-index-term">`; repeats fall back to plain **bold**.
-  `source_type = "content"` when synced to the registry.
-- **Manual (right-click)**: selecting text inside the content panel and
-  choosing "Mark as index term" (custom context menu, `js/app.js`) wraps it
-  in the same span shape (`.rc-index-term.manual`) and syncs it the same
-  way. `source_type = "manual"`.
-- Both are synced via a single POST action, **`sync_index_term`**
+- **{{}} is a visual suggestion only, NOT indexing**: authors can still wrap
+  glossary-worthy terms in double curly braces in the .md source (see
+  `CONTENT_LINK_AI_PROMPT` in `js/app.js` — INDEX TERM MARKING section) to
+  flag candidates for a human editor. `js/richcontent.js`'s
+  `extractIndexTerms()` turns the FIRST occurrence per rendered
+  depth/language block into a `<span class="rc-index-suggestion">` (a
+  dotted underline, non-linking); repeats fall back to plain **bold**.
+  This never touches the registry — no sync, no `source_type`, nothing
+  saved server-side. It exists purely so a human knows what's worth
+  marking next.
+- **Manual (right-click) is the only real indexing action**: selecting
+  text inside the content panel and choosing "Mark as index term" (custom
+  context menu, `js/app.js`) wraps it in `<span class="rc-index-term
+  manual">` and syncs it to the registry with `source_type = "manual"`.
+  This is synced via POST action **`sync_index_term`**
   (`{term, node_id, source_type}`) — it does find-or-create AND link
   server-side in one call, because POST responses on this public webapp are
   sent with `mode:"no-cors"` and are never actually readable client-side
   (same constraint as every other write in `Code.gs`). "Unmark" calls
   **`unlink_index_term`** (`{term, node_id}`), which removes only that one
   (term, node) link — the term itself, and any of its other node links,
-  are left alone.
+  are left alone. Because the response is opaque, both mark and unmark
+  now follow up with a verifying GET (`get_index_terms_for_node`) with one
+  retry, rolling back the optimistic DOM/state change and alerting the
+  user if the write didn't actually take effect — the old silent-failure
+  gap is closed. A manually-marked term also gets re-wrapped from registry
+  data on every render (topic switch, language/depth switch, reload), so
+  the highlight survives even though the raw markdown carries no marker for
+  it. There is no longer a manual-vs-auto distinction shown anywhere in the
+  UI (Index Directory badges were removed) since everything indexed is
+  manual by definition.
 - The Index tab (right panel) now has TWO views: **"This Topic"** (default)
   — only terms linked to the currently open subtopic, fetched via the new
   GET action **`get_index_terms_for_node`** — and **"Full A-Z Glossary"**,

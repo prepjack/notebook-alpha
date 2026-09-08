@@ -79,12 +79,10 @@
                                     </button>
                                     <div id="depth-list-en" class="lang-depth-list" role="listbox"
                                          aria-label="English reading depth" hidden>
-                                        <button type="button" id="depth-toggle-full-en" class="lang-depth-item"
-                                                role="option" onclick="selectLanguageDepth('EN','FULL')">Full Read</button>
-                                        <button type="button" id="depth-toggle-half-en" class="lang-depth-item"
-                                                role="option" onclick="selectLanguageDepth('EN','HALF')">Half Read</button>
-                                        <button type="button" id="depth-toggle-mini-en" class="lang-depth-item"
-                                                role="option" onclick="selectLanguageDepth('EN','MINI')">Mini Read</button>
+                                        <button type="button" id="depth-toggle-detailed-en" class="lang-depth-item"
+                                                role="option" onclick="selectLanguageDepth('EN','DETAILED')">Detailed</button>
+                                        <button type="button" id="depth-toggle-brief-en" class="lang-depth-item"
+                                                role="option" onclick="selectLanguageDepth('EN','BRIEF')">Brief</button>
                                     </div>
                                 </div>
                                 <div class="lang-segment" id="lang-segment-hi">
@@ -101,34 +99,30 @@
                                     </button>
                                     <div id="depth-list-hi" class="lang-depth-list" role="listbox"
                                          aria-label="Hindi reading depth" hidden>
-                                        <button type="button" id="depth-toggle-full-hi" class="lang-depth-item"
-                                                role="option" onclick="selectLanguageDepth('HI','FULL')">Full Read</button>
-                                        <button type="button" id="depth-toggle-half-hi" class="lang-depth-item"
-                                                role="option" onclick="selectLanguageDepth('HI','HALF')">Half Read</button>
-                                        <button type="button" id="depth-toggle-mini-hi" class="lang-depth-item"
-                                                role="option" onclick="selectLanguageDepth('HI','MINI')">Mini Read</button>
+                                        <button type="button" id="depth-toggle-detailed-hi" class="lang-depth-item"
+                                                role="option" onclick="selectLanguageDepth('HI','DETAILED')">Detailed</button>
+                                        <button type="button" id="depth-toggle-brief-hi" class="lang-depth-item"
+                                                role="option" onclick="selectLanguageDepth('HI','BRIEF')">Brief</button>
                                     </div>
                                 </div>
-                                <div class="lang-segment" id="lang-segment-hinglish">
-                                    <button type="button" id="lang-toggle-hinglish" class="toggle-btn lang-btn"
-                                            onclick="switchContentLanguage('HINGLISH')">HINGLISH</button>
-                                    <button type="button" id="lang-caret-hinglish" class="lang-caret-btn"
-                                            title="Hinglish reading depth" aria-haspopup="listbox" aria-expanded="false"
-                                            aria-controls="depth-list-hinglish" onclick="toggleLangDepthDropdown('HINGLISH')">
+                                <div class="lang-segment" id="lang-segment-ai">
+                                    <button type="button" id="lang-toggle-ai" class="toggle-btn lang-btn"
+                                            onclick="switchContentLanguage('AI')">AI</button>
+                                    <button type="button" id="lang-caret-ai" class="lang-caret-btn"
+                                            title="AI Learning reading depth" aria-haspopup="listbox" aria-expanded="false"
+                                            aria-controls="depth-list-ai" onclick="toggleLangDepthDropdown('AI')">
                                         <svg class="lang-caret-icon" width="8" height="8" viewBox="0 0 10 10"
                                              xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                                             <path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.4"
                                                   fill="none" stroke-linecap="round" stroke-linejoin="round"/>
                                         </svg>
                                     </button>
-                                    <div id="depth-list-hinglish" class="lang-depth-list" role="listbox"
-                                         aria-label="Hinglish reading depth" hidden>
-                                        <button type="button" id="depth-toggle-full-hinglish" class="lang-depth-item"
-                                                role="option" onclick="selectLanguageDepth('HINGLISH','FULL')">Full Read</button>
-                                        <button type="button" id="depth-toggle-half-hinglish" class="lang-depth-item"
-                                                role="option" onclick="selectLanguageDepth('HINGLISH','HALF')">Half Read</button>
-                                        <button type="button" id="depth-toggle-mini-hinglish" class="lang-depth-item"
-                                                role="option" onclick="selectLanguageDepth('HINGLISH','MINI')">Mini Read</button>
+                                    <div id="depth-list-ai" class="lang-depth-list" role="listbox"
+                                         aria-label="AI Learning reading depth" hidden>
+                                        <button type="button" id="depth-toggle-detailed-ai" class="lang-depth-item"
+                                                role="option" onclick="selectLanguageDepth('AI','DETAILED')">Detailed</button>
+                                        <button type="button" id="depth-toggle-brief-ai" class="lang-depth-item"
+                                                role="option" onclick="selectLanguageDepth('AI','BRIEF')">Brief</button>
                                     </div>
                                 </div>
                             </div>
