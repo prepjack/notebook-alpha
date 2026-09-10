@@ -503,40 +503,54 @@ function renderMcqView() {
         });
     });
 
-    // ALPHA-PLUS — "All Questions" view: a scrollable list of every
-    // question with its full options, for scanning through the set
-    // instead of one-at-a-time. Read-only (no answer-selection here —
-    // that still only happens in single-question mode below); clicking
-    // anywhere on a question's block jumps into single mode on it.
+    // ALPHA-PLUS — "All Questions" view: every question with its full
+    // options, scrollable — and fully attemptable here too (not just
+    // single view). Selecting an option updates the same shared
+    // selectedAnswers/attemptedQuestions state single-view uses, shows
+    // immediate correct/incorrect feedback for that question, and
+    // re-renders so the right-panel grid stays in sync.
     if (mcqViewMode === "all") {
         questionArea.innerHTML = `
             <div class="mcq-all-list">
                 ${currentMcqs.map((q, i) => {
                     const sel = selectedAnswers[i];
+                    const answered = sel !== undefined;
+                    const correct = answered && sel === q.answer;
                     return `
-                    <div class="mcq-all-item ${i === currentMcqIndex ? "current" : ""}" data-question-index="${i}">
+                    <div class="mcq-all-item">
                         <div class="mcq-question-number mcq-question-heading">
                             <span>Question ${i + 1} of ${currentMcqs.length}</span>
                         </div>
                         <div class="mcq-question-text">${escapeHtml(q.question)}</div>
                         <div class="mcq-large-options">
                             ${q.options.map((option, oi) => `
-                                <div class="mcq-large-option readonly ${sel === oi ? "selected" : ""}">
+                                <button
+                                    type="button"
+                                    class="mcq-large-option ${sel === oi ? "selected" : ""}"
+                                    data-question-index="${i}"
+                                    data-option-index="${oi}"
+                                >
                                     <span class="mcq-radio-circle" aria-hidden="true"></span>
                                     <span class="mcq-option-text">${escapeHtml(option)}</span>
-                                </div>
+                                </button>
                             `).join("")}
                         </div>
+                        ${answered ? `
+                            <div class="mcq-feedback">
+                                <strong>${correct ? "Correct" : "Not correct"}</strong><br>
+                                ${escapeHtml(q.explanation || "")}
+                            </div>` : ""}
                     </div>`;
                 }).join("")}
             </div>
         `;
 
-        questionArea.querySelectorAll(".mcq-all-item").forEach(item => {
-            item.addEventListener("click", () => {
-                currentMcqIndex = Number(item.dataset.questionIndex);
-                mcqViewMode = "single";
-                renderMcqView();
+        questionArea.querySelectorAll(".mcq-all-item .mcq-large-option").forEach(button => {
+            button.addEventListener("click", () => {
+                answerQuestionInAllView(
+                    Number(button.dataset.questionIndex),
+                    Number(button.dataset.optionIndex)
+                );
             });
         });
 
@@ -633,6 +647,20 @@ function answerCurrentQuestion(optionIndex) {
         escapeHtml(mcq.explanation);
 }
 
+// ALPHA-PLUS — same answer-recording logic as answerCurrentQuestion,
+// but for a given question index rather than always currentMcqIndex —
+// used by the "All Questions" view where every question is answerable
+// in place, not just the one currently selected in single view.
+function answerQuestionInAllView(index, optionIndex) {
+    if (!attemptStarted) {
+        alert("Click Start Attempt before answering questions.");
+        return;
+    }
+    selectedAnswers[index] = optionIndex;
+    attemptedQuestions.add(index);
+    renderMcqView();
+}
+
 document.getElementById("mcq-start").addEventListener("click", startAttempt);
 
 document.getElementById("mcq-nav-toggle")?.addEventListener("click", () => {
@@ -655,15 +683,16 @@ document.getElementById("mcq-nav-toggle")?.addEventListener("click", () => {
         : "Collapse question navigator";
 });
 
-// ALPHA-PLUS — main-panel Single/All Questions view toggle.
-document.getElementById("mcq-view-all-toggle")?.addEventListener("click", () => {
-    mcqViewMode = mcqViewMode === "single" ? "all" : "single";
-    const button = document.getElementById("mcq-view-all-toggle");
-    if (button) {
-        button.textContent = mcqViewMode === "all" ? "◀ Back to Single Question" : "📋 View All Questions";
-    }
+// ALPHA-PLUS — main-panel Single/All Questions view switch (two
+// separate buttons, not one toggle — each just sets the mode directly).
+function setMcqViewMode(mode) {
+    mcqViewMode = mode;
+    document.getElementById("mcq-view-single-btn")?.classList.toggle("active", mode === "single");
+    document.getElementById("mcq-view-all-btn")?.classList.toggle("active", mode === "all");
     renderMcqView();
-});
+}
+document.getElementById("mcq-view-single-btn")?.addEventListener("click", () => setMcqViewMode("single"));
+document.getElementById("mcq-view-all-btn")?.addEventListener("click", () => setMcqViewMode("all"));
 
 
 

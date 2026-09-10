@@ -1150,6 +1150,21 @@ body.index-directory-resizing .index-directory-workspace {
 .content-action-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
 .content-action-row-top{margin-top:0;margin-bottom:14px;justify-content:flex-end}
 .content-action{padding:8px 11px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--green);cursor:pointer;font:700 11px Arial,sans-serif}
+
+.mcq-view-mode-switch{
+    display:flex;
+    gap:6px;
+}
+
+.mcq-view-mode-switch .content-action{
+    padding:5px 11px;
+}
+
+.mcq-view-mode-switch .content-action.active{
+    background:var(--green,#315f4c);
+    border-color:var(--green,#315f4c);
+    color:#fff;
+}
 .topic-diagrams{display:flex;flex-wrap:wrap;gap:12px;margin-top:8px}
 .topic-diagram-img{max-width:100%;width:280px;border:1px solid var(--line);border-radius:8px;cursor:zoom-in;background:#fff}
 .content-action.primary{border-color:#9bb2a2;background:var(--green-soft)}
@@ -2473,12 +2488,6 @@ body.index-directory-resizing .index-directory-workspace {
     flex:none;
 }
 
-#mcq-view-all-toggle{
-    letter-spacing:normal;
-    font:700 11px Arial,sans-serif;
-    padding:5px 10px;
-}
-
 #mcq-question{
     padding:22px 24px 30px;
     flex:1;
@@ -2487,7 +2496,7 @@ body.index-directory-resizing .index-directory-workspace {
 }
 
 .mcq-card-large{
-    max-width:980px;
+    max-width:none;
     margin:0;
 }
 
@@ -2569,32 +2578,10 @@ body.index-directory-resizing .index-directory-workspace {
 .mcq-all-item{
     padding:18px 0;
     border-bottom:1px solid var(--line,#d8ddd2);
-    cursor:pointer;
 }
 
 .mcq-all-item:first-child{
     padding-top:0;
-}
-
-.mcq-all-item:hover{
-    background:#fafbf8;
-}
-
-.mcq-all-item.current{
-    background:var(--green-soft,#e4ece4);
-    margin:0 -14px;
-    padding-left:14px;
-    padding-right:14px;
-    border-radius:6px;
-    border-bottom-color:transparent;
-}
-
-.mcq-large-option.readonly{
-    cursor:default;
-}
-
-.mcq-large-option.readonly:hover{
-    background:#fff;
 }
 
 .mcq-large-option:hover{

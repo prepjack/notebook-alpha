@@ -188,3 +188,75 @@ lens onto it:
   (`save_core`, `save_resource`, `save_structure`, etc.) has any throttling
   today either — the same helper can be reused there if that becomes a
   real concern.
+
+## Data lifecycle: how things get added & deleted (2026-09-10)
+
+MAINTENANCE NOTE: this section is meant to be a living reference — any
+time a new add/edit/delete action is built for Nodes, Content_Core,
+Resources, MCQs, or Index_Terms/Index_Node, add a row to the relevant
+table below in the same style. Whoever (human or AI) implements a new
+lifecycle action should update this section as part of that change,
+not as a separate follow-up.
+
+### Addition
+
+Every row in every sheet is created through a **website action**
+(an Apps Script `doPost`/`doGet` call) — there is no mechanism that
+watches Google Drive and auto-creates a Sheet row when a file/folder
+appears there. Dropping a `.md` file into a topic's Drive folder by
+itself does **not** register anything; a website action (pasting the
+link, clicking Save) is always the trigger. Drive is where some
+content's underlying text *lives*, not how it gets *registered*.
+
+| Entity | Trigger (website action) | What gets created |
+|---|---|---|
+| Tree/Topic | "Add topic/subtopic" | `Nodes` row + a new per-topic Drive folder |
+| Content | Content editor Save / "Add Content Link" (paste a Drive `.md` link) | `Content_Core` row (one per content_type: definition/explanation/example/key_points/diagram/md_file) |
+| Reference (Resource) | "Add resource" popup | `Resources` row |
+| MCQ | "Add MCQ" popup, or bulk-import from pasted Markdown | `MCQs` row(s) |
+| Index Term | Right-click "Mark as index term" | `Index_Terms` row (if new term) + `Index_Node` link row |
+
+### Deletion
+
+Unlike addition, deletion genuinely CAN happen two ways: through the
+website, or by deleting a file/folder directly in Google Drive. The
+second path bypasses every `doPost` action, so it can only ever be
+caught after the fact — a daily scheduled scan (`driveHealthCheck`,
+~3 AM) is what notices a missing Drive folder and flags everything
+that depended on it.
+
+Most deletions are **soft** (an `orphaned_at` timestamp + a matching
+`orphan_reason` label get stamped on the row — the row itself is
+never removed). Only a few explicit, single-item "delete this one
+thing" actions are **hard** (the row is actually removed). Content_Core
+and Index_Terms rows also **self-heal**: if real content/a real link
+is saved into a flagged row again later, its flag clears automatically.
+
+| # | Entity | Trigger | Result | `orphan_reason` | Shows up in |
+|---|---|---|---|---|---|
+| 1 | Tree/Topic | Website "Delete topic" button | **Hard delete** — `Nodes` row removed + Drive folder trashed | — | nowhere (gone) |
+| 2 | Tree/Topic | Drive folder deleted directly | Soft flag — `Nodes` row stays | `drive_missing` | `Nodes` |
+| 3 | Content | "Remove all content" button (topic not deleted) | Soft flag — row stays, content cleared | `content_removed` | `Content_Core` |
+| 4 | Content | Whole topic deleted (#1) | Soft flag (cascade) | `topic_deleted` | `Content_Core` |
+| 5 | Content | Drive folder missing (#2) | Soft flag (cascade) | `drive_missing` | `Content_Core` |
+| 6 | Reference (Resource) | Individual delete button | **Hard delete** | — | nowhere (gone) |
+| 7 | Reference (Resource) | Whole topic deleted | Soft flag (cascade) | `topic_deleted` | `Resources` |
+| 8 | Reference (Resource) | Drive folder missing | Soft flag (cascade) | `drive_missing` | `Resources` |
+| 9 | MCQ | Individual delete button | **Hard delete** | — | nowhere (gone) |
+| 10 | MCQ | Whole topic deleted | Soft flag (cascade) | `topic_deleted` | `MCQs` |
+| 11 | MCQ | Drive folder missing | Soft flag (cascade) | `drive_missing` | `MCQs` |
+| 12 | Index Term | Single "Unmark" (term ends up 0-linked) | Soft flag — `Index_Node` link removed, `Index_Terms` row stays | `unmarked` | `Index_Terms` |
+| 13 | Index Term | "Remove all content" | Soft flag (same mechanism) | `content_removed` | `Index_Terms` |
+| 14 | Index Term | Whole topic deleted | Soft flag (cascade) | `topic_deleted` | `Index_Terms` |
+| 15 | Index Term | Drive folder missing | Soft flag (cascade) | `drive_missing` | `Index_Terms` |
+| 16 | Index Term | Index Directory explicit "×" delete | **Hard delete** — row + all its links removed | — | nowhere (gone) |
+| 17 | Any of the above | `backfillAllOrphans` (manual, one-time catch-up for pre-existing orphans) | Soft flag | `backfill_detected` | wherever found |
+
+Relevant `Code.gs` functions: `getOrAddColumn_`, `flagOrphanedRows_`,
+`removeIndexLinksAndFlagOrphans_` (shared soft-delete primitives),
+`deleteStructureNodeRow` (#1, cascades #4/#7/#10/#14), `driveHealthCheck`
+(#2, cascades #5/#8/#11/#15 — installed as a daily trigger via
+`installDriveHealthCheckTrigger`), `flagContentRemoved` (#3),
+`unlinkIndexTermByTerm_` (#12), `deleteIndexTermCascade_` (#16),
+`backfillAllOrphans` (#17, run once after deploying this system and
+any time you suspect something predates it).

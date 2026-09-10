@@ -303,6 +303,21 @@ function doPost(e) {
       return jsonResponse_(result);
     }
 
+    // NEW (2026-09-10): also called by removeTopicContent() in app.js,
+    // right after the save_core clearing loop and the
+    // unlink_all_terms_for_node call above. Flags every Content_Core
+    // row for this node_id with orphaned_at + orphan_reason =
+    // "content_removed" — a topic whose content was cleared but whose
+    // Nodes row (and Drive folder) still exist, so neither
+    // deleteStructureNodeRow's cascade nor driveHealthCheck would ever
+    // catch it. A separate action (not folded into save_core itself)
+    // on purpose: save_core is also the normal content-editing path,
+    // and flagging on every ordinary save would be wrong.
+    if (data.action === "flag_content_removed") {
+      const result = flagContentRemoved(data);
+      return jsonResponse_(result);
+    }
+
     // MCQ BANK — PHASE 3: bulk import from js/mcq-parse.js's parseMcqMarkdown()
     // output. Not called by any client UI yet (that's Phase 4) — testable via
     // testSaveMcqsBulk() below, same style as testDoPostMcq(). Does not
@@ -485,6 +500,32 @@ function saveCoreContent(data) {
       content_type: contentType
     };
   }
+}
+
+// NEW (2026-09-10): called by removeTopicContent() in app.js right
+// after clearing a topic's content fields to "" via repeated save_core
+// calls. Flags every Content_Core row for this node_id with
+// orphaned_at + orphan_reason = "content_removed", using the same
+// soft-delete mechanism as the other cascades (never deletes a row).
+//
+// SELF-HEAL: no extra code is needed here to UN-flag a row later —
+// saveCoreContent already rebuilds a row's ENTIRE column set on every
+// save (`headers.map(...)`, see above), and since that rebuild doesn't
+// know about orphaned_at/orphan_reason, it blanks both automatically
+// the moment real content is saved into that (node_id, content_type)
+// row again — whether that's a correction, a re-link to a new Drive
+// file, or any other edit. So flagging here is safe to do freely: it
+// can never get "stuck" on a row someone is actively using again.
+function flagContentRemoved(data) {
+  const nodeId = data.node_id;
+  if (!nodeId) throw new Error("node_id is required.");
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Content_Core");
+  if (!sheet) throw new Error("Content_Core sheet not found.");
+
+  const flagged = flagOrphanedRows_(sheet, "node_id", new Set([String(nodeId)]), "content_removed");
+  return { success: true, node_id: nodeId, content_core_flagged_orphaned: flagged };
 }
 
 function saveMcq(data) {
@@ -1227,6 +1268,7 @@ function driveHealthCheck() {
   }
 
   const orphanedAtCol = getOrAddColumn_(nodesSheet, "orphaned_at"); // 0-based
+  const reasonCol = getOrAddColumn_(nodesSheet, "orphan_reason"); // 0-based
 
   const brokenNodeIds = [];
   let checked = 0;
@@ -1249,6 +1291,7 @@ function driveHealthCheck() {
     if (folderExists) {
       if (currentFlag) {
         nodesSheet.getRange(i + 1, orphanedAtCol + 1).setValue(""); // +1: 1-indexed
+        nodesSheet.getRange(i + 1, reasonCol + 1).setValue("");
         restored++;
       }
       continue;
@@ -1256,6 +1299,7 @@ function driveHealthCheck() {
 
     if (!currentFlag) {
       nodesSheet.getRange(i + 1, orphanedAtCol + 1).setValue(new Date()); // +1: 1-indexed
+      nodesSheet.getRange(i + 1, reasonCol + 1).setValue("drive_missing");
     }
     brokenNodeIds.push(String(values[i][idIdx]));
   }
@@ -1266,15 +1310,15 @@ function driveHealthCheck() {
     const brokenSet = new Set(brokenNodeIds);
 
     const contentCoreSheet = ss.getSheetByName("Content_Core");
-    if (contentCoreSheet) contentFlagged = flagOrphanedRows_(contentCoreSheet, "node_id", brokenSet);
+    if (contentCoreSheet) contentFlagged = flagOrphanedRows_(contentCoreSheet, "node_id", brokenSet, "drive_missing");
 
     const resourcesSheet = ss.getSheetByName("Resources");
-    if (resourcesSheet) resourcesFlagged = flagOrphanedRows_(resourcesSheet, "topic_id", brokenSet);
+    if (resourcesSheet) resourcesFlagged = flagOrphanedRows_(resourcesSheet, "node_id", brokenSet, "drive_missing");
 
     const mcqsSheet = ss.getSheetByName("MCQs");
-    if (mcqsSheet) mcqsFlagged = flagOrphanedRows_(mcqsSheet, "topic_id", brokenSet);
+    if (mcqsSheet) mcqsFlagged = flagOrphanedRows_(mcqsSheet, "node_id", brokenSet, "drive_missing");
 
-    indexResult = removeIndexLinksAndFlagOrphans_(brokenSet);
+    indexResult = removeIndexLinksAndFlagOrphans_(brokenSet, "drive_missing");
   }
 
   const summary = {
@@ -1481,15 +1525,15 @@ function deleteStructureNodeRow(data) {
   // design used everywhere else, so nothing here is unrecoverable if
   // it turns out to be a mistake.
   const contentCoreSheet = ss.getSheetByName("Content_Core");
-  const contentFlagged = contentCoreSheet ? flagOrphanedRows_(contentCoreSheet, "node_id", idsToDeleteSet) : 0;
+  const contentFlagged = contentCoreSheet ? flagOrphanedRows_(contentCoreSheet, "node_id", idsToDeleteSet, "topic_deleted") : 0;
 
   const resourcesSheet = ss.getSheetByName("Resources");
-  const resourcesFlagged = resourcesSheet ? flagOrphanedRows_(resourcesSheet, "topic_id", idsToDeleteSet) : 0;
+  const resourcesFlagged = resourcesSheet ? flagOrphanedRows_(resourcesSheet, "node_id", idsToDeleteSet, "topic_deleted") : 0;
 
   const mcqsSheet = ss.getSheetByName("MCQs");
-  const mcqsFlagged = mcqsSheet ? flagOrphanedRows_(mcqsSheet, "topic_id", idsToDeleteSet) : 0;
+  const mcqsFlagged = mcqsSheet ? flagOrphanedRows_(mcqsSheet, "node_id", idsToDeleteSet, "topic_deleted") : 0;
 
-  const indexResult = removeIndexLinksAndFlagOrphans_(idsToDeleteSet);
+  const indexResult = removeIndexLinksAndFlagOrphans_(idsToDeleteSet, "topic_deleted");
 
   const foldersToTrash = [];
   if (folderIndex !== -1) {
@@ -2166,16 +2210,26 @@ function getOrAddColumn_(sheet, headerName) {
 
 // ORPHAN TRACKING (2026-09-09/10): shared soft-delete primitive used
 // across Index_Terms, Content_Core, Resources, and MCQs. Never deletes
-// a row — only stamps an `orphaned_at` timestamp on rows whose
-// `matchColumnName` value is in `matchValueSet` (e.g. every
-// Resources/MCQs row whose topic_id belongs to a just-deleted topic
-// subtree). Skips rows that are already flagged, so it's always safe
-// to call more than once (idempotent). Returns how many rows were
-// newly flagged.
-function flagOrphanedRows_(sheet, matchColumnName, matchValueSet) {
+// a row — only stamps an `orphaned_at` timestamp (and an `orphan_reason`
+// label) on rows whose `matchColumnName` value is in `matchValueSet`
+// (e.g. every Resources/MCQs row whose node_id belongs to a
+// just-deleted topic subtree). Skips rows that are already flagged, so
+// it's always safe to call more than once (idempotent) — the reason on
+// an already-flagged row is left as-is (first reason sticks). Returns
+// how many rows were newly flagged.
+//
+// UPDATE (2026-09-10): added `reason` (a short machine-readable label:
+// "topic_deleted" | "drive_missing" | "content_removed" |
+// "unmarked" | "backfill_detected") so a flagged row says WHY it's
+// orphaned, not just that it is — the different cascades that call
+// this (whole-topic delete, Drive folder gone, content manually
+// cleared, single unmark, historical backfill) all mean genuinely
+// different things for review purposes.
+function flagOrphanedRows_(sheet, matchColumnName, matchValueSet, reason) {
   if (!matchValueSet || matchValueSet.size === 0) return 0;
 
   const orphanedAtCol = getOrAddColumn_(sheet, "orphaned_at"); // 0-based
+  const reasonCol = getOrAddColumn_(sheet, "orphan_reason"); // 0-based
   const values = sheet.getDataRange().getValues();
   if (values.length < 2) return 0;
 
@@ -2191,6 +2245,7 @@ function flagOrphanedRows_(sheet, matchColumnName, matchValueSet) {
     if (!matchValueSet.has(matchValue)) continue;
     if (values[i][orphanedAtCol]) continue; // already flagged
     sheet.getRange(i + 1, orphanedAtCol + 1).setValue(now); // +1: 1-indexed sheet coords
+    if (reason) sheet.getRange(i + 1, reasonCol + 1).setValue(reason);
     flagged++;
   }
 
@@ -2224,11 +2279,13 @@ function findOrCreateIndexTerm_(term) {
   const normIndex = headers.indexOf("normalized_term");
   const idIndex = headers.indexOf("index_id");
   const orphanedIndex = headers.indexOf("orphaned_at"); // -1 if column doesn't exist yet
+  const reasonIndex = headers.indexOf("orphan_reason"); // -1 if column doesn't exist yet
 
   for (let i = 1; i < values.length; i++) {
     if (String(values[i][normIndex]) === normalized) {
       if (orphanedIndex !== -1 && values[i][orphanedIndex]) {
         termsSheet.getRange(i + 1, orphanedIndex + 1).setValue(""); // +1: 1-indexed sheet coords
+        if (reasonIndex !== -1) termsSheet.getRange(i + 1, reasonIndex + 1).setValue("");
       }
       return { success: true, action: "found", index_id: values[i][idIndex], term: values[i][headers.indexOf("term")] };
     }
@@ -2327,20 +2384,22 @@ function deleteIndexTermCascade_(indexId) {
 // this exact signature.
 function unlinkAllTermsForNode_(nodeId) {
   if (!nodeId) throw new Error("node_id is required.");
-  return removeIndexLinksAndFlagOrphans_(new Set([String(nodeId)]));
+  return removeIndexLinksAndFlagOrphans_(new Set([String(nodeId)]), "content_removed");
 }
 
 // Shared core: removes every Index_Node row whose node_id is in
-// `nodeIdSet`, then flags (via flagOrphanedRows_'s same orphaned_at
-// mechanism, applied directly to Index_Terms here since the "still
-// linked anywhere" check needs the full Index_Node picture) any
-// Index_Terms row that had a link to one of these nodes and now has
-// ZERO links left anywhere — not just to these specific nodes. A term
-// still linked to some OTHER node outside this set is left completely
-// untouched. NEVER deletes an Index_Terms row — only flags it. Safe to
-// call with a single-element set or hundreds at once (e.g. a whole
-// deleted topic subtree).
-function removeIndexLinksAndFlagOrphans_(nodeIdSet) {
+// `nodeIdSet`, then flags (via flagOrphanedRows_'s same orphaned_at +
+// orphan_reason mechanism, applied directly to Index_Terms here since
+// the "still linked anywhere" check needs the full Index_Node picture)
+// any Index_Terms row that had a link to one of these nodes and now
+// has ZERO links left anywhere — not just to these specific nodes. A
+// term still linked to some OTHER node outside this set is left
+// completely untouched. NEVER deletes an Index_Terms row — only flags
+// it. Safe to call with a single-element set or hundreds at once (e.g.
+// a whole deleted topic subtree). `reason` is passed straight through
+// to flagOrphanedRows_ — callers pass whichever label fits their
+// situation ("content_removed", "topic_deleted", "drive_missing").
+function removeIndexLinksAndFlagOrphans_(nodeIdSet, reason) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const { termsSheet, linksSheet } = ensureIndexSheets_(ss);
 
@@ -2379,7 +2438,7 @@ function removeIndexLinksAndFlagOrphans_(nodeIdSet) {
   }
 
   const orphanedIndexIds = [...affectedIndexIds].filter(id => !stillLinked.has(id));
-  const termsFlagged = flagOrphanedRows_(termsSheet, "index_id", new Set(orphanedIndexIds));
+  const termsFlagged = flagOrphanedRows_(termsSheet, "index_id", new Set(orphanedIndexIds), reason);
 
   return {
     success: true,
@@ -2491,7 +2550,7 @@ function unlinkIndexTermByTerm_(term, nodeId) {
 
   let termFlaggedOrphaned = false;
   if (!stillHasLink) {
-    const flaggedCount = flagOrphanedRows_(termsSheet, "index_id", new Set([String(indexId)]));
+    const flaggedCount = flagOrphanedRows_(termsSheet, "index_id", new Set([String(indexId)]), "unmarked");
     termFlaggedOrphaned = flaggedCount > 0;
   }
 
@@ -3243,6 +3302,7 @@ function backfillAllOrphans() {
   }
 
   const orphanedAtColTerms = getOrAddColumn_(termsSheet, "orphaned_at");
+  const reasonColTerms = getOrAddColumn_(termsSheet, "orphan_reason");
   const termValues = termsSheet.getDataRange().getValues();
   const termIdIdx = termValues[0].map(String).indexOf("index_id");
   let termsNewlyFlagged = 0, termsStaleCleared = 0;
@@ -3252,21 +3312,24 @@ function backfillAllOrphans() {
     if (isLinked) {
       if (currentFlag) {
         termsSheet.getRange(i + 1, orphanedAtColTerms + 1).setValue("");
+        termsSheet.getRange(i + 1, reasonColTerms + 1).setValue("");
         termsStaleCleared++;
       }
     } else if (!currentFlag) {
       termsSheet.getRange(i + 1, orphanedAtColTerms + 1).setValue(new Date());
+      termsSheet.getRange(i + 1, reasonColTerms + 1).setValue("backfill_detected");
       termsNewlyFlagged++;
     }
   }
   results.index_terms = { newly_flagged: termsNewlyFlagged, stale_flags_cleared: termsStaleCleared };
 
-  // --- Content_Core / Resources / MCQs: flag rows whose node_id/
-  // topic_id no longer exists in Nodes at all (a past full-topic
+  // --- Content_Core / Resources / MCQs: flag rows whose node_id
+  // no longer exists in Nodes at all (a past full-topic
   // delete that pre-dates the cascade fix) ---
   function backfillByMissingNode_(sheet, columnName) {
     if (!sheet) return { newly_flagged: 0 };
     const orphanedAtCol = getOrAddColumn_(sheet, "orphaned_at");
+    const reasonCol = getOrAddColumn_(sheet, "orphan_reason");
     const values = sheet.getDataRange().getValues();
     const headers = values[0].map(String);
     const colIdx = headers.indexOf(columnName);
@@ -3278,6 +3341,7 @@ function backfillAllOrphans() {
       const currentFlag = values[i][orphanedAtCol];
       if (!validNodeIds.has(refId) && !currentFlag) {
         sheet.getRange(i + 1, orphanedAtCol + 1).setValue(new Date());
+        sheet.getRange(i + 1, reasonCol + 1).setValue("backfill_detected");
         newlyFlagged++;
       }
     }
@@ -3285,8 +3349,8 @@ function backfillAllOrphans() {
   }
 
   results.content_core = backfillByMissingNode_(ss.getSheetByName("Content_Core"), "node_id");
-  results.resources = backfillByMissingNode_(ss.getSheetByName("Resources"), "topic_id");
-  results.mcqs = backfillByMissingNode_(ss.getSheetByName("MCQs"), "topic_id");
+  results.resources = backfillByMissingNode_(ss.getSheetByName("Resources"), "node_id");
+  results.mcqs = backfillByMissingNode_(ss.getSheetByName("MCQs"), "node_id");
 
   const summary = { success: true, ...results };
   Logger.log("Orphan backfill complete: %s", JSON.stringify(summary));
