@@ -5,6 +5,14 @@
 let currentMcqs = [];
 let currentMcqIndex = 0;
 let attemptedQuestions = new Set();
+
+// ALPHA-PLUS — main practice-panel display mode. "single" is the
+// original one-question-at-a-time view; "all" is a scrollable list
+// showing every question with its full options (question + 4 options),
+// for scanning through the set. Clicking a question in "all" mode jumps
+// back to "single" mode on that question — answering still only
+// happens in single mode, so there's one answer-handling code path.
+let mcqViewMode = "single";
 let selectedAnswers = {};
 let attemptStarted = false;
 let timerSeconds = 0;
@@ -349,6 +357,7 @@ function renderMcqCollectionNotes() {
         host.innerHTML = `<div class="mcq-collection-note">
             <strong>Full paper:</strong> ${escapeHtml(info?.title || currentCollectionView.id)}
             <button type="button" id="mcq-back-to-topic" class="mcq-collection-link">Back to topic</button>
+            <button type="button" id="mcq-delete-collection" class="mcq-collection-link danger">🗑️ Delete this entire collection</button>
         </div>`;
         document.getElementById("mcq-back-to-topic")?.addEventListener("click", () => {
             currentCollectionView = null;
@@ -359,6 +368,9 @@ function renderMcqCollectionNotes() {
             populateMcqPracticeFilters();
             applyMcqPracticeFilters();
         });
+        document.getElementById("mcq-delete-collection")?.addEventListener("click", () =>
+            deleteMcqCollectionPermanently(currentCollectionView.id, info?.title || currentCollectionView.id)
+        );
         return;
     }
 
@@ -382,6 +394,37 @@ function renderMcqCollectionNotes() {
 
 let currentCollectionViewBackup = [];
 let currentCollectionViewApiBackup = null;
+
+// ALPHA-PLUS — bulk delete for an entire collection (Code.gs's
+// delete_mcq_collection: every MCQ row, the Collections row, and any
+// now-orphaned passages). Needs a stronger confirmation than a single
+// question's delete since this can remove hundreds of rows at once —
+// the person must type the collection's own title back, not just OK a
+// generic confirm().
+async function deleteMcqCollectionPermanently(collectionId, title) {
+    const typed = prompt(
+        `This permanently deletes EVERY question in "${title}" — no undo.\n\n` +
+        `Type the collection's name exactly to confirm:\n${title}`
+    );
+    if (typed !== title) return;
+
+    try {
+        await fetch(GOOGLE_SHEET_API, {
+            method: "POST",
+            mode: "no-cors",
+            body: JSON.stringify({ action: "delete_mcq_collection", collection_id: collectionId })
+        });
+
+        currentCollectionView = null;
+        selectedMcqTags = new Set();
+        selectedMcqLanguage = "";
+        await refreshCurrentMcqTopic();
+        alert(`"${title}" deleted.`);
+    } catch (error) {
+        console.error("Collection delete failed:", error);
+        alert("Could not delete this collection. Please try again.");
+    }
+}
 
 async function loadFullMcqCollection(collectionId) {
     if (!collectionId) return;
@@ -455,9 +498,50 @@ function renderMcqView() {
     grid.querySelectorAll(".mcq-number").forEach(button => {
         button.addEventListener("click", () => {
             currentMcqIndex = Number(button.dataset.questionIndex);
+            mcqViewMode = "single";
             renderMcqView();
         });
     });
+
+    // ALPHA-PLUS — "All Questions" view: a scrollable list of every
+    // question with its full options, for scanning through the set
+    // instead of one-at-a-time. Read-only (no answer-selection here —
+    // that still only happens in single-question mode below); clicking
+    // anywhere on a question's block jumps into single mode on it.
+    if (mcqViewMode === "all") {
+        questionArea.innerHTML = `
+            <div class="mcq-all-list">
+                ${currentMcqs.map((q, i) => {
+                    const sel = selectedAnswers[i];
+                    return `
+                    <div class="mcq-all-item ${i === currentMcqIndex ? "current" : ""}" data-question-index="${i}">
+                        <div class="mcq-question-number mcq-question-heading">
+                            <span>Question ${i + 1} of ${currentMcqs.length}</span>
+                        </div>
+                        <div class="mcq-question-text">${escapeHtml(q.question)}</div>
+                        <div class="mcq-large-options">
+                            ${q.options.map((option, oi) => `
+                                <div class="mcq-large-option readonly ${sel === oi ? "selected" : ""}">
+                                    <span class="mcq-radio-circle" aria-hidden="true"></span>
+                                    <span class="mcq-option-text">${escapeHtml(option)}</span>
+                                </div>
+                            `).join("")}
+                        </div>
+                    </div>`;
+                }).join("")}
+            </div>
+        `;
+
+        questionArea.querySelectorAll(".mcq-all-item").forEach(item => {
+            item.addEventListener("click", () => {
+                currentMcqIndex = Number(item.dataset.questionIndex);
+                mcqViewMode = "single";
+                renderMcqView();
+            });
+        });
+
+        return;
+    }
 
     const mcq = currentMcqs[currentMcqIndex];
     const selected = selectedAnswers[currentMcqIndex];
@@ -482,7 +566,8 @@ function renderMcqView() {
                         }"
                         data-option-index="${index}"
                     >
-                        ${escapeHtml(option)}
+                        <span class="mcq-radio-circle" aria-hidden="true"></span>
+                        <span class="mcq-option-text">${escapeHtml(option)}</span>
                     </button>
                 `).join("")}
             </div>
@@ -568,6 +653,16 @@ document.getElementById("mcq-nav-toggle")?.addEventListener("click", () => {
     button.title = collapsed
         ? "Expand question navigator"
         : "Collapse question navigator";
+});
+
+// ALPHA-PLUS — main-panel Single/All Questions view toggle.
+document.getElementById("mcq-view-all-toggle")?.addEventListener("click", () => {
+    mcqViewMode = mcqViewMode === "single" ? "all" : "single";
+    const button = document.getElementById("mcq-view-all-toggle");
+    if (button) {
+        button.textContent = mcqViewMode === "all" ? "◀ Back to Single Question" : "📋 View All Questions";
+    }
+    renderMcqView();
 });
 
 
@@ -1377,8 +1472,15 @@ function openAddMcqModal() {
                 <input id="mcq-collection" type="text" placeholder="e.g. UGC NET 2025 Paper II" required>
 
                 <label for="mcq-drive-link"><span class="mcq-field-num mcq-num-red">3.</span> Google Drive .md link *</label>
-                <input id="mcq-drive-link" type="url" placeholder="https://drive.google.com/file/d/.../view">
-                <p class="drive-note">The file must be shared as <strong>"Anyone with the link can view"</strong>.</p>
+                <input id="mcq-drive-link" type="url" placeholder="https://drive.google.com/file/d/.../view or a folder link">
+                <div class="content-action-row">
+                    <button type="button" id="mcq-open-folder" class="content-action">📁 Open/Create this topic's MCQ folder</button>
+                </div>
+                <p class="drive-note">A single .md file link works as before. You can also paste this
+                    topic's <strong>MCQ folder</strong> link (use the button above to open/create it) and
+                    drop in one or several .md files — every .md in that folder is fetched and merged
+                    together, so future papers just mean adding another .md file to the same folder.
+                    Either way, the file(s) must be shared as <strong>"Anyone with the link can view"</strong>.</p>
 
                 <label for="mcq-description"><span class="mcq-field-num mcq-num-green">4.</span> Description</label>
                 <textarea id="mcq-description" rows="2" placeholder="Optional description"></textarea>
@@ -1465,6 +1567,7 @@ D) Option D
     document.getElementById("mcq-copy-prompt").addEventListener("click", copyMcqAiPrompt);
     document.getElementById("mcq-copy-name").addEventListener("click", copyMcqSuggestedName);
     document.getElementById("mcq-fetch-preview").addEventListener("click", submitAddMcq);
+    document.getElementById("mcq-open-folder").addEventListener("click", openTopicMcqFolder);
 
     document.getElementById("mcq-study-topic").addEventListener("change", e => {
         const selected = findTopic(mcqStudyData.subjects, e.target.value);
@@ -1565,13 +1668,24 @@ function closeAddMcqModal() {
     }
 }
 
-async function fetchMcqMarkdown(ref) {
-    const url = `${GOOGLE_SHEET_API}?action=get_markdown&ref=${encodeURIComponent(ref)}`;
+// ALPHA-PLUS — MCQ LINK: folder mode (multiple .md files).
+// Uses the get_mcq_source action (Code.gs handleGetMcqSource_), which —
+// unlike Content's get_markdown — always returns an ARRAY of files: one
+// entry for a single-file link, or one entry per .md file when the link
+// points at a Drive FOLDER (e.g. this topic's auto-created "MCQ"
+// subfolder, see openTopicMcqFolder() below). Each file's raw text is
+// parsed separately by parseMcqMarkdown() and the results are merged in
+// submitAddMcq(), so a folder that accumulates several papers over time
+// just means every .md in it gets picked up on the next fetch.
+async function fetchMcqSourceFiles(ref) {
+    const url = `${GOOGLE_SHEET_API}?action=get_mcq_source&ref=${encodeURIComponent(ref)}`;
     const response = await fetch(url);
-    if (!response.ok) throw new Error(`Could not fetch the Drive file (${response.status}).`);
+    if (!response.ok) throw new Error(`Could not fetch the Drive source (${response.status}).`);
     const result = await response.json();
-    if (!result?.ok) throw new Error(result?.error || "Could not read the Drive Markdown file.");
-    return String(result.content || "");
+    if (!result?.ok) throw new Error(result?.error || "Could not read the Drive Markdown file(s).");
+    const files = Array.isArray(result.files) ? result.files : [];
+    if (!files.length) throw new Error("No .md file content was returned.");
+    return files;
 }
 
 function isMcqFatal(row) {
@@ -1705,6 +1819,46 @@ function renderMcqPreviewModal(parsed) {
     document.getElementById("mcq-confirm-save").addEventListener("click", confirmSaveMcqs);
 }
 
+// ALPHA-PLUS — MCQ LINK: opens (creating if needed) this topic's
+// auto-created "MCQ" Drive subfolder — same on-demand pattern as
+// js/app.js's openTopicDriveFolder() for the Content folder, just
+// reading mcq_folder_url instead of drive_folder_url from the same
+// get_or_create_node_folder response (Code.gs now returns both).
+// Also fills the .md link field with that folder's URL so the user can
+// come straight back and click "Fetch & Preview" after dropping in
+// their .md file(s), without retyping/pasting the link.
+async function openTopicMcqFolder() {
+    const topic = currentMcqTopic;
+    if (!topic) {
+        alert("Please choose a Study Topic first (field 6).");
+        return;
+    }
+
+    const btn = document.getElementById("mcq-open-folder");
+    if (btn) { btn.disabled = true; btn.textContent = "Opening…"; }
+
+    try {
+        const url = `${GOOGLE_SHEET_API}?action=get_or_create_node_folder&node_id=${encodeURIComponent(topic.id)}&_=${Date.now()}`;
+        const response = await fetch(url, { cache: "no-store" });
+        if (!response.ok) throw new Error(`Folder API failed (${response.status})`);
+
+        const data = await response.json();
+        if (!data || !data.mcq_folder_url) {
+            throw new Error(data?.error || "MCQ folder URL was not returned.");
+        }
+
+        const linkInput = document.getElementById("mcq-drive-link");
+        if (linkInput && !linkInput.value.trim()) linkInput.value = data.mcq_folder_url;
+
+        window.open(data.mcq_folder_url, "_blank", "noopener,noreferrer");
+    } catch (error) {
+        console.error("Open MCQ folder failed:", error);
+        alert("Could not open/create this topic's MCQ folder. Please check the Apps Script Drive authorization.");
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = "📁 Open/Create this topic's MCQ folder"; }
+    }
+}
+
 async function submitAddMcq() {
     // PHASE 8b — Collection name's required-ness is reactive to the
     // Full Set/Individual toggle (updateMcqCollectionRequirement());
@@ -1729,17 +1883,42 @@ async function submitAddMcq() {
         if (typeof window.parseMcqMarkdown !== "function") {
             throw new Error("MCQ parser is not loaded. Please refresh the page.");
         }
-        const text = await fetchMcqMarkdown(ref);
-        const parsed = window.parseMcqMarkdown(text);
-        window.__mcqLastParsedPassages = parsed.passages || [];
-        applyMcqPopupDefaults(parsed);
+        // Folder mode may return several .md files (one per paper); parse
+        // each on its own — parseMcqMarkdown()'s own per-file id/counter
+        // logic stays correct that way — then merge everything together.
+        // Cross-file duplicate mcq_id/passage_id (unlikely, but possible if
+        // two files reuse the same collection name) resolves the same way
+        // save_mcqs_bulk already resolves any duplicate: last one kept.
+        const files = await fetchMcqSourceFiles(ref);
+        const merged = { collections: [], passages: [], mcqs: [] };
+        const collectionTitlesSeen = new Set();
+        const passageIdsSeen = new Set();
+        files.forEach(file => {
+            const parsed = window.parseMcqMarkdown(String(file.content || ""));
+            (parsed.collections || []).forEach(c => {
+                if (collectionTitlesSeen.has(c.title)) return;
+                collectionTitlesSeen.add(c.title);
+                merged.collections.push(c);
+            });
+            (parsed.passages || []).forEach(p => {
+                if (p.passage_id && passageIdsSeen.has(p.passage_id)) return;
+                if (p.passage_id) passageIdsSeen.add(p.passage_id);
+                merged.passages.push(p);
+            });
+            merged.mcqs.push(...(parsed.mcqs || []));
+        });
 
-        if (!parsed.mcqs.length) {
-            throw new Error("No question blocks were found in this Markdown file.");
+        window.__mcqLastParsedPassages = merged.passages;
+        applyMcqPopupDefaults(merged);
+
+        if (!merged.mcqs.length) {
+            throw new Error(files.length > 1
+                ? `No question blocks were found across the ${files.length} .md files in that folder.`
+                : "No question blocks were found in this Markdown file.");
         }
 
         closeAddMcqModal();
-        renderMcqPreviewModal(parsed);
+        renderMcqPreviewModal(merged);
     } catch (error) {
         console.error("MCQ import preview failed:", error);
         alert(error.message || "Could not fetch or parse the Markdown file.");
@@ -1890,8 +2069,32 @@ function openMcqMetaModal(mcq) {
         <div class="add-resource-overlay">
             <div class="add-resource-modal mcq-meta-modal">
                 <button type="button" class="modal-close" id="mcq-meta-close">×</button>
-                <h2>✏️ Edit MCQ Metadata</h2>
+                <h2>✏️ Edit MCQ</h2>
                 <p class="add-resource-scope"><strong>${mcqEscapeHtml(mcq.question)}</strong></p>
+
+                <label for="mcq-edit-question">Question</label>
+                <textarea id="mcq-edit-question" rows="3">${mcqEscapeHtml(mcq.question || "")}</textarea>
+
+                <label for="mcq-edit-option-a">Option A</label>
+                <input id="mcq-edit-option-a" type="text" value="${mcqEscapeHtml(mcq.options?.[0] || "")}">
+                <label for="mcq-edit-option-b">Option B</label>
+                <input id="mcq-edit-option-b" type="text" value="${mcqEscapeHtml(mcq.options?.[1] || "")}">
+                <label for="mcq-edit-option-c">Option C</label>
+                <input id="mcq-edit-option-c" type="text" value="${mcqEscapeHtml(mcq.options?.[2] || "")}">
+                <label for="mcq-edit-option-d">Option D</label>
+                <input id="mcq-edit-option-d" type="text" value="${mcqEscapeHtml(mcq.options?.[3] || "")}">
+
+                <label for="mcq-edit-correct">Correct Option</label>
+                <select id="mcq-edit-correct">
+                    ${["A", "B", "C", "D"].map((letter, i) =>
+                        `<option value="${letter}" ${mcq.answer === i ? "selected" : ""}>${letter}</option>`
+                    ).join("")}
+                </select>
+
+                <label for="mcq-edit-explanation">Explanation</label>
+                <textarea id="mcq-edit-explanation" rows="3">${mcqEscapeHtml(mcq.explanation || "")}</textarea>
+
+                <hr>
 
                 <label for="mcq-meta-topic">Topic</label>
                 <select id="mcq-meta-topic">${topicOptions}</select>
@@ -1920,10 +2123,11 @@ function openMcqMetaModal(mcq) {
                 <label for="mcq-meta-status">Status</label>
                 <select id="mcq-meta-status">
                     <option value="published" ${String(mcq.status || "").toLowerCase() !== "archived" ? "selected" : ""}>Published</option>
-                    <option value="archived" ${String(mcq.status || "").toLowerCase() === "archived" ? "selected" : ""}>Archived</option>
+                    <option value="archived" ${String(mcq.status || "").toLowerCase() === "archived" ? "selected" : ""}>Archived (hidden from practice, still saved)</option>
                 </select>
 
                 <div class="modal-actions">
+                    <button type="button" id="mcq-meta-delete" class="danger">🗑️ Delete permanently</button>
                     <button type="button" id="mcq-meta-cancel">Cancel</button>
                     <button type="button" id="mcq-meta-save" class="primary">Save Changes</button>
                 </div>
@@ -1951,6 +2155,41 @@ function openMcqMetaModal(mcq) {
         if (e.target === e.currentTarget) modal.remove();
     });
     document.getElementById("mcq-meta-save")?.addEventListener("click", () => saveMcqMeta(mcq));
+    document.getElementById("mcq-meta-delete")?.addEventListener("click", () => deleteMcqPermanently(mcq));
+}
+
+// ALPHA-PLUS — real permanent delete, distinct from the "Archived"
+// status option in the same modal (which only hides the question from
+// practice while keeping its row). This has no undo, so it needs its
+// own strong confirmation, not just the generic browser confirm().
+async function deleteMcqPermanently(mcq) {
+    const typed = prompt(
+        `This permanently deletes this question — no undo, unlike "Archived" status above.\n\n` +
+        `Type DELETE to confirm:`
+    );
+    if (typed !== "DELETE") return;
+
+    const btn = document.getElementById("mcq-meta-delete");
+    if (btn) { btn.disabled = true; btn.textContent = "Deleting…"; }
+
+    try {
+        await fetch(GOOGLE_SHEET_API, {
+            method: "POST",
+            mode: "no-cors",
+            body: JSON.stringify({ action: "delete_mcq", mcq_id: mcq.id })
+        });
+
+        document.getElementById("mcq-meta-modal")?.remove();
+        allLoadedMcqs = allLoadedMcqs.filter(m => String(m.id) !== String(mcq.id));
+        currentMcqs = currentMcqs.filter(m => String(m.id) !== String(mcq.id));
+        currentMcqIndex = Math.min(currentMcqIndex, Math.max(0, currentMcqs.length - 1));
+        renderMcqCollectionNotes();
+        renderMcqView();
+    } catch (error) {
+        console.error("MCQ delete failed:", error);
+        alert("Could not delete this question. Please try again.");
+        if (btn) { btn.disabled = false; btn.textContent = "🗑️ Delete permanently"; }
+    }
 }
 
 async function saveMcqMeta(mcq) {
@@ -1975,7 +2214,29 @@ async function saveMcqMeta(mcq) {
     if (description !== oldDescription) fields.description = description;
     if (status !== oldStatus) fields.status = status;
 
-    if (!Object.keys(fields).length) {
+    // ALPHA-PLUS — content fields (question/options/answer/explanation)
+    // go through a separate update_mcq_content action (see Code.gs —
+    // update_mcq_meta's allow-list deliberately excludes these), so they
+    // need their own diff/payload here, sent as a second request below.
+    const question = document.getElementById("mcq-edit-question")?.value.trim() || "";
+    const optionA = document.getElementById("mcq-edit-option-a")?.value.trim() || "";
+    const optionB = document.getElementById("mcq-edit-option-b")?.value.trim() || "";
+    const optionC = document.getElementById("mcq-edit-option-c")?.value.trim() || "";
+    const optionD = document.getElementById("mcq-edit-option-d")?.value.trim() || "";
+    const correctLetter = document.getElementById("mcq-edit-correct")?.value || "A";
+    const explanation = document.getElementById("mcq-edit-explanation")?.value.trim() || "";
+
+    const contentFields = {};
+    if (question !== String(mcq.question || "")) contentFields.question = question;
+    if (optionA !== String(mcq.options?.[0] || "")) contentFields.option_a = optionA;
+    if (optionB !== String(mcq.options?.[1] || "")) contentFields.option_b = optionB;
+    if (optionC !== String(mcq.options?.[2] || "")) contentFields.option_c = optionC;
+    if (optionD !== String(mcq.options?.[3] || "")) contentFields.option_d = optionD;
+    const oldCorrectLetter = ["A", "B", "C", "D"][mcq.answer ?? 0];
+    if (correctLetter !== oldCorrectLetter) contentFields.correct_option = correctLetter;
+    if (explanation !== String(mcq.explanation || "")) contentFields.explanation = explanation;
+
+    if (!Object.keys(fields).length && !Object.keys(contentFields).length) {
         document.getElementById("mcq-meta-modal")?.remove();
         return;
     }
@@ -1984,22 +2245,27 @@ async function saveMcqMeta(mcq) {
     if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
 
     try {
-        await fetch(GOOGLE_SHEET_API, {
-            method: "POST",
-            mode: "no-cors",
-            body: JSON.stringify({
-                action: "update_mcq_meta",
-                mcq_id: mcq.id,
-                fields
-            })
-        });
+        if (Object.keys(fields).length) {
+            await fetch(GOOGLE_SHEET_API, {
+                method: "POST",
+                mode: "no-cors",
+                body: JSON.stringify({ action: "update_mcq_meta", mcq_id: mcq.id, fields })
+            });
+        }
+        if (Object.keys(contentFields).length) {
+            await fetch(GOOGLE_SHEET_API, {
+                method: "POST",
+                mode: "no-cors",
+                body: JSON.stringify({ action: "update_mcq_content", mcq_id: mcq.id, fields: contentFields })
+            });
+        }
 
         document.getElementById("mcq-meta-modal")?.remove();
         await refreshCurrentMcqTopic();
-        alert("MCQ metadata updated.");
+        alert("MCQ updated.");
     } catch (error) {
-        console.error("MCQ metadata update failed:", error);
-        alert("Could not update the MCQ metadata. Check the Apps Script endpoint and try again.");
+        console.error("MCQ update failed:", error);
+        alert("Could not update this MCQ. Check the Apps Script endpoint and try again.");
         if (btn) { btn.disabled = false; btn.textContent = "Save Changes"; }
     }
 }

@@ -112,6 +112,14 @@ function doGet(e) {
     return handleGetMcqs(e.parameter);
   }
 
+  // ALPHA-PLUS — MCQ LINK: folder mode. Same idea as get_markdown's
+  // folder mode for Content, but an MCQ source folder may hold MULTIPLE
+  // .md files (one per paper/collection), so this returns every .md
+  // file's content instead of picking just one. See handleGetMcqSource_.
+  if (action === "get_mcq_source") {
+    return handleGetMcqSource_(e.parameter.ref);
+  }
+
   // AUTO DRIVE FOLDERS: on-demand folder creation/opening for a node.
   if (action === "get_or_create_node_folder") {
     return jsonResponse_(getNodeFolderInfo_(e.parameter.node_id));
@@ -314,6 +322,42 @@ function doPost(e) {
       return ContentService
         .createTextOutput(JSON.stringify(result))
         .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // ALPHA-PLUS — MCQ delete/edit trio.
+    // update_mcq_meta above deliberately never touches question/option/
+    // answer text ("Source/content fields are intentionally not editable
+    // here"); these three actions cover the rest: a real (non-archive)
+    // single-row delete, a bulk collection wipe, and a separate
+    // content-editable patch — kept as its own action so update_mcq_meta's
+    // narrow allow-list stays exactly as conservative as it already was.
+
+    // Permanently removes ONE row from MCQs. Different from setting
+    // status: "archived" via update_mcq_meta (which only hides a
+    // question from practice while keeping the row) — this actually
+    // deletes it, no undo.
+    if (data.action === "delete_mcq") {
+      const result = deleteMcqRow(data);
+      return jsonResponse_(result);
+    }
+
+    // Wipes an entire collection in one call: every MCQ row whose
+    // collection_id matches, the Collections row itself, and any
+    // MCQ_Passages row that was ONLY referenced by that collection's
+    // questions (a passage still used by some other collection's
+    // questions is left alone).
+    if (data.action === "delete_mcq_collection") {
+      const result = deleteMcqCollection(data);
+      return jsonResponse_(result);
+    }
+
+    // Field-level patch for question/options/answer/explanation —
+    // the content fields update_mcq_meta explicitly excludes. Same
+    // fixed-allow-list shape as updateMcqMeta() so nothing outside
+    // MCQ_CONTENT_EDITABLE_COLUMNS can ever be written this way.
+    if (data.action === "update_mcq_content") {
+      const result = updateMcqContent(data);
+      return jsonResponse_(result);
     }
 
     // Unknown / unhandled action - no legacy Community fallback anymore
@@ -858,13 +902,100 @@ function ensureNodeFolder_(nodeId, stack) {
   return folder.getId();
 }
 
+// ALPHA-PLUS — REFERENCES/MCQ SUBFOLDERS.
+// Every node already gets one managed Drive folder (drive_folder_id,
+// above). This adds two FIXED subfolders inside that same folder —
+// "References" and "MCQ" — so reference PDFs and MCQ .md source files
+// have their own dedicated, trackable place, separate from the node's
+// own Content (which still lives at the node folder's root, unchanged).
+//
+// Deliberately NOT wired into ensureNodeFolder_() itself: that function
+// recurses up the parent chain to build ancestor folders as plain
+// containers, and calling this from inside it would create References/
+// MCQ subfolders on every ancestor (Subject, Course, Unit, Chapter) any
+// time a descendant's folder is touched — not what's wanted. Instead
+// this only runs for the exact node the caller asked about, via
+// ensureNodeFolderWithExtras_() below, exactly the same on-demand shape
+// as the main folder itself.
+function ensureNodesExtraFolderColumns_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Nodes");
+  if (!sheet) throw new Error("Nodes sheet not found.");
+
+  const lastCol = Math.max(sheet.getLastColumn(), 1);
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
+
+  function ensureCol(name) {
+    let col = headers.indexOf(name);
+    if (col === -1) {
+      col = headers.length;
+      sheet.getRange(1, col + 1).setValue(name);
+      headers.push(name);
+    }
+    return col + 1; // 1-based column index
+  }
+
+  return {
+    sheet: sheet,
+    referencesCol: ensureCol("references_folder_id"),
+    mcqCol: ensureCol("mcq_folder_id")
+  };
+}
+
+function ensureNodeExtraFolders_(node, mainFolderId) {
+  const cols = ensureNodesExtraFolderColumns_();
+  const rowVals = cols.sheet.getRange(node.rowNumber, 1, 1, cols.sheet.getLastColumn()).getValues()[0];
+
+  const savedRefId = String(rowVals[cols.referencesCol - 1] || "");
+  const savedMcqId = String(rowVals[cols.mcqCol - 1] || "");
+
+  const mainFolder = DriveApp.getFolderById(mainFolderId);
+
+  let refFolder = null;
+  if (savedRefId) {
+    try { refFolder = DriveApp.getFolderById(savedRefId); } catch (e) { refFolder = null; }
+  }
+  if (!refFolder) {
+    refFolder = findOrCreateSubfolder_(mainFolder, "References");
+    cols.sheet.getRange(node.rowNumber, cols.referencesCol).setValue(refFolder.getId());
+  }
+
+  let mcqFolder = null;
+  if (savedMcqId) {
+    try { mcqFolder = DriveApp.getFolderById(savedMcqId); } catch (e) { mcqFolder = null; }
+  }
+  if (!mcqFolder) {
+    mcqFolder = findOrCreateSubfolder_(mainFolder, "MCQ");
+    cols.sheet.getRange(node.rowNumber, cols.mcqCol).setValue(mcqFolder.getId());
+  }
+
+  return { referencesFolderId: refFolder.getId(), mcqFolderId: mcqFolder.getId() };
+}
+
+function ensureNodeFolderWithExtras_(nodeId) {
+  const mainFolderId = ensureNodeFolder_(nodeId);
+  const registry = getNodeRecordMap_();
+  const node = registry.byId[String(nodeId)];
+  if (!node) throw new Error("Node not found: " + nodeId);
+  const extras = ensureNodeExtraFolders_(node, mainFolderId);
+  return {
+    folderId: mainFolderId,
+    referencesFolderId: extras.referencesFolderId,
+    mcqFolderId: extras.mcqFolderId
+  };
+}
+
 function getNodeFolderInfo_(nodeId) {
-  const folderId = ensureNodeFolder_(nodeId);
+  const result = ensureNodeFolderWithExtras_(nodeId);
   return {
     success: true,
     node_id: String(nodeId),
-    drive_folder_id: folderId,
-    drive_folder_url: "https://drive.google.com/drive/folders/" + folderId
+    drive_folder_id: result.folderId,
+    drive_folder_url: "https://drive.google.com/drive/folders/" + result.folderId,
+    references_folder_id: result.referencesFolderId,
+    references_folder_url: "https://drive.google.com/drive/folders/" + result.referencesFolderId,
+    mcq_folder_id: result.mcqFolderId,
+    mcq_folder_url: "https://drive.google.com/drive/folders/" + result.mcqFolderId
   };
 }
 
@@ -1052,6 +1183,145 @@ function resetDriveFolderMigration(){
   writeMigrationStatus_(x);return x;
 }
 
+/* =========================================================
+   DRIVE HEALTH CHECK (2026-09-10)
+   Catches deletions that happen DIRECTLY in Google Drive (deleting a
+   topic's folder from the Drive UI/app) instead of through the
+   website. Those bypass every doPost action entirely, so nothing else
+   in this file can ever see them happen in real time — this is the
+   one mechanism that eventually notices, by periodically re-checking
+   whether each Nodes row's drive_folder_id still resolves.
+
+   Since MCQs, Resources, and the topic's actual content now all live
+   inside that same per-topic Drive folder (per the folder-per-topic
+   change), one missing-folder check is enough to know that ALL of a
+   topic's content, references, and questions are gone — not just one
+   of them. This reuses the exact same flagOrphanedRows_ /
+   removeIndexLinksAndFlagOrphans_ helpers the app-driven deletion
+   paths use, so a Drive-side deletion ends up flagged identically to
+   an app-side one. NEVER deletes any Sheet row, and NEVER touches
+   Drive itself (it only reads folder existence — never trashes
+   anything, unlike the app's own delete_structure action).
+
+   Self-healing both ways: if a previously-flagged node's folder is
+   found again on a later run (e.g. someone restored it from Drive
+   Trash), the Nodes row's own orphaned_at is cleared. Index_Terms are
+   already self-healed elsewhere the moment a term is marked again
+   (see findOrCreateIndexTerm_) — restoring a Drive folder alone
+   doesn't re-establish old Index_Node links or un-flag Content_Core/
+   Resources/MCQs rows, since the old links are already gone and
+   re-linking is a deliberate manual action, same as for any other
+   orphaned term.
+   ========================================================= */
+function driveHealthCheck() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const nodesSheet = ss.getSheetByName("Nodes");
+  if (!nodesSheet) return { success: false, message: "Nodes sheet not found." };
+
+  const values = nodesSheet.getDataRange().getValues();
+  const headers = values[0].map(String);
+  const idIdx = headers.indexOf("node_id");
+  const folderIdx = headers.indexOf("drive_folder_id");
+  if (idIdx === -1 || folderIdx === -1) {
+    return { success: false, message: "Required Nodes columns not found." };
+  }
+
+  const orphanedAtCol = getOrAddColumn_(nodesSheet, "orphaned_at"); // 0-based
+
+  const brokenNodeIds = [];
+  let checked = 0;
+  let restored = 0;
+
+  for (let i = 1; i < values.length; i++) {
+    const folderId = values[i][folderIdx];
+    if (!folderId) continue; // nothing to check for this node
+    checked++;
+
+    let folderExists = false;
+    try {
+      const folder = DriveApp.getFolderById(String(folderId));
+      folderExists = !folder.isTrashed();
+    } catch (e) {
+      folderExists = false; // inaccessible/deleted
+    }
+
+    const currentFlag = values[i][orphanedAtCol];
+    if (folderExists) {
+      if (currentFlag) {
+        nodesSheet.getRange(i + 1, orphanedAtCol + 1).setValue(""); // +1: 1-indexed
+        restored++;
+      }
+      continue;
+    }
+
+    if (!currentFlag) {
+      nodesSheet.getRange(i + 1, orphanedAtCol + 1).setValue(new Date()); // +1: 1-indexed
+    }
+    brokenNodeIds.push(String(values[i][idIdx]));
+  }
+
+  let contentFlagged = 0, resourcesFlagged = 0, mcqsFlagged = 0, indexResult = { links_removed: 0, terms_flagged_orphaned: 0 };
+
+  if (brokenNodeIds.length) {
+    const brokenSet = new Set(brokenNodeIds);
+
+    const contentCoreSheet = ss.getSheetByName("Content_Core");
+    if (contentCoreSheet) contentFlagged = flagOrphanedRows_(contentCoreSheet, "node_id", brokenSet);
+
+    const resourcesSheet = ss.getSheetByName("Resources");
+    if (resourcesSheet) resourcesFlagged = flagOrphanedRows_(resourcesSheet, "topic_id", brokenSet);
+
+    const mcqsSheet = ss.getSheetByName("MCQs");
+    if (mcqsSheet) mcqsFlagged = flagOrphanedRows_(mcqsSheet, "topic_id", brokenSet);
+
+    indexResult = removeIndexLinksAndFlagOrphans_(brokenSet);
+  }
+
+  const summary = {
+    success: true,
+    nodes_checked: checked,
+    newly_broken_nodes: brokenNodeIds.length,
+    restored_nodes: restored,
+    broken_node_ids: brokenNodeIds,
+    content_core_flagged_orphaned: contentFlagged,
+    resources_flagged_orphaned: resourcesFlagged,
+    mcqs_flagged_orphaned: mcqsFlagged,
+    index_terms_flagged_orphaned: indexResult.terms_flagged_orphaned,
+    index_links_removed: indexResult.links_removed
+  };
+
+  Logger.log("Drive health check: %s", JSON.stringify(summary));
+  return summary;
+}
+
+// Installs a once-daily trigger for driveHealthCheck (runs at
+// approximately 3 AM in the script's timezone). Run this ONCE manually
+// from the Apps Script editor after deploying — it does not need to be
+// re-run on every deployment, since triggers are independent of
+// deployment versions. Safe to call more than once: clears any
+// existing driveHealthCheck triggers first, so it never creates
+// duplicates that would run the check multiple times a day.
+function installDriveHealthCheckTrigger() {
+  removeDriveHealthCheckTrigger();
+  ScriptApp.newTrigger("driveHealthCheck").timeBased().everyDays(1).atHour(3).create();
+  return { success: true, message: "Daily Drive health check trigger installed (~3 AM)." };
+}
+
+// Removes the daily driveHealthCheck trigger, if one exists. Run this
+// manually from the Apps Script editor if you ever want to pause the
+// automatic scan (e.g. while doing bulk manual cleanup and don't want
+// the scan interleaving with it).
+function removeDriveHealthCheckTrigger() {
+  let removed = 0;
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === "driveHealthCheck") {
+      ScriptApp.deleteTrigger(t);
+      removed++;
+    }
+  });
+  return { success: true, removed };
+}
+
 function setupDriveStorage() {
   ensureNodesDriveFolderColumn_();
   const root = ensureRootFolder_();
@@ -1198,6 +1468,29 @@ function deleteStructureNodeRow(data) {
     }
   }
 
+  const idsToDeleteSet = new Set(Object.keys(idsToDelete));
+
+  // FIX (2026-09-10): deleting a topic/structure subtree used to leave
+  // its Content_Core rows, Resources, MCQs, and Index_Terms links all
+  // silently orphaned — none of them were ever touched here, so they'd
+  // sit forever referencing node_ids that no longer exist in Nodes.
+  // This is the same class of bug as the "remove all content" one
+  // fixed earlier, just triggered from the "delete whole topic" path
+  // instead. Every affected row across these sheets is FLAGGED
+  // (orphaned_at), never deleted — consistent with the soft-delete
+  // design used everywhere else, so nothing here is unrecoverable if
+  // it turns out to be a mistake.
+  const contentCoreSheet = ss.getSheetByName("Content_Core");
+  const contentFlagged = contentCoreSheet ? flagOrphanedRows_(contentCoreSheet, "node_id", idsToDeleteSet) : 0;
+
+  const resourcesSheet = ss.getSheetByName("Resources");
+  const resourcesFlagged = resourcesSheet ? flagOrphanedRows_(resourcesSheet, "topic_id", idsToDeleteSet) : 0;
+
+  const mcqsSheet = ss.getSheetByName("MCQs");
+  const mcqsFlagged = mcqsSheet ? flagOrphanedRows_(mcqsSheet, "topic_id", idsToDeleteSet) : 0;
+
+  const indexResult = removeIndexLinksAndFlagOrphans_(idsToDeleteSet);
+
   const foldersToTrash = [];
   if (folderIndex !== -1) {
     for (let i = 1; i < values.length; i++) {
@@ -1231,7 +1524,12 @@ function deleteStructureNodeRow(data) {
     node_id: nodeId,
     rows_deleted: deletedCount,
     drive_folders_trashed: foldersTrashed,
-    drive_folder_cleanup: folderIndex === -1 ? "column_missing" : "completed"
+    drive_folder_cleanup: folderIndex === -1 ? "column_missing" : "completed",
+    content_core_flagged_orphaned: contentFlagged,
+    resources_flagged_orphaned: resourcesFlagged,
+    mcqs_flagged_orphaned: mcqsFlagged,
+    index_terms_flagged_orphaned: indexResult.terms_flagged_orphaned,
+    index_links_removed: indexResult.links_removed
   };
 }
 
@@ -1291,6 +1589,170 @@ function updateMcqMeta(data) {
   const now = new Date();
 
   MCQ_META_EDITABLE_COLUMNS.forEach(function(col) {
+    if (fields[col] === undefined) return;
+    const colIndex = headers.indexOf(col);
+    if (colIndex === -1) return;
+    sheet.getRange(targetRow, colIndex + 1).setValue(fields[col]);
+    changed.push(col);
+  });
+
+  if (changed.length) {
+    const updatedAtCol = headers.indexOf("updated_at");
+    if (updatedAtCol !== -1) {
+      sheet.getRange(targetRow, updatedAtCol + 1).setValue(now);
+    }
+  }
+
+  return {
+    success: true,
+    mcq_id: data.mcq_id,
+    fields_changed: changed
+  };
+}
+
+// ALPHA-PLUS — real single-row delete (see doPost's delete_mcq route
+// above for how this differs from the existing archive/status flow).
+function deleteMcqRow(data) {
+  if (!data || !data.mcq_id) throw new Error("mcq_id is required.");
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("MCQs");
+  if (!sheet) throw new Error("MCQs sheet not found.");
+
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0];
+  const idCol = headers.indexOf("mcq_id");
+  if (idCol === -1) throw new Error("mcq_id column not found.");
+
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][idCol]) === String(data.mcq_id)) {
+      sheet.deleteRow(i + 1);
+      return { success: true, action: "deleted", mcq_id: data.mcq_id };
+    }
+  }
+
+  throw new Error("mcq_id not found: " + data.mcq_id);
+}
+
+// ALPHA-PLUS — bulk collection delete. Removes every MCQ row whose
+// collection_id matches, the Collections row itself, and any
+// MCQ_Passages row left with zero remaining references after the MCQ
+// rows are gone (a passage still used by another collection's
+// questions is kept). Row deletions run bottom-to-top per sheet so
+// row numbers stay valid mid-loop.
+function deleteMcqCollection(data) {
+  if (!data || !data.collection_id) throw new Error("collection_id is required.");
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const collectionId = String(data.collection_id);
+
+  const mcqSheet = ss.getSheetByName("MCQs");
+  if (!mcqSheet) throw new Error("MCQs sheet not found.");
+
+  const mcqValues = mcqSheet.getDataRange().getValues();
+  const mcqHeaders = mcqValues[0];
+  const collCol = mcqHeaders.indexOf("collection_id");
+  const passageCol = mcqHeaders.indexOf("passage_id");
+  if (collCol === -1) throw new Error("collection_id column not found in MCQs.");
+
+  const rowsToDelete = [];
+  const passageIdsInCollection = new Set();
+  const passageIdsOutsideCollection = new Set();
+
+  for (let i = 1; i < mcqValues.length; i++) {
+    const rowCollId = String(mcqValues[i][collCol] || "");
+    const rowPassageId = passageCol !== -1 ? String(mcqValues[i][passageCol] || "") : "";
+    if (rowCollId === collectionId) {
+      rowsToDelete.push(i + 1);
+      if (rowPassageId) passageIdsInCollection.add(rowPassageId);
+    } else if (rowPassageId) {
+      passageIdsOutsideCollection.add(rowPassageId);
+    }
+  }
+
+  rowsToDelete.sort(function(a, b) { return b - a; })
+    .forEach(function(r) { mcqSheet.deleteRow(r); });
+
+  let deletedPassages = 0;
+  const passagesSheet = ss.getSheetByName("MCQ_Passages");
+  if (passagesSheet) {
+    const pValues = passagesSheet.getDataRange().getValues();
+    const pHeaders = pValues[0];
+    const pIdCol = pHeaders.indexOf("passage_id");
+    if (pIdCol !== -1) {
+      const passageRowsToDelete = [];
+      for (let i = 1; i < pValues.length; i++) {
+        const pid = String(pValues[i][pIdCol]);
+        if (passageIdsInCollection.has(pid) && !passageIdsOutsideCollection.has(pid)) {
+          passageRowsToDelete.push(i + 1);
+        }
+      }
+      passageRowsToDelete.sort(function(a, b) { return b - a; })
+        .forEach(function(r) { passagesSheet.deleteRow(r); deletedPassages++; });
+    }
+  }
+
+  let collectionRowDeleted = false;
+  const collectionsSheet = ss.getSheetByName("Collections");
+  if (collectionsSheet) {
+    const cValues = collectionsSheet.getDataRange().getValues();
+    const cHeaders = cValues[0];
+    const cIdCol = cHeaders.indexOf("collection_id");
+    if (cIdCol !== -1) {
+      for (let i = 1; i < cValues.length; i++) {
+        if (String(cValues[i][cIdCol]) === collectionId) {
+          collectionsSheet.deleteRow(i + 1);
+          collectionRowDeleted = true;
+          break;
+        }
+      }
+    }
+  }
+
+  return {
+    success: true,
+    action: "deleted_collection",
+    collection_id: collectionId,
+    mcqs_deleted: rowsToDelete.length,
+    passages_deleted: deletedPassages,
+    collection_row_deleted: collectionRowDeleted
+  };
+}
+
+// ALPHA-PLUS — content patch (question/options/answer/explanation).
+// Mirrors updateMcqMeta()'s fixed-allow-list shape exactly, just with
+// the content columns that function deliberately excludes.
+const MCQ_CONTENT_EDITABLE_COLUMNS = [
+  "question", "option_a", "option_b", "option_c", "option_d",
+  "correct_option", "explanation"
+];
+
+function updateMcqContent(data) {
+  if (!data || !data.mcq_id) throw new Error("mcq_id is required.");
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("MCQs");
+  if (!sheet) throw new Error("MCQs sheet not found.");
+
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0];
+  const idCol = headers.indexOf("mcq_id");
+  if (idCol === -1) throw new Error("mcq_id column not found.");
+
+  let targetRow = -1;
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][idCol]) === String(data.mcq_id)) {
+      targetRow = i + 1;
+      break;
+    }
+  }
+  if (targetRow === -1) throw new Error("mcq_id not found: " + data.mcq_id);
+
+  const fields = data.fields || {};
+  const changed = [];
+  const now = new Date();
+
+  MCQ_CONTENT_EDITABLE_COLUMNS.forEach(function(col) {
     if (fields[col] === undefined) return;
     const colIndex = headers.indexOf(col);
     if (colIndex === -1) return;
@@ -1520,6 +1982,89 @@ function extractDriveFileId_(ref) {
   return null;
 }
 
+// ALPHA-PLUS — MCQ LINK: folder mode (multiple .md files).
+// Mirrors handleGetContentFolder_'s link-detection (folder link vs
+// single-file link), but Content wants exactly ONE .md file while an
+// MCQ source folder is meant to hold SEVERAL — one per paper/collection,
+// accumulated over time in that node's auto-created "MCQ" subfolder.
+// Every .md file found is returned; the client (js/mcq.js) parses each
+// with parseMcqMarkdown() and merges the results before saving, so
+// adding a new .md to the folder later just means fetching again.
+// A single-file link still works exactly as before (files: one entry) —
+// nothing about the existing single-file import flow changes.
+function handleGetMcqSource_(ref) {
+  try {
+    const cleanRef = String(ref || "").trim();
+    if (!cleanRef) {
+      return jsonResponse_({ ok: false, error: "No Drive link was provided." });
+    }
+
+    const folderId = extractDriveFolderId_(cleanRef);
+    if (folderId) {
+      let folder;
+      try {
+        folder = DriveApp.getFolderById(folderId);
+      } catch (notFoundOrNoAccess) {
+        return jsonResponse_({
+          ok: false,
+          error: "Could not open this folder. Check that it's shared as " +
+                 "\"Anyone with the link can view\" and that the link is correct."
+        });
+      }
+
+      const iterator = folder.getFiles();
+      const mdFiles = [];
+      while (iterator.hasNext()) {
+        const f = iterator.next();
+        if (/\.md$/i.test(f.getName())) mdFiles.push(f);
+      }
+
+      if (!mdFiles.length) {
+        return jsonResponse_({
+          ok: false,
+          error: "No .md file found in this folder. Add one or more .md files " +
+                 "(each following the MCQ tag format) then make sure the folder " +
+                 "is shared as \"Anyone with the link can view\"."
+        });
+      }
+
+      const files = mdFiles.map(function(f) {
+        return { filename: f.getName(), content: f.getBlob().getDataAsString("UTF-8") };
+      });
+      return jsonResponse_({ ok: true, files: files });
+    }
+
+    const fileId = extractDriveFileId_(cleanRef);
+    let file = null;
+    if (fileId) {
+      try {
+        file = DriveApp.getFileById(fileId);
+      } catch (notFoundOrNoAccess) {
+        file = null;
+      }
+    }
+    if (!file && STUDY_CONTENT_FOLDER_ID) {
+      file = findFileByNameInFolder_(cleanRef, STUDY_CONTENT_FOLDER_ID);
+    }
+    if (!file) {
+      return jsonResponse_({
+        ok: false,
+        error: "Could not find or open this file. Check that it's shared as " +
+               "\"Anyone with the link can view\" and that the link is correct."
+      });
+    }
+
+    const text = file.getBlob().getDataAsString("UTF-8");
+    return jsonResponse_({ ok: true, files: [{ filename: file.getName(), content: text }] });
+
+  } catch (error) {
+    return jsonResponse_({
+      ok: false,
+      error: "Unexpected error reading this MCQ source: " + error.message
+    });
+  }
+}
+
 function findFileByNameInFolder_(filename, folderId) {
   try {
     const folder = DriveApp.getFolderById(folderId);
@@ -1599,10 +2144,71 @@ function nextIndexId_(termsSheet) {
   return "I" + String(maxNum + 1).padStart(3, "0");
 }
 
+// Reads header row of a sheet and returns the 0-based column index for
+// `headerName`, appending a new header cell at the end if it doesn't
+// exist yet. Generic — safe to reuse across Index_Terms, Content_Core,
+// Resources, MCQs, and Nodes. IMPORTANT: some of these sheets (e.g. the
+// live Index_Terms sheet) may already have manual, freeform notes typed
+// by the user into columns past the ones this codebase manages — this
+// function must never assume a fixed column count or overwrite an
+// existing header; it only reads whatever's actually in row 1 and adds
+// a new column strictly after the last one currently used.
+function getOrAddColumn_(sheet, headerName) {
+  const lastCol = Math.max(sheet.getLastColumn(), 1);
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
+  let idx = headers.indexOf(headerName);
+  if (idx === -1) {
+    idx = headers.length;
+    sheet.getRange(1, idx + 1).setValue(headerName);
+  }
+  return idx; // 0-based
+}
+
+// ORPHAN TRACKING (2026-09-09/10): shared soft-delete primitive used
+// across Index_Terms, Content_Core, Resources, and MCQs. Never deletes
+// a row — only stamps an `orphaned_at` timestamp on rows whose
+// `matchColumnName` value is in `matchValueSet` (e.g. every
+// Resources/MCQs row whose topic_id belongs to a just-deleted topic
+// subtree). Skips rows that are already flagged, so it's always safe
+// to call more than once (idempotent). Returns how many rows were
+// newly flagged.
+function flagOrphanedRows_(sheet, matchColumnName, matchValueSet) {
+  if (!matchValueSet || matchValueSet.size === 0) return 0;
+
+  const orphanedAtCol = getOrAddColumn_(sheet, "orphaned_at"); // 0-based
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) return 0;
+
+  const headers = values[0].map(String);
+  const matchIdx = headers.indexOf(matchColumnName);
+  if (matchIdx === -1) return 0;
+
+  const now = new Date();
+  let flagged = 0;
+
+  for (let i = 1; i < values.length; i++) {
+    const matchValue = String(values[i][matchIdx]);
+    if (!matchValueSet.has(matchValue)) continue;
+    if (values[i][orphanedAtCol]) continue; // already flagged
+    sheet.getRange(i + 1, orphanedAtCol + 1).setValue(now); // +1: 1-indexed sheet coords
+    flagged++;
+  }
+
+  return flagged;
+}
+
 // Finds an existing Index_Terms row for this term (by normalized_term)
 // or creates a new one. Always returns { success, index_id, term,
 // action: "found" | "created" }. This is the ONLY place a new index_id
 // is ever minted, so calling it repeatedly for the same term is safe.
+//
+// SELF-HEAL (2026-09-10): a term can carry an `orphaned_at` flag (see
+// removeIndexLinksAndFlagOrphans_) meaning every topic it was linked to
+// is gone. If that same term gets marked again on ANY topic — which is
+// exactly what happens here on the "found" path, right before
+// linkIndexTerm_ links it — it's clearly active again, so the flag is
+// cleared automatically. The row is never lost, and re-using an
+// orphaned term needs zero manual cleanup.
 function findOrCreateIndexTerm_(term) {
   const cleanTerm = String(term || "").trim();
   if (!cleanTerm) {
@@ -1617,9 +2223,13 @@ function findOrCreateIndexTerm_(term) {
   const headers = values[0];
   const normIndex = headers.indexOf("normalized_term");
   const idIndex = headers.indexOf("index_id");
+  const orphanedIndex = headers.indexOf("orphaned_at"); // -1 if column doesn't exist yet
 
   for (let i = 1; i < values.length; i++) {
     if (String(values[i][normIndex]) === normalized) {
+      if (orphanedIndex !== -1 && values[i][orphanedIndex]) {
+        termsSheet.getRange(i + 1, orphanedIndex + 1).setValue(""); // +1: 1-indexed sheet coords
+      }
       return { success: true, action: "found", index_id: values[i][idIndex], term: values[i][headers.indexOf("term")] };
     }
   }
@@ -1703,26 +2313,55 @@ function deleteIndexTermCascade_(indexId) {
 // marked in no longer exists there. Nothing previously called this on
 // content removal, so those links (both "content" and "manual"
 // source_type) were silently orphaned forever, pointing the Index
-// Directory at a now-empty topic. This removes ALL Index_Node rows
-// for one node_id, regardless of source_type. It does NOT delete the
-// Index_Terms rows themselves — if a term is still linked elsewhere
-// (a different topic), it stays; if this was its only location, it
-// simply becomes a 0-location entry like any other orphan (same as
-// what unlink_index_term already allows).
+// Directory at a now-empty topic.
+//
+// GENERALIZED (2026-09-10): the core logic (remove Index_Node links
+// for a set of nodes, flag any Index_Terms row that ends up with zero
+// links left ANYWHERE as a result) is now shared via
+// removeIndexLinksAndFlagOrphans_, so the exact same behavior can be
+// reused for a single node (this function), a whole deleted topic
+// subtree (deleteStructureNodeRow), or a batch of Drive-confirmed-
+// missing nodes (driveHealthCheck). This function is now a thin
+// wrapper for the single-node case, kept because sync_index_term's
+// caller (unlink_all_terms_for_node doPost action) already expects
+// this exact signature.
 function unlinkAllTermsForNode_(nodeId) {
   if (!nodeId) throw new Error("node_id is required.");
+  return removeIndexLinksAndFlagOrphans_(new Set([String(nodeId)]));
+}
 
+// Shared core: removes every Index_Node row whose node_id is in
+// `nodeIdSet`, then flags (via flagOrphanedRows_'s same orphaned_at
+// mechanism, applied directly to Index_Terms here since the "still
+// linked anywhere" check needs the full Index_Node picture) any
+// Index_Terms row that had a link to one of these nodes and now has
+// ZERO links left anywhere — not just to these specific nodes. A term
+// still linked to some OTHER node outside this set is left completely
+// untouched. NEVER deletes an Index_Terms row — only flags it. Safe to
+// call with a single-element set or hundreds at once (e.g. a whole
+// deleted topic subtree).
+function removeIndexLinksAndFlagOrphans_(nodeIdSet) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const { linksSheet } = ensureIndexSheets_(ss);
+  const { termsSheet, linksSheet } = ensureIndexSheets_(ss);
 
   const values = linksSheet.getDataRange().getValues();
   const headers = values[0];
   const nodeIdx = headers.indexOf("node_id");
+  const idIdx = headers.indexOf("index_id");
+
+  // Every index_id linked to any node in this set, BEFORE removal —
+  // these are the only candidates that could become orphaned.
+  const affectedIndexIds = new Set();
+  for (let i = 1; i < values.length; i++) {
+    if (nodeIdSet.has(String(values[i][nodeIdx]))) {
+      affectedIndexIds.add(String(values[i][idIdx]));
+    }
+  }
 
   const kept = [headers];
   let removed = 0;
   for (let i = 1; i < values.length; i++) {
-    if (String(values[i][nodeIdx]) === String(nodeId)) {
+    if (nodeIdSet.has(String(values[i][nodeIdx]))) {
       removed++;
     } else {
       kept.push(values[i]);
@@ -1732,7 +2371,22 @@ function unlinkAllTermsForNode_(nodeId) {
   linksSheet.getRange(1, 1, values.length, headers.length).clearContent();
   linksSheet.getRange(1, 1, kept.length, headers.length).setValues(kept);
 
-  return { success: true, links_removed: removed };
+  // Of the affected index_ids, find which ones have NO remaining link
+  // rows at all — those are now fully orphaned and get flagged.
+  const stillLinked = new Set();
+  for (let i = 1; i < kept.length; i++) {
+    stillLinked.add(String(kept[i][idIdx]));
+  }
+
+  const orphanedIndexIds = [...affectedIndexIds].filter(id => !stillLinked.has(id));
+  const termsFlagged = flagOrphanedRows_(termsSheet, "index_id", new Set(orphanedIndexIds));
+
+  return {
+    success: true,
+    links_removed: removed,
+    terms_flagged_orphaned: termsFlagged,
+    orphaned_index_ids: orphanedIndexIds
+  };
 }
 
 // ALPHA-PLUS — INDEX TERMS: combined find-or-create + link, for the
@@ -1775,6 +2429,14 @@ function syncIndexTerm_(term, nodeId, sourceType) {
 // Other nodes linked to the same term, and the Index_Terms row
 // itself, are left alone — a term can be legitimately marked on
 // more than one subtopic.
+//
+// UPDATE (2026-09-10): per user decision, a single "Unmark" should be
+// flagged the exact same way as the bigger cascade actions if it
+// happens to be this term's LAST remaining link — consistency was
+// specifically requested here after the earlier silent-orphan bug.
+// So after removing the link, this now checks whether the term has
+// any links left anywhere; if not, it gets the same `orphaned_at`
+// flag (never a delete) that removeIndexLinksAndFlagOrphans_ uses.
 function unlinkIndexTermByTerm_(term, nodeId) {
   const cleanTerm = String(term || "").trim();
   if (!cleanTerm) throw new Error("term is required.");
@@ -1806,14 +2468,34 @@ function unlinkIndexTermByTerm_(term, nodeId) {
   const lIdIdx = linkHeaders.indexOf("index_id");
   const lNodeIdx = linkHeaders.indexOf("node_id");
 
+  let unlinkedRowIndex = -1;
   for (let i = linkValues.length - 1; i >= 1; i--) {
     if (String(linkValues[i][lIdIdx]) === String(indexId) && String(linkValues[i][lNodeIdx]) === String(nodeId)) {
-      linksSheet.deleteRow(i + 1); // +1: getValues() is 0-indexed, sheet rows are 1-indexed
-      return { success: true, action: "unlinked", index_id: indexId, node_id: nodeId };
+      unlinkedRowIndex = i;
+      break;
     }
   }
 
-  return { success: true, action: "not_linked" };
+  if (unlinkedRowIndex === -1) {
+    return { success: true, action: "not_linked" };
+  }
+
+  linksSheet.deleteRow(unlinkedRowIndex + 1); // +1: getValues() is 0-indexed, sheet rows are 1-indexed
+
+  // Re-check remaining links for this index_id (post-delete) to decide
+  // whether it just became fully orphaned.
+  const remainingLinks = linksSheet.getDataRange().getValues();
+  const stillHasLink = remainingLinks
+    .slice(1)
+    .some(row => String(row[lIdIdx]) === String(indexId));
+
+  let termFlaggedOrphaned = false;
+  if (!stillHasLink) {
+    const flaggedCount = flagOrphanedRows_(termsSheet, "index_id", new Set([String(indexId)]));
+    termFlaggedOrphaned = flaggedCount > 0;
+  }
+
+  return { success: true, action: "unlinked", index_id: indexId, node_id: nodeId, term_flagged_orphaned: termFlaggedOrphaned };
 }
 
 // ALPHA-PLUS — INDEX TERMS: every term currently linked to one node,
@@ -2514,3 +3196,99 @@ function cleanupTreeSourcedIndexTerms() {
 //
 // Run this ONCE from the Apps Script editor (select
 // fixDuplicateIndexTermIds in the function dropdown, then Run).
+
+/* =========================================================
+   ORPHAN BACKFILL — ONE-TIME CATCH-UP (2026-09-10)
+   The orphaned_at flags above (removeIndexLinksAndFlagOrphans_,
+   flagOrphanedRows_, driveHealthCheck) only fire going forward, at
+   the moment a deletion happens AFTER this code is deployed. This
+   function is the one-time catch-up for everything that was already
+   orphaned BEFORE today — e.g. topics deleted via the old
+   deleteStructureNodeRow (which never used to touch Index_Terms/
+   Resources/MCQs at all), or Drive folders removed manually a while
+   ago, or the old {{}} auto-sync era's leftovers.
+
+   Run this ONCE from the Apps Script editor (select
+   backfillAllOrphans in the function dropdown, then Run), any time
+   after deploying this version. Safe to run more than once —
+   already-flagged/already-valid rows are skipped, nothing is ever
+   deleted. Check View -> Execution log afterwards for the summary.
+   ========================================================= */
+function backfillAllOrphans() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // Every node_id currently in Nodes — the source of truth for
+  // "does this topic still exist at all". Content_Core/Resources/MCQs
+  // rows pointing at anything NOT in this set are orphaned by a past
+  // topic deletion.
+  const nodesSheet = ss.getSheetByName("Nodes");
+  const validNodeIds = new Set();
+  if (nodesSheet) {
+    const nodeValues = nodesSheet.getDataRange().getValues();
+    const nodeIdIdx = nodeValues[0].map(String).indexOf("node_id");
+    for (let i = 1; i < nodeValues.length; i++) {
+      validNodeIds.add(String(nodeValues[i][nodeIdIdx]));
+    }
+  }
+
+  const results = {};
+
+  // --- Index_Terms: flag any term with zero Index_Node links today ---
+  const { termsSheet, linksSheet } = ensureIndexSheets_(ss);
+  const linkValues = linksSheet.getDataRange().getValues();
+  const linkIdIdx = linkValues[0].map(String).indexOf("index_id");
+  const linkedIds = new Set();
+  for (let i = 1; i < linkValues.length; i++) {
+    linkedIds.add(String(linkValues[i][linkIdIdx]));
+  }
+
+  const orphanedAtColTerms = getOrAddColumn_(termsSheet, "orphaned_at");
+  const termValues = termsSheet.getDataRange().getValues();
+  const termIdIdx = termValues[0].map(String).indexOf("index_id");
+  let termsNewlyFlagged = 0, termsStaleCleared = 0;
+  for (let i = 1; i < termValues.length; i++) {
+    const isLinked = linkedIds.has(String(termValues[i][termIdIdx]));
+    const currentFlag = termValues[i][orphanedAtColTerms];
+    if (isLinked) {
+      if (currentFlag) {
+        termsSheet.getRange(i + 1, orphanedAtColTerms + 1).setValue("");
+        termsStaleCleared++;
+      }
+    } else if (!currentFlag) {
+      termsSheet.getRange(i + 1, orphanedAtColTerms + 1).setValue(new Date());
+      termsNewlyFlagged++;
+    }
+  }
+  results.index_terms = { newly_flagged: termsNewlyFlagged, stale_flags_cleared: termsStaleCleared };
+
+  // --- Content_Core / Resources / MCQs: flag rows whose node_id/
+  // topic_id no longer exists in Nodes at all (a past full-topic
+  // delete that pre-dates the cascade fix) ---
+  function backfillByMissingNode_(sheet, columnName) {
+    if (!sheet) return { newly_flagged: 0 };
+    const orphanedAtCol = getOrAddColumn_(sheet, "orphaned_at");
+    const values = sheet.getDataRange().getValues();
+    const headers = values[0].map(String);
+    const colIdx = headers.indexOf(columnName);
+    if (colIdx === -1) return { newly_flagged: 0 };
+
+    let newlyFlagged = 0;
+    for (let i = 1; i < values.length; i++) {
+      const refId = String(values[i][colIdx]);
+      const currentFlag = values[i][orphanedAtCol];
+      if (!validNodeIds.has(refId) && !currentFlag) {
+        sheet.getRange(i + 1, orphanedAtCol + 1).setValue(new Date());
+        newlyFlagged++;
+      }
+    }
+    return { newly_flagged: newlyFlagged };
+  }
+
+  results.content_core = backfillByMissingNode_(ss.getSheetByName("Content_Core"), "node_id");
+  results.resources = backfillByMissingNode_(ss.getSheetByName("Resources"), "topic_id");
+  results.mcqs = backfillByMissingNode_(ss.getSheetByName("MCQs"), "topic_id");
+
+  const summary = { success: true, ...results };
+  Logger.log("Orphan backfill complete: %s", JSON.stringify(summary));
+  return summary;
+}

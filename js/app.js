@@ -1215,16 +1215,17 @@ async function removeTopicContent() {
         // FIX (2026-09-07): removing all content used to leave this
         // node's index-term links (both {{}} auto and manual) pointing
         // at now-empty content forever, since nothing else ever cleans
-        // them up. Fire-and-forget, same pattern as the content clears
-        // above — non-blocking, no-cors.
-        fetch(GOOGLE_SHEET_API, {
-            method: "POST",
-            mode: "no-cors",
-            body: JSON.stringify({
-                action: "unlink_all_terms_for_node",
-                node_id: selectedTopicNode.id
-            })
-        }).catch(err => console.warn("Index link cleanup on content removal failed:", err));
+        // them up.
+        // RELIABILITY (2026-09): this used to be pure fire-and-forget
+        // no-cors, same silent-failure risk as the single-term
+        // sync/unlink/delete actions fixed elsewhere — if this POST
+        // silently failed, the topic would be gone but its index links
+        // would remain as zombie entries pointing at a non-existent
+        // node. Now verified: fire the no-cors POST, then re-fetch this
+        // node's linked terms (a plain, readable GET) to confirm zero
+        // remain, with one retry before surfacing a visible error
+        // instead of failing silently.
+        unlinkAllTermsForNodeAndVerify(selectedTopicNode.id);
 
         const c = selectedTopicNode.content || {};
         selectedTopicNode.content = {
@@ -1868,6 +1869,11 @@ function openAddResource() {
                 <button type="button" class="modal-close" onclick="closeAddResource()">×</button>
                 <h2>➕ Add Reference</h2>
                 <p class="add-resource-scope">Adding to: <strong>${escapeHtml(selectedTopicNode.title)}</strong></p>
+                <div class="content-action-row">
+                    <button type="button" id="open-references-folder" class="content-action">📁 Open/Create this topic's References folder</button>
+                </div>
+                <p class="drive-note">Upload the PDF (or other source file) into that folder, share it as
+                    "Anyone with the link can view", then paste its link below as a Google Drive / Web link.</p>
                 <div class="resource-type-options">
                     <button type="button" onclick="selectResourceType('youtube')">▶️ YouTube</button>
                     <button type="button" onclick="selectResourceType('web')">🌐 Google Drive / Web Link</button>
@@ -1876,9 +1882,39 @@ function openAddResource() {
             </div>
         </div>`;
     document.body.appendChild(modal);
+    document.getElementById("open-references-folder")?.addEventListener("click", openTopicReferencesFolder);
 }
 
 function closeAddResource(){ document.getElementById("add-resource-modal")?.remove(); }
+
+// ALPHA-PLUS — REFERENCES SUBFOLDER: same on-demand open/create pattern
+// as openTopicDriveFolder() above, just reading references_folder_url
+// instead of drive_folder_url from the same get_or_create_node_folder
+// response (Code.gs now returns both, plus mcq_folder_url for js/mcq.js).
+async function openTopicReferencesFolder() {
+    if (!selectedTopicNode) return;
+
+    const btn = document.getElementById("open-references-folder");
+    if (btn) { btn.disabled = true; btn.textContent = "Opening…"; }
+
+    try {
+        const url = `${GOOGLE_SHEET_API}?action=get_or_create_node_folder&node_id=${encodeURIComponent(selectedTopicNode.id)}&_=${Date.now()}`;
+        const response = await fetch(url, { cache: "no-store" });
+        if (!response.ok) throw new Error(`Folder API failed (${response.status})`);
+
+        const data = await response.json();
+        if (!data || !data.references_folder_url) {
+            throw new Error(data?.error || "References folder URL was not returned.");
+        }
+
+        window.open(data.references_folder_url, "_blank", "noopener,noreferrer");
+    } catch (error) {
+        console.error("Open references folder failed:", error);
+        alert("Could not open/create this topic's References folder. Please check the Apps Script Drive authorization.");
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = "📁 Open/Create this topic's References folder"; }
+    }
+}
 
 function selectResourceType(type){
     currentResourceType=type;
@@ -2683,6 +2719,43 @@ async function fetchIndexTermsForNode(nodeId) {
     } catch (error) {
         console.error("Fetching scoped index terms failed:", error);
         return [];
+    }
+}
+
+// RELIABILITY (2026-09): same verify-after-write pattern used for the
+// single mark/unmark actions, applied to the cascade unlink fired when
+// a topic's content is fully removed (removeTopicContent). Fires the
+// no-cors POST, waits a beat, then re-fetches this node's linked terms
+// via the same readable GET used elsewhere — if any are still present,
+// retries the unlink once before giving up and alerting the user
+// (regular users don't check the console, so a console.error alone
+// would silently hide the failure again, same as the original bug
+// this mirrors).
+async function unlinkAllTermsForNodeAndVerify(nodeId) {
+    const fireUnlink = () => fetch(GOOGLE_SHEET_API, {
+        method: "POST",
+        mode: "no-cors",
+        body: JSON.stringify({ action: "unlink_all_terms_for_node", node_id: nodeId })
+    });
+
+    const stillLinked = async () => {
+        await new Promise(resolve => setTimeout(resolve, 400));
+        const remaining = await fetchIndexTermsForNode(nodeId);
+        return remaining.length > 0;
+    };
+
+    try {
+        await fireUnlink();
+        if (await stillLinked()) {
+            await fireUnlink(); // one retry before giving up
+            if (await stillLinked()) {
+                console.error("Index link cleanup on content removal could not be verified for node:", nodeId);
+                alert("Content ka index links poori tarah clear nahi ho paye — page reload karke Index tab check kar lo.");
+                return;
+            }
+        }
+    } catch (error) {
+        console.error("Index link cleanup on content removal failed:", error);
     }
 }
 
