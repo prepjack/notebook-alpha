@@ -567,7 +567,7 @@ body.resizing-panels .workspace {
 }
 
 #mcq-page-root {
-    height: calc(100vh - 110px);
+    min-height: calc(100vh - 110px);
     display: flex;
     flex-direction: column;
 }
@@ -2603,10 +2603,25 @@ body.index-directory-resizing .index-directory-workspace {
     line-height:1.5;
 }
 
+.mcq-feedback-toggle-row{
+    margin-top:14px;
+}
+
+.mcq-feedback-toggle-row:empty{
+    margin-top:0;
+}
+
 .mcq-navigation-buttons{
     display:flex;
     justify-content:space-between;
+    align-items:center;
     margin-top:24px;
+}
+
+.mcq-nav-left-group{
+    display:flex;
+    align-items:center;
+    gap:8px;
 }
 
 .mcq-navigation-buttons button{

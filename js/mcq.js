@@ -6,6 +6,12 @@ let currentMcqs = [];
 let currentMcqIndex = 0;
 let attemptedQuestions = new Set();
 
+// ALPHA-PLUS — explanation stays collapsed by default even after a
+// question is attempted; this tracks which question indices the user
+// has explicitly expanded via the 👁️ toggle (single view and All
+// Questions view share this same index-keyed state).
+let expandedExplanations = new Set();
+
 // ALPHA-PLUS — main practice-panel display mode. "single" is the
 // original one-question-at-a-time view; "all" is a scrollable list
 // showing every question with its full options (question + 4 options),
@@ -515,6 +521,7 @@ function renderMcqView() {
                 ${currentMcqs.map((q, i) => {
                     const sel = selectedAnswers[i];
                     const answered = sel !== undefined;
+                    const expanded = expandedExplanations.has(i);
                     const correct = answered && sel === q.answer;
                     return `
                     <div class="mcq-all-item">
@@ -536,6 +543,13 @@ function renderMcqView() {
                             `).join("")}
                         </div>
                         ${answered ? `
+                            <div class="mcq-feedback-toggle-row">
+                                <button type="button" class="content-action mcq-feedback-toggle-btn" data-question-index="${i}">
+                                    ${expanded ? "🙈 Hide Explanation" : "👁️ Show Explanation"}
+                                </button>
+                            </div>
+                        ` : ""}
+                        ${answered && expanded ? `
                             <div class="mcq-feedback">
                                 <strong>${correct ? "Correct" : "Not correct"}</strong><br>
                                 ${escapeHtml(q.explanation || "")}
@@ -551,6 +565,18 @@ function renderMcqView() {
                     Number(button.dataset.questionIndex),
                     Number(button.dataset.optionIndex)
                 );
+            });
+        });
+
+        questionArea.querySelectorAll(".mcq-feedback-toggle-btn").forEach(button => {
+            button.addEventListener("click", () => {
+                const index = Number(button.dataset.questionIndex);
+                if (expandedExplanations.has(index)) {
+                    expandedExplanations.delete(index);
+                } else {
+                    expandedExplanations.add(index);
+                }
+                renderMcqView();
             });
         });
 
@@ -586,14 +612,35 @@ function renderMcqView() {
                 `).join("")}
             </div>
 
-            <div id="mcq-feedback" class="mcq-feedback" hidden></div>
+            ${attemptedQuestions.has(currentMcqIndex) && expandedExplanations.has(currentMcqIndex) ? `
+                <div id="mcq-feedback" class="mcq-feedback">
+                    <strong>${selected === mcq.answer ? "Correct" : "Not correct"}</strong><br>
+                    ${escapeHtml(mcq.explanation || "")}
+                </div>
+            ` : ""}
 
             <div class="mcq-navigation-buttons">
-                <button id="mcq-prev" type="button">← Previous</button>
+                <div class="mcq-nav-left-group">
+                    <button id="mcq-prev" type="button">← Previous</button>
+                    ${attemptedQuestions.has(currentMcqIndex) ? `
+                        <button type="button" id="mcq-feedback-toggle" class="content-action">
+                            ${expandedExplanations.has(currentMcqIndex) ? "🙈 Hide Explanation" : "👁️ Show Explanation"}
+                        </button>
+                    ` : ""}
+                </div>
                 <button id="mcq-next" type="button">Next →</button>
             </div>
         </div>
     `;
+
+    document.getElementById("mcq-feedback-toggle")?.addEventListener("click", () => {
+        if (expandedExplanations.has(currentMcqIndex)) {
+            expandedExplanations.delete(currentMcqIndex);
+        } else {
+            expandedExplanations.add(currentMcqIndex);
+        }
+        renderMcqView();
+    });
 
     questionArea.querySelectorAll(".mcq-large-option")
         .forEach(button => {
@@ -622,29 +669,15 @@ function renderMcqView() {
 }
 
 function answerCurrentQuestion(optionIndex) {
-    const feedback = document.getElementById("mcq-feedback");
-
     if (!attemptStarted) {
-        feedback.hidden = false;
-        feedback.textContent =
-            "Click Start Attempt before answering questions.";
+        alert("Click Start Attempt before answering questions.");
         return;
     }
-
-    const mcq = currentMcqs[currentMcqIndex];
 
     selectedAnswers[currentMcqIndex] = optionIndex;
     attemptedQuestions.add(currentMcqIndex);
 
     renderMcqView();
-
-    const newFeedback = document.getElementById("mcq-feedback");
-    const correct = optionIndex === mcq.answer;
-
-    newFeedback.hidden = false;
-    newFeedback.innerHTML =
-        `<strong>${correct ? "Correct" : "Not correct"}</strong><br>` +
-        escapeHtml(mcq.explanation);
 }
 
 // ALPHA-PLUS — same answer-recording logic as answerCurrentQuestion,
