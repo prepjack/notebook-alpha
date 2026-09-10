@@ -1215,17 +1215,16 @@ async function removeTopicContent() {
         // FIX (2026-09-07): removing all content used to leave this
         // node's index-term links (both {{}} auto and manual) pointing
         // at now-empty content forever, since nothing else ever cleans
-        // them up.
-        // RELIABILITY (2026-09): this used to be pure fire-and-forget
-        // no-cors, same silent-failure risk as the single-term
-        // sync/unlink/delete actions fixed elsewhere — if this POST
-        // silently failed, the topic would be gone but its index links
-        // would remain as zombie entries pointing at a non-existent
-        // node. Now verified: fire the no-cors POST, then re-fetch this
-        // node's linked terms (a plain, readable GET) to confirm zero
-        // remain, with one retry before surfacing a visible error
-        // instead of failing silently.
-        unlinkAllTermsForNodeAndVerify(selectedTopicNode.id);
+        // them up. Fire-and-forget, same pattern as the content clears
+        // above — non-blocking, no-cors.
+        fetch(GOOGLE_SHEET_API, {
+            method: "POST",
+            mode: "no-cors",
+            body: JSON.stringify({
+                action: "unlink_all_terms_for_node",
+                node_id: selectedTopicNode.id
+            })
+        }).catch(err => console.warn("Index link cleanup on content removal failed:", err));
 
         const c = selectedTopicNode.content || {};
         selectedTopicNode.content = {
@@ -1359,6 +1358,11 @@ IMAGES — GENEROUS BUT PURPOSEFUL:
 Use substantially more visual support than a minimal notes file would need — but every single visual must earn its place. Possible visual types include: real-life illustrative images, labelled diagrams, process diagrams, step-by-step visuals, concept maps, comparison visuals, timelines, relationship diagrams, classification diagrams, cause-and-effect diagrams, visual summaries, scenario illustrations, before/after illustrations, concrete representations of abstract concepts, educational infographics, and memory-oriented visualizations.
 
 Before creating any visual, ask: "Will this help the learner understand, remember, distinguish, connect, or recall the concept?" If yes, create it. If no, skip it. Prefer one large, clear, readable visual over several small cluttered ones. Avoid visual clutter — do not add a visual just because the topic could technically support one. Use simple lowercase-hyphenated filenames such as information-lifecycle.png. Every referenced image must actually exist in the final package and must work when the folder/ZIP is linked to the website.
+
+CHOOSING HOW TO PRODUCE EACH VISUAL — use whichever of your available tools actually fits, not just whichever is fastest to reach for:
+- Structural visuals (process diagrams, timelines, comparisons, classification/relationship diagrams, flowcharts) are usually clearest as clean line-based diagrams — build these with code (e.g. a plotting library) or Mermaid.
+- Illustrative visuals (real-life illustrative images, scenario illustrations, before/after illustrations, concrete representations of abstract ideas, educational infographics) need color, texture, and visual richness that a plotting library cannot produce — if you have an image-generation tool available, use it for these, and describe the scene vividly and specifically (setting, characters, mood, color) rather than defaulting to a plotted chart out of habit. If no image-generation tool is available, fall back to the clearest diagram you can still build with what you have, rather than skipping the visual.
+Match the tool to what the visual actually needs — don't let convenience quietly downgrade what could have been colorful and vivid into another basic line chart.
 
 ====================================================
 SCOPE AND EDUCATIONAL QUALITY
@@ -1526,6 +1530,7 @@ Before finishing, verify:
 - the ZIP is complete and self-contained
 
 Create the complete Notebook Alpha study-content ZIP package for the topic and source material provided.`;
+
 
 function openAddContentLink() {
     if (!selectedTopicNode) return;
@@ -1869,11 +1874,6 @@ function openAddResource() {
                 <button type="button" class="modal-close" onclick="closeAddResource()">×</button>
                 <h2>➕ Add Reference</h2>
                 <p class="add-resource-scope">Adding to: <strong>${escapeHtml(selectedTopicNode.title)}</strong></p>
-                <div class="content-action-row">
-                    <button type="button" id="open-references-folder" class="content-action">📁 Open/Create this topic's References folder</button>
-                </div>
-                <p class="drive-note">Upload the PDF (or other source file) into that folder, share it as
-                    "Anyone with the link can view", then paste its link below as a Google Drive / Web link.</p>
                 <div class="resource-type-options">
                     <button type="button" onclick="selectResourceType('youtube')">▶️ YouTube</button>
                     <button type="button" onclick="selectResourceType('web')">🌐 Google Drive / Web Link</button>
@@ -1882,39 +1882,9 @@ function openAddResource() {
             </div>
         </div>`;
     document.body.appendChild(modal);
-    document.getElementById("open-references-folder")?.addEventListener("click", openTopicReferencesFolder);
 }
 
 function closeAddResource(){ document.getElementById("add-resource-modal")?.remove(); }
-
-// ALPHA-PLUS — REFERENCES SUBFOLDER: same on-demand open/create pattern
-// as openTopicDriveFolder() above, just reading references_folder_url
-// instead of drive_folder_url from the same get_or_create_node_folder
-// response (Code.gs now returns both, plus mcq_folder_url for js/mcq.js).
-async function openTopicReferencesFolder() {
-    if (!selectedTopicNode) return;
-
-    const btn = document.getElementById("open-references-folder");
-    if (btn) { btn.disabled = true; btn.textContent = "Opening…"; }
-
-    try {
-        const url = `${GOOGLE_SHEET_API}?action=get_or_create_node_folder&node_id=${encodeURIComponent(selectedTopicNode.id)}&_=${Date.now()}`;
-        const response = await fetch(url, { cache: "no-store" });
-        if (!response.ok) throw new Error(`Folder API failed (${response.status})`);
-
-        const data = await response.json();
-        if (!data || !data.references_folder_url) {
-            throw new Error(data?.error || "References folder URL was not returned.");
-        }
-
-        window.open(data.references_folder_url, "_blank", "noopener,noreferrer");
-    } catch (error) {
-        console.error("Open references folder failed:", error);
-        alert("Could not open/create this topic's References folder. Please check the Apps Script Drive authorization.");
-    } finally {
-        if (btn) { btn.disabled = false; btn.textContent = "📁 Open/Create this topic's References folder"; }
-    }
-}
 
 function selectResourceType(type){
     currentResourceType=type;
@@ -2719,43 +2689,6 @@ async function fetchIndexTermsForNode(nodeId) {
     } catch (error) {
         console.error("Fetching scoped index terms failed:", error);
         return [];
-    }
-}
-
-// RELIABILITY (2026-09): same verify-after-write pattern used for the
-// single mark/unmark actions, applied to the cascade unlink fired when
-// a topic's content is fully removed (removeTopicContent). Fires the
-// no-cors POST, waits a beat, then re-fetches this node's linked terms
-// via the same readable GET used elsewhere — if any are still present,
-// retries the unlink once before giving up and alerting the user
-// (regular users don't check the console, so a console.error alone
-// would silently hide the failure again, same as the original bug
-// this mirrors).
-async function unlinkAllTermsForNodeAndVerify(nodeId) {
-    const fireUnlink = () => fetch(GOOGLE_SHEET_API, {
-        method: "POST",
-        mode: "no-cors",
-        body: JSON.stringify({ action: "unlink_all_terms_for_node", node_id: nodeId })
-    });
-
-    const stillLinked = async () => {
-        await new Promise(resolve => setTimeout(resolve, 400));
-        const remaining = await fetchIndexTermsForNode(nodeId);
-        return remaining.length > 0;
-    };
-
-    try {
-        await fireUnlink();
-        if (await stillLinked()) {
-            await fireUnlink(); // one retry before giving up
-            if (await stillLinked()) {
-                console.error("Index link cleanup on content removal could not be verified for node:", nodeId);
-                alert("Content ka index links poori tarah clear nahi ho paye — page reload karke Index tab check kar lo.");
-                return;
-            }
-        }
-    } catch (error) {
-        console.error("Index link cleanup on content removal failed:", error);
     }
 }
 
