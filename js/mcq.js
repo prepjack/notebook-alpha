@@ -489,6 +489,14 @@ function renderMcqView() {
     const totalLabel = document.getElementById("mcq-nav-total");
     if (totalLabel) totalLabel.textContent = currentMcqs.length;
 
+    // Keep the question-panel header synchronized with the currently shown question.
+    const currentQuestionLabel = document.getElementById("mcq-current-question-label");
+    if (currentQuestionLabel) {
+        currentQuestionLabel.textContent = mcqViewMode === "all"
+            ? `ALL QUESTIONS (${currentMcqs.length})`
+            : `QUESTION ${currentMcqIndex + 1} OF ${currentMcqs.length}`;
+    }
+
     grid.innerHTML = currentMcqs.map((mcq, index) => `
         <button
             type="button"
@@ -588,8 +596,7 @@ function renderMcqView() {
 
     questionArea.innerHTML = `
         <div class="mcq-card-large">
-            <div class="mcq-question-number mcq-question-heading">
-                <span>Question ${currentMcqIndex + 1} of ${currentMcqs.length}</span>
+            <div style="display:flex;justify-content:flex-end;align-items:center;margin-bottom:12px;">
                 <button type="button" class="mcq-edit-meta" id="mcq-edit-meta" title="Edit question metadata" aria-label="Edit question metadata">✏️</button>
             </div>
 

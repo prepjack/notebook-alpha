@@ -561,25 +561,14 @@ body.resizing-panels .workspace {
 
 
 
-/* Dedicated MCQ page */
-.mcq-page {
-    overflow: hidden;
-}
-
-#mcq-page-root {
-    min-height: calc(100vh - 110px);
-    display: flex;
-    flex-direction: column;
-}
-
-#mcq-page-root .mcq-setup {
-    flex: 0 0 auto;
-}
-
-#mcq-page-root .mcq-workspace {
-    flex: 1;
-    min-height: 0;
-}
+/* Dedicated MCQ page
+   NOTE: the full layout (header/setup/workspace sizing) now lives in ONE
+   place — see "STEP 32 — MCQ TWO-PANEL PRACTICE INTERFACE" further down.
+   This early block used to duplicate/fight with it (overflow:hidden here
+   blocked page scrolling, and the flex-column + min-height:0 rules below
+   silently overrode any height edits made later in the file because
+   "#mcq-page-root .mcq-workspace" is more specific than ".mcq-workspace").
+   Removed for good so future edits only need to touch STEP 32. */
 
 /* =========================================================
    STEP 8 — MCQ RESULT
@@ -2377,44 +2366,65 @@ body.index-directory-resizing .index-directory-workspace {
     font-family:Arial,sans-serif;
 }
 
+/* Header row: a narrow title column on the left, and the settings
+   toolbar filling the rest — the toolbar scrolls horizontally so new
+   controls can be added later without breaking the layout. */
 .mcq-page .app-header{
-    height:70px;
+    height:auto;
+    min-height:76px;
     box-sizing:border-box;
-    padding:10px 20px;
+    padding:0;
     display:flex;
-    align-items:flex-start;
+    align-items:stretch;
     background:#fff;
     border-bottom:1px solid #d7ddd6;
 }
 
+.mcq-title-col{
+    flex:none;
+    display:flex;
+    align-items:center;
+    padding:14px 24px;
+    border-right:1px solid #e2e7e0;
+}
+
 .mcq-page .app-header h1{
     margin:0;
+    white-space:nowrap;
     font-family:Georgia,serif;
-    font-size:27px;
+    font-size:28px;
     font-weight:400;
     line-height:1.1;
+    color:#26332b;
 }
 
 #mcq-page-root{
-    min-height:calc(100vh - 70px);
+    min-height:calc(100vh - 76px);
     box-sizing:border-box;
     padding:14px 16px 20px;
 }
 
 .mcq-setup{
+    position:relative;
+    flex:1 1 auto;
+    min-width:0;
     display:flex;
     align-items:center;
     gap:10px;
-    flex-wrap:wrap;
-    padding:10px 12px;
+    flex-wrap:nowrap;
+    overflow-x:auto;
+    overflow-y:hidden;
+    padding:14px 16px;
     background:#fff;
-    border:1px solid #d5ddd5;
-    border-radius:8px;
-    margin-bottom:12px;
+}
+
+.mcq-setup > *{
+    flex-shrink:0;
 }
 
 .mcq-setup-title{
-    width:100%;
+    width:auto;
+    margin-right:6px;
     color:#657168;
     font:700 10px Arial,sans-serif;
     letter-spacing:.08em;
@@ -2430,7 +2440,7 @@ body.index-directory-resizing .index-directory-workspace {
 
 .mcq-setup select,
 .mcq-setup input{
-    height:28px;
+    height:34px;
     box-sizing:border-box;
     border:1px solid #cbd4cb;
     border-radius:5px;
@@ -2441,27 +2451,39 @@ body.index-directory-resizing .index-directory-workspace {
 .mcq-setup input{width:74px}
 
 #mcq-start{
-    height:28px;
+    height:34px;
     padding:0 12px;
     border:1px solid #9db2a2;
     border-radius:6px;
     background:#e8eee8;
     color:#244a35;
     cursor:pointer;
+    white-space:nowrap;
 }
 
 .mcq-timer-display{
     margin-left:auto;
     color:#66736b;
     font:700 12px Arial,sans-serif;
+    white-space:nowrap;
 }
 
 .mcq-workspace{
     display:grid;
-    grid-template-columns:minmax(0,1fr) 285px;
+    grid-template-columns:minmax(0,1fr) 300px;
     gap:12px;
-    min-height:calc(100vh - 180px);
+    min-height:100vh;
     align-items:stretch;
+    transition:grid-template-columns .2s ease;
+}
+
+.mcq-workspace.navigator-collapsed{
+    grid-template-columns:minmax(0,1fr) 48px;
+}
+
+.mcq-workspace.navigator-collapsed .mcq-navigator{
+    width:48px;
+    justify-self:end;
 }
 
 .mcq-question-area{
@@ -2956,38 +2978,16 @@ body.index-directory-resizing .index-directory-workspace {
 }
 
 .mcq-page .app-header{
-    height:62px;
-    padding:10px 20px;
-    align-items:center;
     background:#fdfdf8;
     border-bottom:1px solid #d8ddd2;
 }
 
-.mcq-page .app-header h1{
-    font-size:28px;
-    color:#26332b;
-}
-
-#mcq-page-root{
-    padding:12px 14px 20px;
-    min-height:calc(100vh - 62px);
-}
-
-/* Settings become a compact exam toolbar. */
+/* Settings toolbar colors (sizing lives in STEP 32 above). */
 .mcq-setup{
-    position:relative;
-    min-height:54px;
-    box-sizing:border-box;
-    padding:8px 12px;
-    gap:10px;
-    border-radius:5px;
     background:#fdfdf8;
-    border-color:#d8ddd2;
 }
 
 .mcq-setup-title{
-    width:auto;
-    margin-right:6px;
     color:#55695c;
 }
 
@@ -3034,13 +3034,8 @@ body.index-directory-resizing .index-directory-workspace {
     padding:2px 7px;
 }
 
-/* Main exam area: much larger question text and options. */
-.mcq-workspace{
-    grid-template-columns:minmax(0,1fr) 300px;
-    gap:10px;
-    min-height:calc(100vh - 155px);
-}
-
+/* Main exam area: much larger question text and options.
+   (grid/sizing lives in STEP 32 above; only colors here.) */
 .mcq-question-area{
     border-radius:5px;
     background:#fff;
@@ -3152,22 +3147,25 @@ body.index-directory-resizing .index-directory-workspace {
 }
 
 @media(max-width:700px){
+    .mcq-page .app-header{
+        flex-direction:column;
+        align-items:stretch;
+    }
+    .mcq-title-col{
+        border-right:0;
+        border-bottom:1px solid #e2e7e0;
+        padding:10px 16px;
+    }
     .mcq-display-controls{
         margin-left:0;
-    }
-    .mcq-setup{
-        flex-wrap:wrap;
     }
     .mcq-workspace{
         grid-template-columns:1fr 245px;
     }
 }
 
-/* STEP 35 — RIGHT NAVIGATOR COLLAPSES TO THE RIGHT EDGE */
-.mcq-workspace{
-    grid-template-columns:minmax(0,1fr) 300px;
-}
-
+/* STEP 35 — RIGHT NAVIGATOR COLLAPSES TO THE RIGHT EDGE
+   (grid-template-columns lives in STEP 32 above) */
 .mcq-navigator{
     justify-self:stretch;
 }
@@ -3199,21 +3197,9 @@ body.index-directory-resizing .index-directory-workspace {
 
 /* =========================================================
    STEP 36 — COLLAPSE GIVES THE QUESTION AREA THE SPACE
+   (grid-template-columns + .navigator-collapsed variant live in
+   STEP 32 above)
    ========================================================= */
-
-.mcq-workspace{
-    grid-template-columns:minmax(0,1fr) 300px;
-    transition:grid-template-columns .2s ease;
-}
-
-.mcq-workspace.navigator-collapsed{
-    grid-template-columns:minmax(0,1fr) 48px;
-}
-
-.mcq-workspace.navigator-collapsed .mcq-navigator{
-    width:48px;
-    justify-self:end;
-}
 
 /* Darker four-sided panel boundaries */
 .mcq-question-area,
@@ -3230,9 +3216,8 @@ body.index-directory-resizing .index-directory-workspace {
     outline:1px solid rgba(49,95,76,.05);
 }
 
-.mcq-setup{
-    border:1px solid #9aab93;
-    box-shadow:0 0 0 1px rgba(49,95,76,.06);
+.mcq-title-col{
+    border-right:1px solid #9aab93;
 }
 
 .mcq-page .app-header{
