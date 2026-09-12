@@ -2356,66 +2356,52 @@ body.index-directory-resizing .index-directory-workspace {
 
 /* =========================================================
    STEP 32 — MCQ TWO-PANEL PRACTICE INTERFACE
+   Reuses the SAME shell as index.html / index-directory.html:
+   .app-header (shared, 92px, defined once near the top of this file)
+   + .app-shell content area sized to exactly fill the rest of the
+   viewport + .app-footer. Do not give .app-header or its h1 a new
+   height/padding here — any future header tweaks belong in that one
+   shared rule so every page stays in sync.
    ========================================================= */
 
 .mcq-page{
     margin:0;
     min-height:100vh;
-    background:#f0f3ed;
+    background:#eef1e9;
     color:#26332b;
     font-family:Arial,sans-serif;
+    --mcq-font-scale:1;
 }
 
-/* Header row: a narrow title column on the left, and the settings
-   toolbar filling the rest — the toolbar scrolls horizontally so new
-   controls can be added later without breaking the layout. */
 .mcq-page .app-header{
-    height:auto;
-    min-height:76px;
-    box-sizing:border-box;
-    padding:0;
-    display:flex;
-    align-items:stretch;
-    background:#fff;
-    border-bottom:1px solid #d7ddd6;
-}
-
-.mcq-title-col{
-    flex:none;
-    display:flex;
-    align-items:center;
-    padding:14px 24px;
-    border-right:1px solid #e2e7e0;
+    background:#fdfdf8;
+    border-bottom:1px solid #9aab93;
 }
 
 .mcq-page .app-header h1{
-    margin:0;
-    white-space:nowrap;
     font-family:Georgia,serif;
-    font-size:28px;
-    font-weight:400;
-    line-height:1.1;
     color:#26332b;
 }
 
-#mcq-page-root{
-    min-height:calc(100vh - 76px);
-    box-sizing:border-box;
-    padding:14px 16px 20px;
-}
-
+/* Settings toolbar: sits in the header's second row (same slot as the
+   main page's subject strip). Scrolls horizontally so more controls
+   can be added later without ever needing to wrap or clip. */
 .mcq-setup{
     position:relative;
-    flex:1 1 auto;
-    min-width:0;
+    width:100%;
+    height:34px;
+    min-height:34px;
+    margin:3px 0 0;
     display:flex;
     align-items:center;
-    gap:10px;
+    gap:12px;
     flex-wrap:nowrap;
     overflow-x:auto;
     overflow-y:hidden;
-    padding:14px 16px;
-    background:#fff;
+}
+
+.mcq-page .app-shell{
+    padding:16px 16px 20px;
 }
 
 .mcq-setup > *{
@@ -2425,7 +2411,7 @@ body.index-directory-resizing .index-directory-workspace {
 .mcq-setup-title{
     width:auto;
     margin-right:6px;
-    color:#657168;
+    color:#55695c;
     font:700 10px Arial,sans-serif;
     letter-spacing:.08em;
 }
@@ -2434,45 +2420,94 @@ body.index-directory-resizing .index-directory-workspace {
     display:flex;
     align-items:center;
     gap:5px;
-    color:#657168;
+    color:#55695c;
     font-size:11px;
 }
 
 .mcq-setup select,
 .mcq-setup input{
-    height:34px;
+    height:28px;
     box-sizing:border-box;
-    border:1px solid #cbd4cb;
+    border:1px solid #c9d2c5;
     border-radius:5px;
     background:#fff;
+    color:#2c3b2f;
     padding:3px 7px;
 }
 
-.mcq-setup input{width:74px}
+.mcq-setup input{width:64px}
 
 #mcq-start{
-    height:34px;
+    height:28px;
     padding:0 12px;
-    border:1px solid #9db2a2;
+    border:1px solid #7fa08c;
     border-radius:6px;
-    background:#e8eee8;
-    color:#244a35;
+    background:#e4ece4;
+    color:#1f4a37;
     cursor:pointer;
     white-space:nowrap;
 }
 
+#mcq-start:hover{
+    background:#d6e3d6;
+}
+
 .mcq-timer-display{
     margin-left:auto;
-    color:#66736b;
+    color:#56685a;
     font:700 12px Arial,sans-serif;
     white-space:nowrap;
+}
+
+/* Text-size / language controls inside the toolbar. */
+.mcq-display-controls{
+    display:flex;
+    align-items:center;
+    gap:5px;
+    color:#55695c;
+    font:11px Arial,sans-serif;
+}
+
+.mcq-display-label{
+    margin-right:2px;
+    font-weight:700;
+}
+
+.mcq-display-controls button{
+    min-width:31px;
+    height:27px;
+    padding:0 7px;
+    border:1px solid #c9d2c5;
+    border-radius:4px;
+    background:#fff;
+    color:#36566c;
+    cursor:pointer;
+    font-weight:700;
+}
+
+.mcq-display-controls button:hover{
+    background:#e4ece4;
+}
+
+.mcq-language-label{
+    margin-left:8px;
+}
+
+#mcq-language{
+    height:27px;
+    border:1px solid #c9d2c5;
+    border-radius:4px;
+    background:#fff;
+    color:#36566c;
+    padding:2px 7px;
 }
 
 .mcq-workspace{
     display:grid;
     grid-template-columns:minmax(0,1fr) 300px;
     gap:12px;
-    min-height:100vh;
+    height:calc(100vh - 92px);
+    overflow:hidden;
     align-items:stretch;
     transition:grid-template-columns .2s ease;
 }
@@ -2517,6 +2552,21 @@ body.index-directory-resizing .index-directory-workspace {
     overflow-y:auto;
 }
 
+.mcq-question-footer{
+    flex:none;
+    padding:12px 24px;
+    border-top:1px solid #d8ded8;
+    background:#fdfdf8;
+}
+
+.mcq-question-footer:empty{
+    display:none;
+}
+
+.mcq-question-footer .mcq-navigation-buttons{
+    margin-top:0;
+}
+
 .mcq-card-large{
     max-width:none;
     margin:0;
@@ -2547,15 +2597,16 @@ body.index-directory-resizing .index-directory-workspace {
     box-sizing:border-box;
     padding:12px 14px;
     text-align:left;
-    border:1px solid #d0d8d0;
+    border:1px solid transparent;
     border-radius:7px;
-    background:#fff;
+    background:transparent;
     color:#354239;
     cursor:pointer;
     font:13px/1.4 Arial,sans-serif;
     display:flex;
     align-items:center;
     gap:11px;
+    transition:background .12s ease,border-color .12s ease;
 }
 
 .mcq-radio-circle{
@@ -2606,14 +2657,8 @@ body.index-directory-resizing .index-directory-workspace {
     padding-top:0;
 }
 
-.mcq-large-option:hover{
-    background:#f4f6f2;
-}
-
-.mcq-large-option.selected{
-    border-color:#91a999;
-    background:#e9f0e9;
-}
+/* Hover/selected colors for .mcq-large-option live further down
+   (the darker STEP 33 theme values win anyway). */
 
 .mcq-feedback{
     margin-top:14px;
@@ -2830,54 +2875,29 @@ body.index-directory-resizing .index-directory-workspace {
    STEP 33 — DISTINCT BLUISH MCQ THEME
    ========================================================= */
 
-.mcq-page{
-    background:#eef1e9;
-    color:#26332b;
-}
+/* .mcq-page / .app-header / #mcq-page-root / .mcq-setup / #mcq-start
+   colors now live in STEP 32 above — only the selectors STEP 32
+   doesn't cover remain here. */
 
-.mcq-page .app-header{
-    background:#fdfdf8;
-    border-bottom-color:#d8ddd2;
-}
-
-.mcq-page #mcq-page-root{
-    background:#eef1e9;
-}
-
-.mcq-setup,
 .mcq-question-area,
 .mcq-navigator{
     background:#fdfdf8;
     border-color:#d8ddd2;
 }
 
-.mcq-setup-title,
 .mcq-view-title,
 .mcq-nav-title{
     color:#55695c;
 }
 
-.mcq-setup select,
-.mcq-setup input{
-    border-color:#c9d2c5;
-    background:#fff;
-    color:#2c3b2f;
-}
-
-#mcq-start,
 .mcq-submit{
     background:#e4ece4;
     border-color:#7fa08c;
     color:#1f4a37;
 }
 
-#mcq-start:hover,
 .mcq-submit:hover{
     background:#d6e3d6;
-}
-
-.mcq-timer-display{
-    color:#56685a;
 }
 
 .mcq-question-number{
@@ -2889,8 +2909,6 @@ body.index-directory-resizing .index-directory-workspace {
 }
 
 .mcq-large-option{
-    background:#fff;
-    border-color:#cfd8cb;
     color:#2c3b2f;
 }
 
@@ -2972,67 +2990,8 @@ body.index-directory-resizing .index-directory-workspace {
    STEP 34 — EXAM-STYLE MCQ REFINEMENT
    ========================================================= */
 
-.mcq-page{
-    --mcq-font-scale:1;
-    background:#eef1e9;
-}
-
-.mcq-page .app-header{
-    background:#fdfdf8;
-    border-bottom:1px solid #d8ddd2;
-}
-
-/* Settings toolbar colors (sizing lives in STEP 32 above). */
-.mcq-setup{
-    background:#fdfdf8;
-}
-
-.mcq-setup-title{
-    color:#55695c;
-}
-
-.mcq-display-controls{
-    margin-left:auto;
-    display:flex;
-    align-items:center;
-    gap:5px;
-    color:#55695c;
-    font:11px Arial,sans-serif;
-}
-
-.mcq-display-label{
-    margin-right:2px;
-    font-weight:700;
-}
-
-.mcq-display-controls button{
-    min-width:31px;
-    height:27px;
-    padding:0 7px;
-    border:1px solid #c9d2c5;
-    border-radius:4px;
-    background:#fff;
-    color:#36566c;
-    cursor:pointer;
-    font-weight:700;
-}
-
-.mcq-display-controls button:hover{
-    background:#e4ece4;
-}
-
-.mcq-language-label{
-    margin-left:8px;
-}
-
-#mcq-language{
-    height:27px;
-    border:1px solid #c9d2c5;
-    border-radius:4px;
-    background:#fff;
-    color:#36566c;
-    padding:2px 7px;
-}
+/* .mcq-page / .app-header / .mcq-setup / .mcq-setup-title /
+   .mcq-display-controls / #mcq-language now live in STEP 32 above. */
 
 /* Main exam area: much larger question text and options.
    (grid/sizing lives in STEP 32 above; only colors here.) */
@@ -3147,18 +3106,6 @@ body.index-directory-resizing .index-directory-workspace {
 }
 
 @media(max-width:700px){
-    .mcq-page .app-header{
-        flex-direction:column;
-        align-items:stretch;
-    }
-    .mcq-title-col{
-        border-right:0;
-        border-bottom:1px solid #e2e7e0;
-        padding:10px 16px;
-    }
-    .mcq-display-controls{
-        margin-left:0;
-    }
     .mcq-workspace{
         grid-template-columns:1fr 245px;
     }
@@ -3216,13 +3163,7 @@ body.index-directory-resizing .index-directory-workspace {
     outline:1px solid rgba(49,95,76,.05);
 }
 
-.mcq-title-col{
-    border-right:1px solid #9aab93;
-}
-
-.mcq-page .app-header{
-    border-bottom:1px solid #9aab93;
-}
+/* .mcq-title-col / .app-header border colors now live in STEP 32 above. */
 
 /* Make the collapsed right strip clearly belong to the right panel. */
 .mcq-workspace.navigator-collapsed .mcq-nav-header{
@@ -3621,6 +3562,24 @@ button.danger:hover,.mcq-collection-link.danger:hover{background:#fdeceb}
 .mcq-collection-notes { margin:0 0 12px; }
 .mcq-collection-note { display:flex; flex-wrap:wrap; align-items:center; gap:7px; padding:7px 10px; margin-bottom:6px; border:1px solid #d8dfd8; border-radius:7px; font-size:12px; }
 .mcq-collection-link { border:0; background:transparent; padding:0; cursor:pointer; text-decoration:underline; font:inherit; }
+
+.mcq-paper-sources-popover{
+    position:fixed;
+    z-index:200;
+    background:#fff;
+    border:1px solid #d8dfd8;
+    border-radius:8px;
+    box-shadow:0 8px 22px rgba(0,0,0,.14);
+    padding:8px;
+    min-width:300px;
+    max-width:440px;
+}
+.mcq-paper-sources-popover .mcq-collection-note{
+    margin-bottom:0;
+}
+.mcq-paper-sources-popover .mcq-collection-note + .mcq-collection-note{
+    margin-top:6px;
+}
 
 /* =========================================================
    ALPHA-PLUS — INDEX TERMS: verify-after-write warning

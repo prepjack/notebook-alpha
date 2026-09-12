@@ -377,26 +377,83 @@ function renderMcqCollectionNotes() {
         document.getElementById("mcq-delete-collection")?.addEventListener("click", () =>
             deleteMcqCollectionPermanently(currentCollectionView.id, info?.title || currentCollectionView.id)
         );
+        renderMcqPaperSourcesToolbar([]);
         return;
     }
 
+    host.innerHTML = "";
     const counts = new Map();
     allLoadedMcqs.forEach(mcq => {
         const id = String(mcq.collection_id_ref || "").trim();
         if (id) counts.set(id, (counts.get(id) || 0) + 1);
     });
     const shared = Array.from(counts.entries()).filter(([, count]) => count > 1);
-    host.innerHTML = shared.map(([id]) => {
+    renderMcqPaperSourcesToolbar(shared);
+}
+
+// Paper-source links used to live as a banner above every question. They
+// now live behind a toolbar button (hidden when there's nothing to show)
+// so the question area stays uncluttered — see renderMcqCollectionNotes.
+function renderMcqPaperSourcesToolbar(shared) {
+    const btn = document.getElementById("mcq-paper-sources-btn");
+    const popover = document.getElementById("mcq-paper-sources-popover");
+    if (!btn || !popover) return;
+
+    if (!shared.length) {
+        btn.hidden = true;
+        popover.hidden = true;
+        popover.innerHTML = "";
+        return;
+    }
+
+    btn.hidden = false;
+    popover.innerHTML = shared.map(([id]) => {
         const info = getMcqCollectionInfo(id);
         return `<div class="mcq-collection-note">
             This topic includes questions from: <strong>${escapeHtml(info?.title || id)}</strong>
             <button type="button" class="mcq-collection-link" data-collection-id="${escapeHtml(id)}">View full paper in order</button>
         </div>`;
     }).join("");
-    host.querySelectorAll("[data-collection-id]").forEach(button => {
-        button.addEventListener("click", () => loadFullMcqCollection(button.dataset.collectionId));
+    popover.querySelectorAll("[data-collection-id]").forEach(button => {
+        button.addEventListener("click", () => {
+            popover.hidden = true;
+            loadFullMcqCollection(button.dataset.collectionId);
+        });
     });
 }
+
+function positionMcqPaperSourcesPopover() {
+    const btn = document.getElementById("mcq-paper-sources-btn");
+    const popover = document.getElementById("mcq-paper-sources-popover");
+    if (!btn || !popover) return;
+    const rect = btn.getBoundingClientRect();
+    popover.style.top = `${rect.bottom + 6}px`;
+    popover.style.left = `${Math.max(8, rect.left)}px`;
+}
+
+document.getElementById("mcq-paper-sources-btn")?.addEventListener("click", () => {
+    const popover = document.getElementById("mcq-paper-sources-popover");
+    if (!popover) return;
+    if (popover.hidden) {
+        positionMcqPaperSourcesPopover();
+        popover.hidden = false;
+    } else {
+        popover.hidden = true;
+    }
+});
+
+document.addEventListener("click", event => {
+    const popover = document.getElementById("mcq-paper-sources-popover");
+    const btn = document.getElementById("mcq-paper-sources-btn");
+    if (!popover || popover.hidden) return;
+    if (event.target === btn || popover.contains(event.target)) return;
+    popover.hidden = true;
+});
+
+window.addEventListener("resize", () => {
+    const popover = document.getElementById("mcq-paper-sources-popover");
+    if (popover && !popover.hidden) positionMcqPaperSourcesPopover();
+});
 
 let currentCollectionViewBackup = [];
 let currentCollectionViewApiBackup = null;
@@ -483,19 +540,13 @@ function renderMcqView() {
     if (!currentMcqs.length) {
         questionArea.innerHTML = "<p>No MCQs added for this topic yet.</p>";
         grid.innerHTML = "";
+        const emptyFooter = document.getElementById("mcq-question-footer");
+        if (emptyFooter) emptyFooter.innerHTML = "";
         return;
     }
 
     const totalLabel = document.getElementById("mcq-nav-total");
     if (totalLabel) totalLabel.textContent = currentMcqs.length;
-
-    // Keep the question-panel header synchronized with the currently shown question.
-    const currentQuestionLabel = document.getElementById("mcq-current-question-label");
-    if (currentQuestionLabel) {
-        currentQuestionLabel.textContent = mcqViewMode === "all"
-            ? `ALL QUESTIONS (${currentMcqs.length})`
-            : `QUESTION ${currentMcqIndex + 1} OF ${currentMcqs.length}`;
-    }
 
     grid.innerHTML = currentMcqs.map((mcq, index) => `
         <button
@@ -524,6 +575,8 @@ function renderMcqView() {
     // immediate correct/incorrect feedback for that question, and
     // re-renders so the right-panel grid stays in sync.
     if (mcqViewMode === "all") {
+        const footer = document.getElementById("mcq-question-footer");
+        if (footer) footer.innerHTML = "";
         questionArea.innerHTML = `
             <div class="mcq-all-list">
                 ${currentMcqs.map((q, i) => {
@@ -596,7 +649,8 @@ function renderMcqView() {
 
     questionArea.innerHTML = `
         <div class="mcq-card-large">
-            <div style="display:flex;justify-content:flex-end;align-items:center;margin-bottom:12px;">
+            <div class="mcq-question-number mcq-question-heading">
+                <span>Question ${currentMcqIndex + 1} of ${currentMcqs.length}</span>
                 <button type="button" class="mcq-edit-meta" id="mcq-edit-meta" title="Edit question metadata" aria-label="Edit question metadata">✏️</button>
             </div>
 
@@ -625,7 +679,12 @@ function renderMcqView() {
                     ${escapeHtml(mcq.explanation || "")}
                 </div>
             ` : ""}
+        </div>
+    `;
 
+    const footer = document.getElementById("mcq-question-footer");
+    if (footer) {
+        footer.innerHTML = `
             <div class="mcq-navigation-buttons">
                 <div class="mcq-nav-left-group">
                     <button id="mcq-prev" type="button">← Previous</button>
@@ -637,8 +696,8 @@ function renderMcqView() {
                 </div>
                 <button id="mcq-next" type="button">Next →</button>
             </div>
-        </div>
-    `;
+        `;
+    }
 
     document.getElementById("mcq-feedback-toggle")?.addEventListener("click", () => {
         if (expandedExplanations.has(currentMcqIndex)) {
@@ -660,14 +719,14 @@ function renderMcqView() {
         openMcqMetaModal(mcq);
     });
 
-    document.getElementById("mcq-prev").addEventListener("click", () => {
+    document.getElementById("mcq-prev")?.addEventListener("click", () => {
         if (currentMcqIndex > 0) {
             currentMcqIndex--;
             renderMcqView();
         }
     });
 
-    document.getElementById("mcq-next").addEventListener("click", () => {
+    document.getElementById("mcq-next")?.addEventListener("click", () => {
         if (currentMcqIndex < currentMcqs.length - 1) {
             currentMcqIndex++;
             renderMcqView();

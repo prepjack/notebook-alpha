@@ -10,14 +10,13 @@
 <body class="mcq-page">
 
     <header class="app-header">
-        <div class="mcq-title-col">
-            <h1>MCQ Practice</h1>
-        </div>
+        <h1>MCQ Practice</h1>
 
         <div class="mcq-setup">
             <div class="mcq-setup-title">
                 <span>ATTEMPT SETTINGS</span>
                 <button id="mcq-add-open" type="button" class="content-action">➕ Add MCQs</button>
+                <button id="mcq-paper-sources-btn" type="button" class="content-action" hidden>📄 Paper Sources</button>
             </div>
         <div class="mcq-display-controls" aria-label="Display controls">
             <span class="mcq-display-label">Text</span>
@@ -57,7 +56,9 @@
         </div>
     </header>
 
-    <main id="mcq-page-root">
+    <div id="mcq-paper-sources-popover" class="mcq-paper-sources-popover" hidden></div>
+
+    <main id="mcq-page-root" class="app-shell">
 
         <div class="mcq-workspace">
 
@@ -71,6 +72,7 @@
                 </div>
                 <div id="mcq-collection-notes"></div>
                 <div id="mcq-question"></div>
+                <div id="mcq-question-footer" class="mcq-question-footer"></div>
             </div>
 
             <aside id="mcq-navigator" class="mcq-navigator">
