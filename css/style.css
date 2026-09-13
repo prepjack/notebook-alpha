@@ -720,7 +720,6 @@ body.resizing-panels .workspace {
 .right-panel-tab{padding:7px 10px;border:0;border-radius:6px;background:transparent;color:#6a746d;cursor:pointer;font:700 10px Arial,sans-serif;letter-spacing:.06em}
 .right-panel-tab:hover{background:#f1f4ee}
 .right-panel-tab.active{background:var(--green-soft);color:var(--green)}
-.right-tab-view{}
 
 /* =========================================================
    RIGHT PANEL — MCQ TAB (embedded) + "open in new tab" action
@@ -3516,7 +3515,6 @@ body.index-directory-resizing .index-directory-workspace {
 .mcq-guide-modal { width: min(480px, 92vw); }
 .mcq-guide-list { margin: 10px 0 0; padding-left: 18px; list-style: none; }
 .mcq-guide-list li { margin: 0 0 12px; font: 11px/1.55 Arial, sans-serif; color: #354239; }
-.mcq-guide-list li strong { /* color now comes from the required .mcq-num-red/yellow/green class */ }
 .mcq-tag-chip {
     display:inline-flex; align-items:center; gap:5px; padding:4px 7px;
     border:1px solid var(--line); border-radius:999px; background:#f4f6f2;
