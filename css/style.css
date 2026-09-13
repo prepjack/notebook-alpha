@@ -3607,3 +3607,16 @@ button.danger:hover,.mcq-collection-link.danger:hover{background:#fdeceb}
     from { opacity: 0; transform: translateY(6px); }
     to { opacity: 1; transform: translateY(0); }
 }
+
+/* SPEED FIX 2 (support) — freshness confirmation: the same toast
+   turns green and fades itself out once live data replaces the
+   cached placeholder. See hideStaleDataNotice() in js/app.js. */
+.index-sync-warning--success {
+    background: #eaf7ee;
+    border-color: #b9e2c3;
+    color: #1f6b3a;
+    animation: index-sync-warning-out 0.4s ease-in 1.1s forwards;
+}
+@keyframes index-sync-warning-out {
+    to { opacity: 0; transform: translateY(6px); }
+}

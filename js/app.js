@@ -2338,6 +2338,56 @@ function getNodeLevelLabel(node, depth) {
     return "Subtopic";
 }
 
+// SPEED FIX 2 (support) — small corner toast shown only while the tree
+// on screen is the localStorage copy (or still loading with no copy at
+// all), not the live server data yet. Same visual pattern as the
+// existing .index-sync-warning toast.
+function showStaleDataNotice(noCache = false) {
+    hideStaleDataNotice("failed"); // silently clear any old instance first
+    const el = document.createElement("div");
+    el.id = "study-tree-stale-notice";
+    el.className = "index-sync-warning";
+    el.textContent = noCache
+        ? "Still loading…"
+        : "Showing your last saved copy — updating…";
+    document.body.appendChild(el);
+}
+
+// Called once, several seconds in, only if the fetch is STILL not back —
+// tells slow-connection users this is their internet, not a broken page.
+function markStaleDataNoticeAsSlow() {
+    const el = document.getElementById("study-tree-stale-notice");
+    if (!el) return;
+    el.textContent = "Your connection looks slow — still fetching fresh data…";
+}
+
+// mode: "success" (default) | "offline" | "failed"
+//   success — placeholder replaced by live data; confirm and fade out
+//   offline — fetch failed but a saved copy is on screen; say so, then fade
+//   failed  — fetch failed and there was nothing to fall back to; just clear
+function hideStaleDataNotice(mode = "success") {
+    const el = document.getElementById("study-tree-stale-notice");
+    if (!el) return; // no notice was ever shown — this load was already fresh, nothing to confirm
+
+    if (mode === "offline") {
+        el.textContent = "Couldn't reach the server — showing your last saved copy.";
+        setTimeout(() => el.remove(), 4000);
+        return;
+    }
+
+    if (mode === "failed") {
+        el.remove();
+        return;
+    }
+
+    // Confirm the placeholder has been replaced with live data. Turns
+    // green and fades itself out — no click, no layout shift, and it
+    // only ever appears on the loads where a cached copy was shown.
+    el.textContent = "✓ Up to date";
+    el.classList.add("index-sync-warning--success");
+    setTimeout(() => el.remove(), 1500);
+}
+
 function renderStudyTree(data) {
     renderSubjectStrip();
     studyTreeElement.innerHTML = "";
@@ -2477,6 +2527,20 @@ document.getElementById("index-open-newtab")?.addEventListener("click", () => {
 // never see a term synced during THIS session (window.__studyData was
 // only ever populated once, at app start). "This Topic" is unaffected
 // either way since it already does its own always-live fetch.
+// Local-only rebuild: rebuilds the in-memory index registry and, if the
+// glossary is currently open, re-renders it — using whatever is already
+// in window.__studyData.indexTerms/indexLinks. No network call here;
+// see invalidateIndexCache() below for the version that also re-fetches.
+function applyIndexRegistryUpdate() {
+    invalidateIndexRegistry();
+    // Full A-Z Glossary is only actually visible while that sub-tab is
+    // active — re-render it now so an open glossary updates live too,
+    // not just on the next manual tab switch.
+    if (typeof indexTabScope !== "undefined" && indexTabScope === "global") {
+        renderIndexAZList(document.getElementById("index-search-input")?.value.trim().toLowerCase() || "");
+    }
+}
+
 async function invalidateIndexCache() {
     try {
         const url = `${GOOGLE_SHEET_API}?action=get_index_registry`;
@@ -2490,13 +2554,7 @@ async function invalidateIndexCache() {
     } catch (error) {
         console.error("Refreshing index registry failed:", error);
     }
-    invalidateIndexRegistry();
-    // Full A-Z Glossary is only actually visible while that sub-tab is
-    // active — re-render it now so an open glossary updates live too,
-    // not just on the next manual tab switch.
-    if (typeof indexTabScope !== "undefined" && indexTabScope === "global") {
-        renderIndexAZList(document.getElementById("index-search-input")?.value.trim().toLowerCase() || "");
-    }
+    applyIndexRegistryUpdate();
 }
 
 function renderIndexAZList(filterText = "") {
@@ -3296,23 +3354,90 @@ function renderIndexSuggestions(query) {
     suggestions.hidden = false;
 }
 
-async function startApp() {
-    let data = await loadStudyData();
+const STUDY_DATA_CACHE_KEY = "study-notebook-alpha-content";
+const CACHE_PLACEHOLDER_DELAY_MS = 400;   // don't flash any notice on fast connections
+const SLOW_CONNECTION_NOTICE_MS = 6000;   // reassure the user only if it's genuinely slow
 
-    if (!data) return;
+async function startApp() {
+    // SPEED FIX 1 (revised) — loadStudyData()'s response already includes
+    // index_terms/index_links (see convertApiDataToStudyData() above and
+    // Code.gs's default doGet branch), so a separate get_index_registry
+    // call here was pure duplication: two Apps Script executions hitting
+    // the same spreadsheet at once, firing one full request and racing
+    // it against a second one made the SECOND one queue behind the first
+    // (Apps Script serializes concurrent executions against the same
+    // spreadsheet) — that's what turned a normally ~2s call into the
+    // 28s seen in testing, regardless of how few index terms existed.
+    // get_index_registry itself isn't being removed — invalidateIndexCache()
+    // below is still exactly what runs later, mid-session, right after a
+    // term is added/renamed/unlinked, when a genuinely fresh re-fetch
+    // (not just what's already in hand) is actually needed.
+    const freshDataPromise = loadStudyData();
+
+    let cachedData = null;
+    try {
+        const raw = localStorage.getItem(STUDY_DATA_CACHE_KEY);
+        if (raw) cachedData = JSON.parse(raw);
+    } catch (_) {
+        cachedData = null; // corrupt/old cache — ignore, network will fill in
+    }
+
+    let settled = false;
+    freshDataPromise.then(() => { settled = true; }, () => { settled = true; });
+
+    // SPEED FIX 2 — wait a short beat before showing any placeholder or
+    // notice. On a fast connection the real response is often already
+    // back within a few hundred ms, so most users never see anything —
+    // no flash, no flicker. Only connections slower than this actually
+    // get the placeholder tree + "updating…" toast.
+    await new Promise(resolve => setTimeout(resolve, CACHE_PLACEHOLDER_DELAY_MS));
+
+    if (!settled) {
+        if (cachedData && cachedData.subjects) {
+            renderStudyTree(cachedData);
+            window.__studyData = cachedData;
+            applyIndexRegistryUpdate();
+            showStaleDataNotice();
+        } else {
+            // No saved copy AND still not back after 400ms — say something
+            // rather than leaving a blank tree with zero explanation.
+            showStaleDataNotice(/* noCache */ true);
+        }
+
+        // Only fires if STILL not back several seconds later — this is
+        // the "internet speed" case specifically: normal latency doesn't
+        // reach this, only an actually slow connection does.
+        setTimeout(() => {
+            if (!settled) markStaleDataNoticeAsSlow();
+        }, SLOW_CONNECTION_NOTICE_MS);
+    }
+
+    let data = await freshDataPromise;
+
+    if (!data) {
+        if (cachedData && cachedData.subjects) {
+            hideStaleDataNotice("offline");
+            data = cachedData;
+        } else {
+            hideStaleDataNotice("failed");
+            return;
+        }
+    } else {
+        try {
+            localStorage.setItem(STUDY_DATA_CACHE_KEY, JSON.stringify(data));
+        } catch (_) {
+            // localStorage full/unavailable — caching is a nice-to-have,
+            // never let it block the app from loading fresh data.
+        }
+        renderStudyTree(data);
+        hideStaleDataNotice("success");
+    }
 
     window.__studyData = data;
+    window.__studyData.indexTerms = window.__studyData.indexTerms || [];
+    window.__studyData.indexLinks = window.__studyData.indexLinks || [];
+    applyIndexRegistryUpdate();
 
-    /*
-    const localContent = localStorage.getItem("study-notebook-alpha-content");
-    if(localContent){
-        try{ window.__studyData=JSON.parse(localContent); }catch(_){}
-    } */
-
-
-    data = window.__studyData;
-    renderStudyTree(data);
-    invalidateIndexCache();
     initRightPanelTabs();
     initIndexSearch();
     initIndexScopeToggle();
