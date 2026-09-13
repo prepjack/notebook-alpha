@@ -2389,6 +2389,11 @@ function hideStaleDataNotice(mode = "success") {
 }
 
 function renderStudyTree(data) {
+    // Keep shared runtime data in sync before rendering the subject strip.
+    // renderSubjectStrip() reads window.__studyData.subjects.
+    if (!data || typeof data !== "object") return;
+    window.__studyData = data;
+
     renderSubjectStrip();
     studyTreeElement.innerHTML = "";
 
