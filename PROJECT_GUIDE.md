@@ -124,7 +124,30 @@ The MCQ page has:
 - attempted/marked questions are green;
 - bluish theme distinct from the main notebook;
 - A− / A+ text-size controls;
-- English/Hindi selector is currently a UI placeholder; actual translation is intentionally deferred.
+- a real language filter/dropdown (`js/mcq.js` `MCQ_LANGUAGES` — English
+  + all 22 Eighth Schedule languages), populated from whatever
+  `@language` values actually exist in the loaded topic's MCQs — this
+  supersedes an earlier placeholder note in this file; translation
+  itself is authored per question via `@language`, not machine-translated.
+
+### Language-linking (question pairs shown as one question with a toggle)
+When the same question is authored in 2+ languages (e.g. via the "How
+many languages?" multi-language AI-prompt flow in the Add MCQ popup),
+each language's question can carry a matching `@group: <id>` tag
+(`js/mcq-parse.js`) so they resolve to one shared `question_group_id`.
+The practice page (`js/mcq.js` `buildMcqSlots` / `activateSlotLanguage`)
+groups such rows into a single "slot" shown as ONE question with a
+small language-toggle pill row above it, instead of as separate
+questions — switching the pill swaps the displayed question/options/
+explanation in place without losing the answer already selected
+(tracked by slot position, not by row id). A question with no `@group`
+match, or only one language, behaves exactly as before (its own single
+slot, no toggle shown). This is additive/backward-compatible: existing
+single-language MCQs keep their original `mcq_id`; only a real 2+-member
+group gets a language-suffixed id (see the file header comment in
+`js/mcq-parse.js` for the exact resolution rules and the
+"MULTI-LANGUAGE INSTRUCTION" section of `buildMcqAiPrompt` in
+`js/mcq.js` for how the AI prompt asks for matching `@group` values).
 
 ## Important product direction
 The author publishes the initial/core structure and content. Users can extend the structure, maintain My Notes, add resources, and contribute content. The user is the actual builder of their personalized notebook while the author/community layer keeps shared content organized.

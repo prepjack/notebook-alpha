@@ -1153,6 +1153,40 @@ body.index-directory-resizing .index-directory-workspace {
     border-color:var(--green,#315f4c);
     color:#fff;
 }
+
+/* LANGUAGE-LINKING — toggle pills shown above a question that has
+   more than one language variant paired to it (see js/mcq.js
+   buildMcqSlots / activateSlotLanguage). Switching a pill swaps the
+   question/options/explanation shown in place without resetting the
+   answer already given, since the answer is tracked per slot index. */
+.mcq-lang-toggle{
+    display:flex;
+    flex-wrap:wrap;
+    gap:6px;
+    margin:0 0 12px;
+}
+
+.mcq-lang-pill{
+    padding:4px 10px;
+    border:1px solid #cbd5c7;
+    border-radius:999px;
+    background:#fff;
+    color:#3a5a44;
+    cursor:pointer;
+    font:700 10px Arial,sans-serif;
+    letter-spacing:.02em;
+}
+
+.mcq-lang-pill:hover{
+    background:#f1f5ef;
+    border-color:#a9bfae;
+}
+
+.mcq-lang-pill.active{
+    background:#315f4c;
+    border-color:#315f4c;
+    color:#fff;
+}
 .topic-diagrams{display:flex;flex-wrap:wrap;gap:12px;margin-top:8px}
 .topic-diagram-img{max-width:100%;width:280px;border:1px solid var(--line);border-radius:8px;cursor:zoom-in;background:#fff}
 .content-action.primary{border-color:#9bb2a2;background:var(--green-soft)}

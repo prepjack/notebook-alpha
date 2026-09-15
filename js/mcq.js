@@ -176,8 +176,73 @@ function mapMcqRow(row) {
         collection_id: row.collection_id || "",
         question_no: row.question_no ?? "",
         node_id: row.node_id || "",
+        question_group_id: row.question_group_id || "",
         warnings: row.warnings || []
     };
+}
+
+// LANGUAGE-LINKING — groups flat mapped rows into practice "slots".
+// A slot with a non-empty question_group_id shared by 2+ rows becomes
+// one slot holding several language variants (toggle-able); every
+// other row becomes its own single-variant slot, unchanged from the
+// old flat behaviour. Order follows first appearance in `rows`.
+function buildMcqSlots(rows) {
+    const order = [];
+    const byGroup = new Map();
+
+    (rows || []).forEach(row => {
+        const groupId = String(row.question_group_id || "").trim();
+        const langKey = row.language || "English";
+
+        if (groupId) {
+            let slot = byGroup.get(groupId);
+            if (!slot) {
+                slot = { group_id: groupId, variants: {}, languages: [] };
+                byGroup.set(groupId, slot);
+                order.push(slot);
+            }
+            // Safety net: if this language key is already taken in the
+            // group (almost always a missing @language tag upstream, so
+            // both variants defaulted to the same value), don't silently
+            // overwrite and lose the earlier variant — give this one a
+            // distinguishing label so both stay visible/toggle-able.
+            let finalKey = langKey;
+            let n = 2;
+            while (slot.variants[finalKey]) finalKey = `${langKey} (${n++})`;
+            slot.languages.push(finalKey);
+            slot.variants[finalKey] = row;
+        } else {
+            order.push({ group_id: "", variants: { [langKey]: row }, languages: [langKey] });
+        }
+    });
+
+    return order;
+}
+
+// Copies one variant's fields onto the slot's top level (question,
+// options, answer, explanation, id, tags, ...) so every existing bit
+// of render/result/report code that reads e.g. `mcq.question` keeps
+// working unchanged — the slot just also carries `languages` /
+// `activeLanguage` / `variants` / `group_id` for the toggle UI.
+function activateSlotLanguage(slot, preferredLang) {
+    const chosen = (preferredLang && slot.variants[preferredLang]) ? preferredLang : slot.languages[0];
+    Object.assign(slot, slot.variants[chosen]);
+    slot.activeLanguage = chosen;
+    return slot;
+}
+
+// Remembers which language was last shown for a given question group,
+// so re-filtering (tags, topic switch within the same session) doesn't
+// keep snapping a toggled question back to its first language. Reset
+// whenever the underlying topic/collection data changes.
+let mcqActiveLanguageByGroup = new Map();
+
+function setSlotLanguage(slotIndex, lang) {
+    const slot = currentMcqs[slotIndex];
+    if (!slot || !slot.variants[lang] || slot.activeLanguage === lang) return;
+    activateSlotLanguage(slot, lang);
+    if (slot.group_id) mcqActiveLanguageByGroup.set(slot.group_id, lang);
+    renderMcqView();
 }
 
 
@@ -369,6 +434,7 @@ function renderMcqCollectionNotes() {
             currentCollectionView = null;
             selectedMcqTags = new Set();
             selectedMcqLanguage = "";
+            mcqActiveLanguageByGroup = new Map();
             allLoadedMcqs = currentCollectionViewBackup.slice();
             mcqApiData = currentCollectionViewApiBackup;
             populateMcqPracticeFilters();
@@ -506,6 +572,7 @@ async function loadFullMcqCollection(collectionId) {
         currentCollectionView = { id: collectionId };
         selectedMcqTags = new Set();
         selectedMcqLanguage = "";
+        mcqActiveLanguageByGroup = new Map();
         populateMcqPracticeFilters();
         applyMcqPracticeFilters();
     } catch (error) {
@@ -515,17 +582,43 @@ async function loadFullMcqCollection(collectionId) {
 }
 
 function applyMcqPracticeFilters() {
-    let filtered = allLoadedMcqs.slice();
-    if (selectedMcqLanguage) {
-        filtered = filtered.filter(mcq => String(mcq.language || "").trim().toLowerCase() === selectedMcqLanguage.trim().toLowerCase());
-    }
+    let slots = buildMcqSlots(allLoadedMcqs);
+
+    // Tags — a slot passes if the UNION of tags across all its language
+    // variants covers every selected tag (a translator won't always
+    // repeat tags on every variant, so this avoids hiding a paired
+    // question just because one variant's tags cell is blank).
     if (selectedMcqTags.size) {
-        filtered = filtered.filter(mcq => {
-            const tags = new Set(String(mcq.tags || "").split(",").map(t => t.trim().toLowerCase()).filter(Boolean));
-            return Array.from(selectedMcqTags).every(tag => tags.has(tag.toLowerCase()));
+        slots = slots.filter(slot => {
+            const tagSet = new Set();
+            slot.languages.forEach(lang => {
+                String(slot.variants[lang].tags || "").split(",")
+                    .map(t => t.trim().toLowerCase()).filter(Boolean)
+                    .forEach(t => tagSet.add(t));
+            });
+            return Array.from(selectedMcqTags).every(tag => tagSet.has(tag.toLowerCase()));
         });
     }
-    currentMcqs = filtered;
+
+    // Language — a slot passes if selectedMcqLanguage is empty, OR it
+    // has a variant in that language (the OTHER variants of a paired
+    // slot stay reachable via the toggle, they just aren't what
+    // decides whether the slot shows up in this filtered list).
+    if (selectedMcqLanguage) {
+        slots = slots.filter(slot =>
+            slot.languages.some(lang => lang.trim().toLowerCase() === selectedMcqLanguage.trim().toLowerCase())
+        );
+    }
+
+    slots.forEach(slot => {
+        const matchingFilterLang = selectedMcqLanguage
+            ? slot.languages.find(lang => lang.trim().toLowerCase() === selectedMcqLanguage.trim().toLowerCase())
+            : null;
+        const remembered = slot.group_id ? mcqActiveLanguageByGroup.get(slot.group_id) : null;
+        activateSlotLanguage(slot, matchingFilterLang || remembered || slot.languages[0]);
+    });
+
+    currentMcqs = slots;
     currentMcqIndex = Math.min(currentMcqIndex, Math.max(0, currentMcqs.length - 1));
     resetAttemptState();
     populateMcqPracticeFilters();
@@ -589,6 +682,13 @@ function renderMcqView() {
                         <div class="mcq-question-number mcq-question-heading">
                             <span>Question ${i + 1} of ${currentMcqs.length}</span>
                         </div>
+                        ${q.languages.length > 1 ? `
+                            <div class="mcq-lang-toggle" role="group" aria-label="Question language">
+                                ${q.languages.map(lang => `
+                                    <button type="button" class="mcq-lang-pill ${lang === q.activeLanguage ? "active" : ""}" data-question-index="${i}" data-lang="${escapeHtml(lang)}">${escapeHtml(lang)}</button>
+                                `).join("")}
+                            </div>
+                        ` : ""}
                         <div class="mcq-question-text">${escapeHtml(q.question)}</div>
                         <div class="mcq-large-options">
                             ${q.options.map((option, oi) => `
@@ -641,6 +741,12 @@ function renderMcqView() {
             });
         });
 
+        questionArea.querySelectorAll(".mcq-all-item .mcq-lang-pill").forEach(button => {
+            button.addEventListener("click", () => {
+                setSlotLanguage(Number(button.dataset.questionIndex), button.dataset.lang);
+            });
+        });
+
         return;
     }
 
@@ -653,6 +759,14 @@ function renderMcqView() {
                 <span>Question ${currentMcqIndex + 1} of ${currentMcqs.length}</span>
                 <button type="button" class="mcq-edit-meta" id="mcq-edit-meta" title="Edit question metadata" aria-label="Edit question metadata">✏️</button>
             </div>
+
+            ${mcq.languages.length > 1 ? `
+                <div class="mcq-lang-toggle" role="group" aria-label="Question language">
+                    ${mcq.languages.map(lang => `
+                        <button type="button" class="mcq-lang-pill ${lang === mcq.activeLanguage ? "active" : ""}" data-lang="${escapeHtml(lang)}">${escapeHtml(lang)}</button>
+                    `).join("")}
+                </div>
+            ` : ""}
 
             <div class="mcq-question-text">
                 ${escapeHtml(mcq.question)}
@@ -714,6 +828,12 @@ function renderMcqView() {
                 answerCurrentQuestion(Number(button.dataset.optionIndex));
             });
         });
+
+    questionArea.querySelectorAll(".mcq-lang-pill").forEach(button => {
+        button.addEventListener("click", () => {
+            setSlotLanguage(currentMcqIndex, button.dataset.lang);
+        });
+    });
 
     document.getElementById("mcq-edit-meta")?.addEventListener("click", () => {
         openMcqMetaModal(mcq);
@@ -1022,11 +1142,8 @@ async function init() {
         currentCollectionView = null;
         selectedMcqTags = new Set();
         selectedMcqLanguage = "";
-        populateMcqPracticeFilters();
-        currentMcqs = allLoadedMcqs.slice();
-        renderMcqCollectionNotes();
-        resetAttemptState();
-        renderMcqView();
+        mcqActiveLanguageByGroup = new Map();
+        applyMcqPracticeFilters();
 
         if (topic) {
             document.title = `${topic.title} — MCQ Practice`;
@@ -1372,13 +1489,21 @@ function buildMcqAiPrompt() {
             const closing = i === 0
                 ? `...then all ${lang} questions...`
                 : `...then all ${lang} questions in the same order and meaning as the ${languages[i - 1]} block.`;
-            return `${intro}\n@collection: ${blockCollectionName(lang)}\n${closing}`;
+            return `${intro}\n@collection: ${blockCollectionName(lang)}\n@language: ${lang} (put this on EVERY question in this block, including the English block — it is REQUIRED here even though a single-language file could skip it)\n${closing}`;
         }).join("\n");
 
         lines.push("", "MULTI-LANGUAGE INSTRUCTION",
             `Generate this exact set of questions ${countWord}, once fully in each of the following languages, in this exact order, so that question N in one block corresponds exactly to question N in every other block: ${languages.join(", then ")}.`,
             blockText,
-            "Each new @collection line above starts a fresh sequential question_no count for that block only (do not repeat it mid-block).");
+            "Each new @collection line above starts a fresh sequential question_no count for that block only (do not repeat it mid-block).",
+            "",
+            "LANGUAGE-LINKING (IMPORTANT): also add a @group tag to EVERY question, set to " +
+            `"${topicId}-qN" where N is that question's position within its own language block (1, 2, 3, ...). ` +
+            `The SAME @group value must appear on question N in EVERY language block — e.g. @group: ${topicId}-q1 on the ` +
+            "first question of each block, @group: " + topicId + "-q2 on the second question of each block, and so on. " +
+            "This is what lets the website show one question with a language-toggle instead of treating each " +
+            "language's version as a separate question — without it, the languages will still generate fine but will " +
+            "appear as unrelated questions in practice mode.");
     } else if (collection) {
         lines.push("", `@collection: ${collection}`,
             "Put this @collection line on the FIRST question of this collection only. It carries forward to subsequent questions; do not repeat it on every question.");
@@ -1474,8 +1599,8 @@ const MCQ_GUIDE_POINTS = [
       hi: "Tags — optional हैं। Index में मौजूद terms को search करके select करें; यहाँ से नया tag नहीं बनाया जा सकता।" },
     { en: "Study Topic — optional. Pick the tree node these MCQs belong to; used to build the suggested file name.",
       hi: "Study Topic — optional है। उस tree node को चुनें जिससे ये MCQs related हैं; इसी से suggested file name बनता है।" },
-    { en: "How many languages? — choose 1–23. Selecting more than one adds a Language dropdown for each, used to generate the same questions in every selected language.",
-      hi: "How many languages? — 1 से 23 तक चुन सकते हैं। एक से ज़्यादा चुनने पर हर एक के लिए एक Language dropdown आ जाता है, जिससे same questions हर selected language में generate होते हैं।" },
+    { en: "How many languages? — choose 1–23. Selecting more than one adds a Language dropdown for each, used to generate the same questions in every selected language. The AI prompt also adds a matching @group tag to each pair, so the practice page shows them as ONE question with a language-toggle instead of separate questions.",
+      hi: "How many languages? — 1 से 23 तक चुन सकते हैं। एक से ज़्यादा चुनने पर हर एक के लिए एक Language dropdown आ जाता है, जिससे same questions हर selected language में generate होते हैं। AI prompt हर pair पर एक matching @group tag भी जोड़ता है, ताकि practice page पर वो अलग-अलग questions की जगह एक ही question की तरह language-toggle के साथ दिखें।" },
     { en: "Question type(s) — select which types (Simple, Assertion–Reasoning, Comprehension, Table/DI) the AI prompt should ask for; at least one is required. The same row has an optional 'Include math' checkbox for calculation-heavy questions.",
       hi: "Question type(s) — तय करें कि AI prompt किस type (Simple, Assertion–Reasoning, Comprehension, Table/DI) के questions माँगे; कम से कम एक type चुनना ज़रूरी है। इसी row में एक optional 'Include math' checkbox भी है, calculation-heavy questions के लिए।" },
     { en: "How many questions? — sets the approximate question count the AI prompt asks for.",
@@ -1653,6 +1778,7 @@ function openAddMcqModal() {
                     <summary>Tag format reference</summary>
                     <pre class="content-link-guide-body">${mcqEscapeHtml(`@collection: Collection Name
 @question_no: 1
+@group: t20-q1 (optional — same value on this question's translation in another language block links them into one toggle-able question)
 @type: simple | assertion_reason
 @topic: node_id
 @passage: p001
@@ -1891,7 +2017,7 @@ function renderMcqPreviewModal(parsed) {
                 <div class="mcq-preview-table-wrap">
                     <table class="mcq-preview-table">
                         <thead><tr>
-                            <th>✓</th><th>Topic</th><th>Collection</th><th>Type</th><th>Question</th><th>Status</th>
+                            <th>✓</th><th>Topic</th><th>Collection</th><th>Type</th><th>Lang</th><th>Question</th><th>Status</th>
                         </tr></thead>
                         <tbody id="mcq-preview-body"></tbody>
                     </table>
@@ -1919,11 +2045,15 @@ function renderMcqPreviewModal(parsed) {
                 ? `<span class="mcq-preview-warning" title="${mcqEscapeHtml(warnings.join("; "))}">⚠ ${mcqEscapeHtml(warnings.join("; "))}</span>`
                 : `<span>✅ Ready</span>`;
         const question = String(row.question || "").replace(/\s+/g, " ").trim();
+        const langDisplay = row.question_group_id
+            ? `🔗 ${mcqEscapeHtml(row.language || "en")}`
+            : mcqEscapeHtml(row.language || "en");
         return `<tr>
             <td><input type="checkbox" class="mcq-preview-check" data-index="${item.index}" ${item.checked ? "checked" : ""} ${item.fatal ? "" : ""}></td>
             <td>${topicDisplay}</td>
             <td>${mcqEscapeHtml(row.collection_id_ref || "")}</td>
             <td>${mcqEscapeHtml(row.question_type || "simple")}</td>
+            <td title="${row.question_group_id ? "Linked — will show as one question with a language toggle" : "Standalone — no other language variant detected"}">${langDisplay}</td>
             <td title="${mcqEscapeHtml(row.question || "")}">${mcqEscapeHtml(question.length > 100 ? question.slice(0, 100) + "…" : question)}</td>
             <td>${status}</td>
         </tr>`;
@@ -2116,12 +2246,11 @@ async function confirmSaveMcqs() {
                 mcqStudyData = freshTree;
                 const freshTopic = findTopic(freshTree.subjects, currentMcqTopic.id);
                 currentMcqTopic = freshTopic || currentMcqTopic;
-                currentMcqs = freshTopic
-                    ? await loadMcqsForTopic(freshTopic.id)
-                    : currentMcqs;
-                currentMcqIndex = 0;
-                resetAttemptState();
-                renderMcqView();
+                if (freshTopic) {
+                    allLoadedMcqs = await loadMcqsForTopic(freshTopic.id);
+                    currentMcqIndex = 0;
+                    applyMcqPracticeFilters();
+                }
             } catch (refreshError) {
                 console.warn("MCQ view refresh failed:", refreshError);
             }
@@ -2308,11 +2437,11 @@ async function deleteMcqPermanently(mcq) {
         });
 
         document.getElementById("mcq-meta-modal")?.remove();
+        // Rebuild from allLoadedMcqs (not a direct currentMcqs filter) so a
+        // paired question that still has its OTHER language variant left
+        // keeps showing that variant, instead of the whole slot vanishing.
         allLoadedMcqs = allLoadedMcqs.filter(m => String(m.id) !== String(mcq.id));
-        currentMcqs = currentMcqs.filter(m => String(m.id) !== String(mcq.id));
-        currentMcqIndex = Math.min(currentMcqIndex, Math.max(0, currentMcqs.length - 1));
-        renderMcqCollectionNotes();
-        renderMcqView();
+        applyMcqPracticeFilters();
     } catch (error) {
         console.error("MCQ delete failed:", error);
         alert("Could not delete this question. Please try again.");
@@ -2408,12 +2537,8 @@ async function refreshCurrentMcqTopic() {
     currentCollectionView = null;
     selectedMcqTags = new Set();
     selectedMcqLanguage = "";
-    populateMcqPracticeFilters();
-    currentMcqs = allLoadedMcqs.slice();
-    currentMcqIndex = Math.min(currentMcqIndex, Math.max(0, currentMcqs.length - 1));
-    resetAttemptState();
-    renderMcqCollectionNotes();
-    renderMcqView();
+    mcqActiveLanguageByGroup = new Map();
+    applyMcqPracticeFilters();
 }
 
 document.getElementById("mcq-add-open")?.addEventListener("click", openAddMcqModal);
