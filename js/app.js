@@ -360,28 +360,28 @@ function escapeHtml(value) {
 
 /* =========================================================
    ALPHA-PLUS — SCROLL POSITION MEMORY
-   Keeps reading position per topic/language/depth in memory only.
+   Keeps reading position per topic/language in memory only.
    Same combination restores exact scrollTop.
 
-   Language/depth switches restore by matching the NUMBERED POINT
+   Language switches restore by matching the NUMBERED POINT
    (e.g. "1.", "2.", "3." at the start of a heading's text) rather
    than by raw DOM position/index. Index-based matching broke
    whenever a variant had a different total heading count (an
-   extra sub-heading in one language, a collapsed section in a
-   shorter depth layer) — the point numbers lined up, but "the
-   5th heading overall" didn't, since h1–h6 were all counted
-   together as one flat list. Matching on the number itself finds
-   the correct point regardless of how many other headings exist
-   around it in that particular variant. Falls back to the old
-   index-based match only for headings with no leading number, and
-   to a proportional scrollTop if nothing matches at all.
+   extra sub-heading in one language) — the point numbers lined
+   up, but "the 5th heading overall" didn't, since h1–h6 were all
+   counted together as one flat list. Matching on the number
+   itself finds the correct point regardless of how many other
+   headings exist around it in that particular variant. Falls
+   back to the old index-based match only for headings with no
+   leading number, and to a proportional scrollTop if nothing
+   matches at all.
    ========================================================= */
 const contentScrollMemory = new Map();
 let pendingScrollRestore = null;
 
 const HEADING_SELECTOR = "#rc-explanation h1, #rc-explanation h2, #rc-explanation h3, #rc-explanation h4, #rc-explanation h5, #rc-explanation h6";
 
-// The content-panel-header (CONTENT button + language/depth row + progress
+// The content-panel-header (CONTENT button + language row + progress
 // line) is position:sticky and stays pinned to the top of #middle-panel's
 // scroll viewport, physically covering that much of the top of the visible
 // area. Any scroll-to-heading math must clear this — a flat magic number
@@ -401,8 +401,8 @@ function extractHeadingNumber(headingText) {
     return match ? match[1] : null;
 }
 
-function contentScrollKey(topicId, language, depth) {
-    return `${topicId}::${language}::${depth}`;
+function contentScrollKey(topicId, language) {
+    return `${topicId}::${language}`;
 }
 
 function findVisibleHeadingInfo(host) {
@@ -438,7 +438,7 @@ function captureContentScrollPosition() {
     };
 
     contentScrollMemory.set(
-        contentScrollKey(selectedTopicNode.id, currentContentLanguage, currentContentDepth),
+        contentScrollKey(selectedTopicNode.id, currentContentLanguage),
         state
     );
     return state;
@@ -459,8 +459,8 @@ function rememberBeforeContentVariantSwitch() {
 }
 
 function prepareTopicScrollRestore(node) {
-    const state = node ? contentScrollMemory.get(contentScrollKey(node.id, "EN", "DETAILED")) : null;
-    // The exact topic/language/depth key is resolved once the new .md file
+    const state = node ? contentScrollMemory.get(contentScrollKey(node.id, "EN")) : null;
+    // The exact topic/language key is resolved once the new .md file
     // has been parsed. Until then, a new topic starts at the top.
     pendingScrollRestore = { mode: "topic", topicId: node ? node.id : null };
 }
@@ -474,7 +474,7 @@ function restoreContentScrollPosition() {
 
     if (pending.mode === "topic") {
         const target = contentScrollMemory.get(
-            contentScrollKey(selectedTopicNode.id, currentContentLanguage, currentContentDepth)
+            contentScrollKey(selectedTopicNode.id, currentContentLanguage)
         );
         host.scrollTop = target ? target.scrollTop : 0;
         return;
@@ -737,7 +737,6 @@ async function loadAndRenderMdFileContent(node, mdLink, container, token) {
    ========================================================= */
 
 const LANG_MARKER_RE = /^[ \t]*<!--\s*===LANG:(EN|HI|AI)===\s*-->[ \t]*$/gm;
-const DEPTH_MARKER_RE = /^[ \t]*<!--\s*===DEPTH:(DETAILED|BRIEF)===\s*-->[ \t]*$/gm;
 
 function splitContentByLanguage(rawMarkdown) {
     const text = String(rawMarkdown || "");
@@ -767,8 +766,6 @@ function splitContentByLanguage(rawMarkdown) {
 // re-fetch and no re-parse of the raw text needed.
 let currentLanguageSplit = null;
 let currentContentLanguage = "EN";
-let currentDepthSplit = null;
-let currentContentDepth = "DETAILED";
 // ALPHA-PLUS — CONTENT LINK: folder mode. {filename: url} for whatever
 // content is currently loaded — {} for legacy/single-file content, or
 // the folder's other files (images/diagrams) when loaded via
@@ -783,29 +780,6 @@ let currentContentDebug = null;
 // revisiting a topic keeps whatever the user was reading; falls back
 // to EN for topics that don't have that language authored.
 const lastLanguagePerTopic = new Map();
-const lastDepthPerTopicLanguage = new Map();
-
-function splitLayerByDepth(languageBlockText) {
-    const text = String(languageBlockText || "");
-    const matches = [...text.matchAll(DEPTH_MARKER_RE)];
-
-    if (!matches.length) {
-        return { detailed: text, brief: null, hasDepthMarkers: false };
-    }
-
-    const result = { detailed: null, brief: null, hasDepthMarkers: true };
-    const keyByTag = { DETAILED: "detailed", BRIEF: "brief" };
-
-    matches.forEach((match, i) => {
-        const tag = keyByTag[match[1]];
-        const start = match.index + match[0].length;
-        const end = i + 1 < matches.length ? matches[i + 1].index : text.length;
-        const chunk = text.slice(start, end).trim();
-        result[tag] = chunk || null;
-    });
-
-    return result;
-}
 
 function applyMdTextToContentPanel(rawText, container, assets, assetData) {
     currentContentAssets = (assets && typeof assets === "object") ? assets : {};
@@ -821,14 +795,8 @@ function applyMdTextToContentPanel(rawText, container, assets, assetData) {
     const preferred = (selectedTopicNode && lastLanguagePerTopic.get(selectedTopicNode.id)) || "EN";
     currentContentLanguage = languageBlockFor(preferred, currentLanguageSplit) ? preferred : "EN";
 
-    const depthKey = selectedTopicNode ? `${selectedTopicNode.id}::${currentContentLanguage}` : null;
-    const preferredDepth = (depthKey && lastDepthPerTopicLanguage.get(depthKey)) || "DETAILED";
-    currentDepthSplit = splitLayerByDepth(languageBlockFor(currentContentLanguage, currentLanguageSplit) || "");
-    currentContentDepth = depthBlockFor(preferredDepth, currentDepthSplit) ? preferredDepth : "DETAILED";
-
     renderCurrentLanguageBlock(container);
     updateLanguageToggleUI();
-    updateDepthToggleUI();
 }
 
 function languageBlockFor(lang, split) {
@@ -838,17 +806,9 @@ function languageBlockFor(lang, split) {
     return split.en;
 }
 
-function depthBlockFor(depth, split) {
-    if (!split) return null;
-    if (depth === "BRIEF") return split.brief;
-    return split.detailed;
-}
-
 function renderCurrentLanguageBlock(container) {
     if (!container || !currentLanguageSplit) return;
-    const languageText = languageBlockFor(currentContentLanguage, currentLanguageSplit) || currentLanguageSplit.en || "";
-    currentDepthSplit = splitLayerByDepth(languageText);
-    const text = depthBlockFor(currentContentDepth, currentDepthSplit) || currentDepthSplit.full || "";
+    const text = languageBlockFor(currentContentLanguage, currentLanguageSplit) || currentLanguageSplit.en || "";
     renderRichContent(text, container, currentContentAssets, currentContentAssetData);
     renderAlphaContentDiagnostic(container);
     if (window.ReadingTools) window.ReadingTools.onContentRendered();
@@ -862,53 +822,11 @@ function renderAlphaContentDiagnostic(container) {
     return;
 }
 
-// Languages that get their own segment (button + depth dropdown) in the
-// content-toggle-row. Each language remembers its own last-used depth via
-// lastDepthPerTopicLanguage, so every segment's dropdown reflects that
-// language's own Full/Half/Mini choice independently of the others.
+// Languages available in the content-toggle-row.
 const CONTENT_LANGUAGES = ["EN", "HI", "AI"];
 const LANG_SEGMENT_SUFFIX = { EN: "en", HI: "hi", AI: "ai" };
 
-// Picking a depth from a language's own dropdown switches to that language
-// (if not already active) AND applies that depth, in one action.
-function selectLanguageDepth(lang, depth) {
-    if (!currentLanguageSplit) return;
-    if (lang !== currentContentLanguage) {
-        if (!languageBlockFor(lang, currentLanguageSplit)) return;
-        switchContentLanguage(lang, depth);
-    } else {
-        switchContentDepth(depth);
-    }
-    closeAllLangDepthDropdowns();
-}
-
-function toggleLangDepthDropdown(lang) {
-    const suffix = LANG_SEGMENT_SUFFIX[lang];
-    const list = document.getElementById(`depth-list-${suffix}`);
-    const caret = document.getElementById(`lang-caret-${suffix}`);
-    if (!list || !caret) return;
-    const wasOpen = !list.hidden;
-    closeAllLangDepthDropdowns();
-    if (!wasOpen) {
-        list.hidden = false;
-        caret.setAttribute("aria-expanded", "true");
-    }
-}
-
-function closeAllLangDepthDropdowns() {
-    CONTENT_LANGUAGES.forEach(lang => {
-        const suffix = LANG_SEGMENT_SUFFIX[lang];
-        const list = document.getElementById(`depth-list-${suffix}`);
-        const caret = document.getElementById(`lang-caret-${suffix}`);
-        if (list) list.hidden = true;
-        if (caret) caret.setAttribute("aria-expanded", "false");
-    });
-}
-
 document.addEventListener("click", e => {
-    const row = document.getElementById("content-toggle-row");
-    if (row && !row.contains(e.target)) closeAllLangDepthDropdowns();
-
     const tocBtn = document.getElementById("content-toc-btn");
     const tocPanel = document.getElementById("content-toc-panel");
     if (tocPanel && !tocPanel.hidden && tocBtn
@@ -919,7 +837,6 @@ document.addEventListener("click", e => {
 
 document.addEventListener("keydown", e => {
     if (e.key === "Escape") {
-        closeAllLangDepthDropdowns();
         closeContentTocPanel();
     }
 });
@@ -928,8 +845,8 @@ document.addEventListener("keydown", e => {
    CONTENT outline (table of contents) panel — lists every
    heading of the currently rendered variant, indented by
    level; clicking one scrolls the article to that heading.
-   Rebuilt on every render (topic load, language switch, depth
-   switch) so it always matches what's on screen right now.
+   Rebuilt on every render (topic load, language switch) so it
+   always matches what's on screen right now.
    ========================================================= */
 function buildContentTocPanel() {
     const btn = document.getElementById("content-toc-btn");
@@ -982,7 +899,6 @@ function toggleContentTocPanel() {
     const panel = document.getElementById("content-toc-panel");
     if (!btn || !panel || btn.disabled) return;
     if (panel.hidden) {
-        closeAllLangDepthDropdowns();
         panel.hidden = false;
         btn.setAttribute("aria-expanded", "true");
         btn.classList.add("active");
@@ -1001,7 +917,7 @@ function closeContentTocPanel() {
     }
 }
 
-function switchContentLanguage(lang, forceDepth) {
+function switchContentLanguage(lang) {
     if (!currentLanguageSplit) return;
     if (!languageBlockFor(lang, currentLanguageSplit)) return; // not authored for this topic — button should be disabled anyway
     if (lang === currentContentLanguage) return;
@@ -1010,49 +926,14 @@ function switchContentLanguage(lang, forceDepth) {
     currentContentLanguage = lang;
     if (selectedTopicNode) lastLanguagePerTopic.set(selectedTopicNode.id, lang);
 
-    const depthKey = selectedTopicNode ? `${selectedTopicNode.id}::${lang}` : null;
-    const languageText = languageBlockFor(lang, currentLanguageSplit) || "";
-    const depthSplit = splitLayerByDepth(languageText);
-    // A depth picked directly from this language's own dropdown (selectLanguageDepth)
-    // wins over the remembered last-used depth for that language.
-    const preferredDepth = forceDepth || (depthKey && lastDepthPerTopicLanguage.get(depthKey)) || "DETAILED";
-    currentDepthSplit = depthSplit;
-    currentContentDepth = depthBlockFor(preferredDepth, depthSplit) ? preferredDepth : "DETAILED";
-    if (selectedTopicNode && depthKey) lastDepthPerTopicLanguage.set(depthKey, currentContentDepth);
-
     const container = document.getElementById("rc-explanation");
     if (!container) return;
 
     // Reset/recompute reading-time state before rendering the newly selected
-    // language/depth content, so all reading tools use the live DOM.
+    // language content, so all reading tools use the live DOM.
     if (window.ReadingTools) window.ReadingTools.onNewArticle();
     renderCurrentLanguageBlock(container);
     updateLanguageToggleUI();
-    updateDepthToggleUI();
-}
-
-function switchContentDepth(depth) {
-    if (!currentLanguageSplit) return;
-
-    const languageText = languageBlockFor(currentContentLanguage, currentLanguageSplit) || "";
-    const depthSplit = splitLayerByDepth(languageText);
-    if (!depthBlockFor(depth, depthSplit)) return;
-    if (depth === currentContentDepth) return;
-
-    rememberBeforeContentVariantSwitch();
-    currentDepthSplit = depthSplit;
-    currentContentDepth = depth;
-    if (selectedTopicNode) {
-        lastDepthPerTopicLanguage.set(`${selectedTopicNode.id}::${currentContentLanguage}`, depth);
-    }
-
-    const container = document.getElementById("rc-explanation");
-    if (!container) return;
-
-    if (window.ReadingTools) window.ReadingTools.onNewArticle();
-    renderCurrentLanguageBlock(container);
-    updateLanguageToggleUI();
-    updateDepthToggleUI();
 }
 
 function updateLanguageToggleUI() {
@@ -1074,60 +955,19 @@ function updateLanguageToggleUI() {
 
     CONTENT_LANGUAGES.forEach(lang => {
         const btn = langButtons[lang];
-        const segment = document.getElementById(`lang-segment-${LANG_SEGMENT_SUFFIX[lang]}`);
         const authored = !!languageBlockFor(lang, currentLanguageSplit);
         if (btn) {
             btn.disabled = !authored;
             btn.classList.toggle("active", lang === currentContentLanguage);
+            btn.classList.toggle("lang-segment-unavailable", !authored);
         }
-        if (segment) segment.classList.toggle("lang-segment-unavailable", !authored);
-    });
-}
-
-function updateDepthToggleUI() {
-    if (!currentLanguageSplit) return;
-
-    CONTENT_LANGUAGES.forEach(lang => {
-        const suffix = LANG_SEGMENT_SUFFIX[lang];
-        const languageText = languageBlockFor(lang, currentLanguageSplit) || "";
-        // For the active language reuse the already-computed split; for the
-        // others (whose panel isn't rendered) compute it fresh — cheap, and
-        // needed so each language's own dropdown can disable Full/Half/Mini
-        // options that weren't authored for it.
-        const depthSplit = lang === currentContentLanguage
-            ? currentDepthSplit
-            : splitLayerByDepth(languageText);
-        if (!depthSplit) return;
-
-        const depthKey = selectedTopicNode ? `${selectedTopicNode.id}::${lang}` : null;
-        const shownDepth = lang === currentContentLanguage
-            ? currentContentDepth
-            : ((depthKey && lastDepthPerTopicLanguage.get(depthKey)) || "DETAILED");
-
-        const buttons = {
-            DETAILED: document.getElementById(`depth-toggle-detailed-${suffix}`),
-            BRIEF: document.getElementById(`depth-toggle-brief-${suffix}`)
-        };
-
-        Object.keys(buttons).forEach(depth => {
-            const btn = buttons[depth];
-            if (!btn) return;
-            const disabled = !depthBlockFor(depth, depthSplit);
-            const active = depth === shownDepth;
-            btn.disabled = disabled;
-            btn.classList.toggle("active", active);
-            btn.setAttribute("aria-selected", String(active));
-        });
     });
 }
 
 function hideLanguageToggleRow() {
     currentLanguageSplit = null;
-    currentDepthSplit = null;
-    currentContentDepth = "DETAILED";
     const row = document.getElementById("content-toggle-row");
     if (row) row.hidden = true;
-    closeAllLangDepthDropdowns();
     closeContentTocPanel();
     const tocList = document.getElementById("content-toc-list");
     if (tocList) tocList.innerHTML = "";
@@ -1335,21 +1175,20 @@ INDEX TERM MARKING:
 As you write, identify the important terminologies, key concepts, and
 definitions in this topic — the kind that would belong in a glossary
 or index for a student revising this chapter. Wrap each such term in
-double curly braces the FIRST time it appears WITHIN EACH depth
-section (Detailed/Brief), e.g. {{Mental Processes}} — each depth
-section is rendered on its own, so the "first occurrence" rule resets
-at the start of every DETAILED/BRIEF block, not just once for the
-whole file. Do not wrap every bolded phrase — only wrap terms that
-are genuinely index-worthy standalone concepts, not general emphasis.
-Wrap a given term only once per depth section, at its first occurrence
-there; leave all later mentions of the same term in that same section
-as plain text (still use **bold** for emphasis on repeat mentions if
-needed). Keep the exact same set of terms wrapped across the EN, HI,
-and AI versions of the same depth section, so the suggestions stay
-consistent regardless of which version the student is reading. Aim
-for the natural set of key terms a student would want in a quick-
-reference glossary for this topic — typically a handful per depth
-section, not every noun phrase.
+double curly braces the FIRST time it appears WITHIN EACH language
+block, e.g. {{Mental Processes}} — each language block (EN/HI/AI) is
+rendered on its own, so the "first occurrence" rule resets at the
+start of every LANG block. Do not wrap every bolded phrase — only
+wrap terms that are genuinely index-worthy standalone concepts, not
+general emphasis. Wrap a given term only once per language block, at
+its first occurrence there; leave all later mentions of the same term
+in that same block as plain text (still use **bold** for emphasis on
+repeat mentions if needed). Keep the exact same set of terms wrapped
+across the EN, HI, and AI versions, so the suggestions stay consistent
+regardless of which version the student is reading. Aim for the
+natural set of key terms a student would want in a quick-reference
+glossary for this topic — typically a handful per block, not every
+noun phrase.
 
 IMPORTANT — {{}} does NOT auto-index anything: on the site, a {{Term}}
 you wrap here only renders as a visual suggestion (a dotted underline) —
@@ -1394,69 +1233,46 @@ Create clear, serious, exam-oriented notes. Where relevant include:
 Do not use generic filler, excessive motivational language, decorative sections, or unnecessary repetition.
 
 ====================================================
-LANGUAGE + DEPTH ARCHITECTURE — CRITICAL
+LANGUAGE ARCHITECTURE — CRITICAL
 ====================================================
-The website has TWO independent controls:
-1. Version: EN / HI / AI (AI = the AI Learning Version — see AI LEARNING VERSION below)
-2. Content depth: Detailed / Brief
+The website has ONE control: Version: EN / HI / AI (AI = the AI Learning Version — see AI LEARNING VERSION below).
 
-Therefore generate TWO depth versions for EACH of the three version slots in ONE .md file — 6 blocks total, always — using this exact marker order:
+Generate exactly ONE block per version slot in ONE .md file — 3 blocks total, always — using this exact marker order:
 
 <!-- ===LANG:EN=== -->
-<!-- ===DEPTH:DETAILED=== -->
-...English Detailed (source-faithful)...
-<!-- ===DEPTH:BRIEF=== -->
-...English Brief (source-faithful)...
+...English (source-faithful)...
 
 <!-- ===LANG:HI=== -->
-<!-- ===DEPTH:DETAILED=== -->
-...Hindi Detailed (source-faithful)...
-<!-- ===DEPTH:BRIEF=== -->
-...Hindi Brief (source-faithful)...
+...Hindi (source-faithful)...
 
 <!-- ===LANG:AI=== -->
-<!-- ===DEPTH:DETAILED=== -->
-...AI Learning Version, Detailed — see AI LEARNING VERSION below...
-<!-- ===DEPTH:BRIEF=== -->
-...AI Learning Version, Brief...
+...AI Learning Version — see AI LEARNING VERSION below...
 
 MARKER RULES:
 - Copy every marker exactly.
 - Every marker must be alone on its own line.
 - Do not add spaces, punctuation, headings, or fences on marker lines.
-- Do not omit any of the six depth sections.
+- Do not omit any of the three language blocks.
 - Keep version order EN → HI → AI.
-- Keep depth order DETAILED → BRIEF inside every version.
-- Do not create separate files for versions or depths.
+- Do not create separate files for versions.
 
 SECTION NUMBERING FOR TOGGLE SYNC — CRITICAL:
-- Every ## heading in EN DETAILED must start with a strictly increasing major number: "1. Title", "2. Title", "3. Title".
-- BRIEF must reuse the same numbers as DETAILED for the same concepts; do not independently renumber.
-- HI and AI must reuse the exact same numbers, in the exact same order, as the corresponding EN concepts — this is what lets the site's toggle jump between EN/HI/AI and DETAILED/BRIEF without losing the reader's place.
+- Every ## heading in EN must start with a strictly increasing major number: "1. Title", "2. Title", "3. Title".
+- HI and AI must reuse the exact same numbers, in the exact same order, as the corresponding EN concepts — this is what lets the site's toggle jump between EN/HI/AI without losing the reader's place.
 - If concepts are merged, keep the smaller original number.
 - Never reuse one number for two different concepts.
 - ### headings may optionally use decimals such as 2.1, 2.2.
 
-DEPTH RULES (apply to EN and HI — source-faithful versions):
-
-DETAILED:
+CONTENT RULES (apply to EN and HI — source-faithful versions):
 - Most complete and authoritative version.
 - Preserve important source structure, sequence, terminology, definitions, examples, classifications, relationships, and exam-relevant detail.
 - Explain concepts clearly rather than listing keywords.
 - Add useful clarification, analogies, cross-links, or "why it matters" notes only when genuinely helpful and not factually invented.
+- EN and HI must remain factually consistent with each other and with the source material.
 
-BRIEF:
-- Fast revision version, roughly half the reading time of DETAILED.
-- Keep the same major heading order and numbering as DETAILED.
-- Reduce each section to essential recall points, short definitions, one-line explanations, comparisons, rules/formulas where relevant, and recall cues.
-- Must stand alone; never say "see Detailed".
-
-Both EN/HI depths must remain factually consistent. Do not introduce facts in BRIEF that are absent from DETAILED/source material.
-
-DEPTH RULES FOR THE AI LEARNING VERSION (LANG:AI):
-- AI DETAILED: the richest teaching pass — full analogies, multiple real-life examples, mnemonics where useful, connections between concepts, and active-recall prompts, covering every heading from EN DETAILED with full teaching depth.
-- AI BRIEF: fast teaching recall — same heading order and numbers, one crisp explanation and one example per concept, minimal mnemonics (only where they were already established in DETAILED), and at most one short recall prompt per major heading.
-- Both AI depths must stay teaching-focused (see AI LEARNING VERSION below), never degrade into a plain compressed copy of EN — that is what the EN Brief block is for.
+RULES FOR THE AI LEARNING VERSION (LANG:AI):
+- The richest teaching pass — full analogies, multiple real-life examples, mnemonics where useful, connections between concepts, and active-recall prompts, covering every heading from EN with full teaching depth.
+- Must stay teaching-focused (see AI LEARNING VERSION below), never degrade into a plain compressed copy of EN.
 
 ====================================================
 LANGUAGE INSTRUCTIONS
@@ -1527,15 +1343,15 @@ Package Manifest:
 List every file actually included in the ZIP (content.md plus every asset), so I can quickly verify what was generated. This is a confirmation of what exists, not an instruction list for me to act on.
 
 Before finishing, verify:
-- all 6 LANG/DEPTH blocks exist (EN×2, HI×2, AI×2)
-- marker order is exact: EN → HI → AI, and DETAILED → BRIEF within each
+- all 3 LANG blocks exist (EN, HI, AI)
+- marker order is exact: EN → HI → AI
 - section numbering is synchronized concept-for-concept across EN, HI, and AI
 - Markdown references are valid
 - Mermaid syntax is valid
 - chart JSON is valid
 - every image filename referenced in the Markdown matches a real file actually included in the ZIP, and vice versa
 - no unnecessary external URLs are used
-- {{}} is used only for genuine glossary-worthy terms, once per depth section, consistently across EN/HI/AI
+- {{}} is used only for genuine glossary-worthy terms, once per language block, consistently across EN/HI/AI
 - EN/HI content contains no unnecessary "according to the source"-style phrasing
 - the AI Learning Version teaches rather than merely paraphrasing, uses real-life examples purposefully, and keeps its headings/numbering mapped to EN/HI
 - the ZIP is complete and self-contained
@@ -3066,9 +2882,9 @@ function scrollToScopedIndexTerm(termEntry) {
 
     if (!el) {
         // Best-effort text match fallback for manually-marked terms whose
-        // span isn't present in the CURRENT render (different depth/
-        // language block than when it was marked) — still listed above,
-        // just nothing to scroll to yet.
+        // span isn't present in the CURRENT render (different language
+        // block than when it was marked) — still listed above, just
+        // nothing to scroll to yet.
         return;
     }
 

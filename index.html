@@ -64,67 +64,13 @@
                             </svg>
                         </button>
                         <div id="content-toggle-row" class="content-toggle-row" hidden>
-                            <div class="toggle-group lang-toggle-group" role="group" aria-label="Content language and depth">
-                                <div class="lang-segment" id="lang-segment-en">
-                                    <button type="button" id="lang-toggle-en" class="toggle-btn lang-btn active"
-                                            onclick="switchContentLanguage('EN')">EN</button>
-                                    <button type="button" id="lang-caret-en" class="lang-caret-btn"
-                                            title="English reading depth" aria-haspopup="listbox" aria-expanded="false"
-                                            aria-controls="depth-list-en" onclick="toggleLangDepthDropdown('EN')">
-                                        <svg class="lang-caret-icon" width="8" height="8" viewBox="0 0 10 10"
-                                             xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                                            <path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.4"
-                                                  fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-                                        </svg>
-                                    </button>
-                                    <div id="depth-list-en" class="lang-depth-list" role="listbox"
-                                         aria-label="English reading depth" hidden>
-                                        <button type="button" id="depth-toggle-detailed-en" class="lang-depth-item"
-                                                role="option" onclick="selectLanguageDepth('EN','DETAILED')">Detailed</button>
-                                        <button type="button" id="depth-toggle-brief-en" class="lang-depth-item"
-                                                role="option" onclick="selectLanguageDepth('EN','BRIEF')">Brief</button>
-                                    </div>
-                                </div>
-                                <div class="lang-segment" id="lang-segment-hi">
-                                    <button type="button" id="lang-toggle-hi" class="toggle-btn lang-btn"
-                                            onclick="switchContentLanguage('HI')">HI</button>
-                                    <button type="button" id="lang-caret-hi" class="lang-caret-btn"
-                                            title="Hindi reading depth" aria-haspopup="listbox" aria-expanded="false"
-                                            aria-controls="depth-list-hi" onclick="toggleLangDepthDropdown('HI')">
-                                        <svg class="lang-caret-icon" width="8" height="8" viewBox="0 0 10 10"
-                                             xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                                            <path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.4"
-                                                  fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-                                        </svg>
-                                    </button>
-                                    <div id="depth-list-hi" class="lang-depth-list" role="listbox"
-                                         aria-label="Hindi reading depth" hidden>
-                                        <button type="button" id="depth-toggle-detailed-hi" class="lang-depth-item"
-                                                role="option" onclick="selectLanguageDepth('HI','DETAILED')">Detailed</button>
-                                        <button type="button" id="depth-toggle-brief-hi" class="lang-depth-item"
-                                                role="option" onclick="selectLanguageDepth('HI','BRIEF')">Brief</button>
-                                    </div>
-                                </div>
-                                <div class="lang-segment" id="lang-segment-ai">
-                                    <button type="button" id="lang-toggle-ai" class="toggle-btn lang-btn"
-                                            onclick="switchContentLanguage('AI')">AI</button>
-                                    <button type="button" id="lang-caret-ai" class="lang-caret-btn"
-                                            title="AI Learning reading depth" aria-haspopup="listbox" aria-expanded="false"
-                                            aria-controls="depth-list-ai" onclick="toggleLangDepthDropdown('AI')">
-                                        <svg class="lang-caret-icon" width="8" height="8" viewBox="0 0 10 10"
-                                             xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                                            <path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.4"
-                                                  fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-                                        </svg>
-                                    </button>
-                                    <div id="depth-list-ai" class="lang-depth-list" role="listbox"
-                                         aria-label="AI Learning reading depth" hidden>
-                                        <button type="button" id="depth-toggle-detailed-ai" class="lang-depth-item"
-                                                role="option" onclick="selectLanguageDepth('AI','DETAILED')">Detailed</button>
-                                        <button type="button" id="depth-toggle-brief-ai" class="lang-depth-item"
-                                                role="option" onclick="selectLanguageDepth('AI','BRIEF')">Brief</button>
-                                    </div>
-                                </div>
+                            <div class="toggle-group lang-toggle-group" role="group" aria-label="Content language">
+                                <button type="button" id="lang-toggle-en" class="toggle-btn lang-btn active"
+                                        onclick="switchContentLanguage('EN')">EN</button>
+                                <button type="button" id="lang-toggle-hi" class="toggle-btn lang-btn"
+                                        onclick="switchContentLanguage('HI')">HI</button>
+                                <button type="button" id="lang-toggle-ai" class="toggle-btn lang-btn"
+                                        onclick="switchContentLanguage('AI')">AI</button>
                             </div>
                         </div>
                         <button type="button" id="read-time-btn" class="read-time-btn">Read time</button>

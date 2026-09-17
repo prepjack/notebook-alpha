@@ -173,7 +173,7 @@ lens onto it:
   `CONTENT_LINK_AI_PROMPT` in `js/app.js` — INDEX TERM MARKING section) to
   flag candidates for a human editor. `js/richcontent.js`'s
   `extractIndexTerms()` turns the FIRST occurrence per rendered
-  depth/language block into a `<span class="rc-index-suggestion">` (a
+  language block into a `<span class="rc-index-suggestion">` (a
   dotted underline, non-linking); repeats fall back to plain **bold**.
   This never touches the registry — no sync, no `source_type`, nothing
   saved server-side. It exists purely so a human knows what's worth
@@ -194,7 +194,7 @@ lens onto it:
   retry, rolling back the optimistic DOM/state change and alerting the
   user if the write didn't actually take effect — the old silent-failure
   gap is closed. A manually-marked term also gets re-wrapped from registry
-  data on every render (topic switch, language/depth switch, reload), so
+  data on every render (topic switch, language switch, reload), so
   the highlight survives even though the raw markdown carries no marker for
   it. There is no longer a manual-vs-auto distinction shown anywhere in the
   UI (Index Directory badges were removed) since everything indexed is

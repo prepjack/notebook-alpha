@@ -2097,14 +2097,13 @@ body.index-directory-resizing .index-directory-workspace {
     background:var(--green-soft);
 }
 /* =========================================================
-   Content-language + content-depth toggles — content panel
-   only. Both segmented-control groups sit in ONE row
-   (#content-toggle-row) between the CONTENT label and the
+   Content-language toggle — content panel only. Sits in ONE
+   row (#content-toggle-row) between the CONTENT label and the
    Read-time button, right up against the sticky header's
    bottom edge, with the progress line directly beneath —
    see the STEP 32 PHASE 2 block below for why the whole
-   header (label + both toggle groups + Read-time + progress
-   line) stays pinned together as one sticky unit.
+   header (label + toggle group + Read-time + progress line)
+   stays pinned together as one sticky unit.
    ========================================================= */
 .content-toggle-row{
     display:flex;
@@ -2148,111 +2147,17 @@ body.index-directory-resizing .index-directory-workspace {
 }
 
 /* =========================================================
-   Per-language toggle + its own reading-depth dropdown.
-   Visually still ONE segmented toggle-group (EN / HI / HINGLISH,
-   same look as the old plain toggle-group), but each language
-   segment now also carries a small caret that opens THAT
-   language's own Full/Half/Mini list — so depth is picked
-   per language, not through one shared control.
+   Language toggle (EN / HI / AI) — plain segmented control.
+   Reading-depth (Detailed/Brief) has been removed; language is
+   now the only axis, so this is just the shared .toggle-group/
+   .toggle-btn styling with a class hook (.lang-btn) in case
+   language-specific styling is needed later.
    ========================================================= */
-.lang-toggle-group{
-    overflow:visible; /* let each segment's dropdown escape the group's box */
-}
-/* overflow:visible above means the group no longer clips its children into
-   its own rounded corners, so give the two outer buttons that radius directly. */
-.lang-toggle-group .lang-segment:first-child .lang-btn{
-    border-radius:6px 0 0 6px;
-}
-.lang-toggle-group .lang-segment:last-child .lang-caret-btn{
-    border-radius:0 6px 6px 0;
-}
-.lang-segment{
-    position:relative;
-    display:inline-flex;
-    align-items:stretch;
-    border-right:1px solid var(--line);
-}
-.lang-toggle-group .lang-segment:last-child{
-    border-right:none;
-}
 .lang-btn{
-    border-right:none;
-    border-radius:0;
-}
-.lang-caret-btn{
-    display:inline-flex;
-    align-items:center;
-    justify-content:center;
-    padding:4px 6px;
-    border:none;
-    border-left:1px solid var(--line);
-    background:#fff;
-    color:var(--green);
-    cursor:pointer;
-}
-.lang-caret-btn:hover{
-    background:var(--green-soft);
-}
-.lang-caret-btn[aria-expanded="true"]{
-    background:var(--green-soft);
-}
-.lang-caret-icon{
-    transition:transform .15s ease;
-}
-.lang-caret-btn[aria-expanded="true"] .lang-caret-icon{
-    transform:rotate(180deg);
+    /* intentionally left as a hook; no depth-specific styling remains */
 }
 .lang-segment-unavailable{
     display:none; /* topic simply doesn't have this language authored */
-}
-.lang-depth-list{
-    position:absolute;
-    top:calc(100% + 4px);
-    left:0;
-    z-index:40;
-    display:flex;
-    flex-direction:column;
-    min-width:110px;
-    border:1px solid var(--line);
-    border-radius:7px;
-    background:#fff;
-    box-shadow:0 4px 14px rgba(0,0,0,.12);
-    overflow:hidden;
-}
-/* The [hidden] attribute is how JS opens/closes this dropdown
-   (see toggleLangDepthDropdown/closeAllLangDepthDropdowns in app.js).
-   Without this rule the display:flex above wins over the browser's
-   default [hidden]{display:none} — author CSS always beats the UA
-   stylesheet at equal specificity — so the dropdown would stay
-   visually open even after hidden was set back to true. */
-.lang-depth-list[hidden]{
-    display:none;
-}
-.lang-depth-item{
-    padding:6px 10px;
-    border:none;
-    border-bottom:1px solid var(--line);
-    background:#fff;
-    color:var(--green);
-    cursor:pointer;
-    font:700 10px Arial,sans-serif;
-    letter-spacing:.04em;
-    text-align:left;
-}
-.lang-depth-list .lang-depth-item:last-child{
-    border-bottom:none;
-}
-.lang-depth-item:hover:not(:disabled){
-    background:var(--green-soft);
-}
-.lang-depth-item.active{
-    background:var(--green);
-    color:#fff;
-}
-.lang-depth-item:disabled{
-    color:#b7c2bb;
-    cursor:not-allowed;
-    background:#f5f7f5;
 }
 .reading-progress-track{
     position:relative;

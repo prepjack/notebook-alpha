@@ -23,7 +23,7 @@
     let lottieCounter = 0;
 
     // Every live lottie-web instance created by renderLottieBlocks(), so a
-    // fresh render pass (new topic, language/depth switch, etc.) can tear
+    // fresh render pass (new topic, language switch, etc.) can tear
     // down whatever animations the PREVIOUS pass started before wiping
     // container.innerHTML. Without this, replaced-away SVG animations keep
     // their internal requestAnimationFrame loop (and any ResizeObserver)
@@ -35,7 +35,7 @@
        ALPHA-PLUS — INDEX TERMS: {{Term}} visual-only suggestion
        Runs BEFORE marked.parse()/DOMPurify, on the exact text that is
        about to be rendered (i.e. already split to the current
-       language + depth block by app.js). A term is spanned only at
+       language block by app.js). A term is spanned only at
        its FIRST occurrence within that block; later repeats of the
        same term fall back to plain **bold** so no duplicate DOM id
        is ever created. {{Term}} spans are a visual hint only — they
@@ -438,7 +438,7 @@
 
         // Self-heals the exact "layout-timing" scenario above, AND keeps the
         // animation correctly sized when the user drags the panel resizer
-        // (STEP 2 horizontal panel resizers) or toggles language/depth,
+        // (STEP 2 horizontal panel resizers) or toggles language,
         // both of which can change this container's width after init.
         if (typeof ResizeObserver !== "undefined") {
             let lastW = wrap.clientWidth, lastH = wrap.clientHeight;
@@ -618,7 +618,7 @@
         if (!container) return;
 
         // Tear down any lottie-web instances from the content this
-        // container is ABOUT to lose (topic switch, language/depth toggle,
+        // container is ABOUT to lose (topic switch, language toggle,
         // re-render) before wiping it out. Without this, each replaced
         // animation's internal render loop (and its ResizeObserver) keeps
         // running in the background indefinitely — a leak that grows with
