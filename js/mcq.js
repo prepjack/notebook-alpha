@@ -2551,3 +2551,12 @@ async function refreshCurrentMcqTopic() {
 }
 
 document.getElementById("mcq-add-open")?.addEventListener("click", openAddMcqModal);
+
+/* PHASE 7 — MCQ mobile question-navigator drawer. */
+window.initMobileDrawers?.({
+    headerSelector: ".app-header",
+    breakpoint: 900,
+    drawers: [
+        { panel: "mcq-navigator", label: "Questions", icon: "☷", side: "right" }
+    ]
+});

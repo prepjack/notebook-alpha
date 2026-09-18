@@ -3849,3 +3849,242 @@ button.danger:hover,.mcq-collection-link.danger:hover{background:#fdeceb}
 .mcq-nav-submit{
     margin-top:auto;
 }
+
+
+/* =========================================================
+   PHASE 7 — MOBILE OFF-CANVAS DRAWERS
+   Below 901px only. Desktop (>900px) layout is intentionally untouched.
+   ========================================================= */
+.mobile-drawer-controls{
+    display:none;
+}
+.mobile-drawer-backdrop{
+    position:fixed;
+    inset:92px 0 0;
+    z-index:850;
+    background:rgba(25,35,29,.32);
+}
+.mobile-drawer-backdrop[hidden]{display:none !important;}
+
+@media (max-width:900px){
+    body.mobile-drawer-active{
+        overflow-x:hidden;
+    }
+
+    .mobile-drawer-controls{
+        position:absolute;
+        top:8px;
+        right:10px;
+        z-index:1000;
+        display:flex;
+        align-items:center;
+        gap:6px;
+    }
+    .mobile-drawer-toggle{
+        min-height:30px;
+        padding:0 9px;
+        border:1px solid var(--line,#cfd7cf);
+        border-radius:6px;
+        background:var(--paper,#fdfdf8);
+        color:var(--text,#26332b);
+        box-shadow:0 1px 3px rgba(28,38,31,.10);
+        cursor:pointer;
+        font:700 11px/30px Arial,sans-serif;
+        white-space:nowrap;
+    }
+    .mobile-drawer-toggle:active,
+    .mobile-drawer-toggle[aria-expanded="true"]{
+        background:var(--green-soft,#e4ece4);
+    }
+
+    /* Home: one-column content; both side panels leave the document flow
+       completely and become viewport overlays. */
+    .workspace{
+        display:block !important;
+        grid-template-columns:1fr !important;
+        width:100%;
+        overflow:visible !important;
+    }
+    #middle-panel{
+        width:auto;
+        margin-left:0;
+        margin-right:0;
+        min-width:0;
+        height:auto !important;
+        max-height:none !important;
+        overflow:visible !important;
+    }
+    #left-panel,
+    #right-panel{
+        position:fixed !important;
+        top:92px !important;
+        bottom:0 !important;
+        z-index:900;
+        width:min(86vw,360px) !important;
+        max-width:calc(100vw - 24px);
+        max-height:none !important;
+        height:auto !important;
+        margin:0 !important;
+        box-sizing:border-box;
+        overflow-x:hidden !important;
+        overflow-y:auto !important;
+        border-radius:0 10px 10px 0;
+        box-shadow:0 8px 28px rgba(25,35,29,.18);
+        transition:transform .22s ease, visibility .22s ease;
+        visibility:hidden;
+    }
+    #left-panel{
+        left:0;
+        right:auto;
+        transform:translateX(-105%);
+    }
+    #right-panel{
+        right:0;
+        left:auto;
+        border-radius:10px 0 0 10px;
+        transform:translateX(105%);
+    }
+    #left-panel.mobile-drawer-open,
+    #right-panel.mobile-drawer-open{
+        transform:translateX(0);
+        visibility:visible;
+    }
+    #left-panel .panel-resizer,
+    #right-panel .panel-resizer{
+        display:none !important;
+    }
+    #left-panel .panel-heading-row,
+    #right-panel .right-panel-header{
+        position:sticky;
+        top:0;
+        z-index:2;
+        background:inherit;
+    }
+    .panel-width-toggle{
+        display:none !important;
+    }
+
+    /* Index-directory: only the filter sidebar becomes a drawer; the A-Z
+       listing remains the full-width document content. */
+    .index-directory-workspace{
+        display:block !important;
+        grid-template-columns:1fr !important;
+        width:100%;
+        overflow:visible !important;
+    }
+    .index-directory-right{
+        width:auto;
+        margin:10px 0 18px !important;
+        min-width:0;
+        height:auto !important;
+        max-height:none !important;
+        overflow:visible !important;
+    }
+    .index-directory-left{
+        position:fixed !important;
+        top:92px !important;
+        bottom:0 !important;
+        left:0;
+        width:min(86vw,360px) !important;
+        max-width:calc(100vw - 24px);
+        max-height:none !important;
+        height:auto !important;
+        margin:0 !important;
+        box-sizing:border-box;
+        overflow-x:hidden !important;
+        overflow-y:auto !important;
+        z-index:900;
+        border-radius:0 10px 10px 0;
+        box-shadow:0 8px 28px rgba(25,35,29,.18);
+        transform:translateX(-105%);
+        visibility:hidden;
+        transition:transform .22s ease, visibility .22s ease;
+    }
+    .index-directory-left.mobile-drawer-open{
+        transform:translateX(0);
+        visibility:visible;
+    }
+    #index-directory-resizer,
+    #index-directory-toggle{
+        display:none !important;
+    }
+
+    /* MCQ: question navigator becomes a right-side drawer. Main question
+       content stays one full-width column. */
+    .mcq-workspace{
+        display:block !important;
+        grid-template-columns:1fr !important;
+        width:100%;
+        overflow:visible !important;
+    }
+    .mcq-main-column{
+        width:100%;
+        min-width:0;
+    }
+    .mcq-navigator{
+        position:fixed !important;
+        top:92px !important;
+        bottom:0 !important;
+        right:0;
+        left:auto;
+        width:min(86vw,360px) !important;
+        max-width:calc(100vw - 24px);
+        max-height:none !important;
+        height:auto !important;
+        margin:0 !important;
+        z-index:900;
+        border-radius:10px 0 0 10px;
+        box-shadow:0 8px 28px rgba(25,35,29,.18);
+        transform:translateX(105%);
+        visibility:hidden;
+        transition:transform .22s ease, visibility .22s ease;
+    }
+    .mcq-navigator.mobile-drawer-open{
+        transform:translateX(0);
+        visibility:visible;
+    }
+    .mcq-navigator.collapsed{
+        width:min(86vw,360px) !important;
+        height:auto !important;
+    }
+    .mcq-navigator .mcq-nav-body{
+        min-height:0;
+        overflow:hidden;
+    }
+    .mcq-navigator #mcq-question-grid{
+        overflow-y:auto;
+    }
+    .mcq-nav-width-toggle{
+        display:none !important;
+    }
+
+    /* Phase 2/5 action strips stay sticky-bottom on mobile. */
+    .action-strip,
+    .mcq-action-strip{
+        position:sticky;
+        bottom:8px;
+        z-index:120;
+        max-width:100%;
+    }
+
+    /* Keep mobile header controls from colliding with the page title. */
+    .app-header h1{
+        padding-right:120px !important;
+        box-sizing:border-box;
+    }
+    .mcq-page .app-header h1{
+        padding-right:125px !important;
+    }
+}
+
+@media (max-width:480px){
+    .mobile-drawer-toggle{
+        min-height:28px;
+        padding:0 7px;
+        font-size:10px;
+        line-height:28px;
+    }
+    .mobile-drawer-controls{top:7px;right:7px;gap:4px;}
+    .app-header h1{font-size:23px !important;}
+    .mcq-page .app-header h1{font-size:22px !important;}
+}

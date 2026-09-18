@@ -4,6 +4,104 @@
    ========================================================= */
 
 
+
+
+/* =========================================================
+   PHASE 7 — MOBILE OFF-CANVAS DRAWERS
+   Reusable mobile-only drawer controller. Desktop behavior is untouched.
+   ========================================================= */
+function initMobileDrawers(config) {
+    if (!config || !Array.isArray(config.drawers) || !config.drawers.length) return null;
+
+    const breakpoint = Number.isFinite(config.breakpoint) ? config.breakpoint : 900;
+    const header = document.querySelector(config.headerSelector || ".app-header");
+    if (!header) return null;
+
+    const drawerItems = config.drawers
+        .map(item => ({
+            panel: typeof item.panel === "string" ? document.getElementById(item.panel) : item.panel,
+            label: item.label || "Panel",
+            side: item.side === "right" ? "right" : "left"
+        }))
+        .filter(item => item.panel);
+
+    if (!drawerItems.length) return null;
+
+    let backdrop = document.getElementById("mobile-drawer-backdrop");
+    if (!backdrop) {
+        backdrop = document.createElement("div");
+        backdrop.id = "mobile-drawer-backdrop";
+        backdrop.className = "mobile-drawer-backdrop";
+        backdrop.hidden = true;
+        document.body.appendChild(backdrop);
+    }
+
+    const controls = document.createElement("div");
+    controls.className = "mobile-drawer-controls";
+    controls.setAttribute("aria-label", "Mobile panel controls");
+    header.appendChild(controls);
+
+    const states = new Map();
+    let openPanel = null;
+
+    function closeAll() {
+        drawerItems.forEach(item => {
+            item.panel.classList.remove("mobile-drawer-open");
+            states.get(item.panel)?.setAttribute("aria-expanded", "false");
+        });
+        openPanel = null;
+        backdrop.hidden = true;
+        document.body.classList.remove("mobile-drawer-active");
+    }
+
+    function open(item) {
+        if (window.innerWidth > breakpoint) return;
+        if (openPanel && openPanel !== item.panel) closeAll();
+        if (item.panel.classList.contains("mobile-drawer-open")) {
+            closeAll();
+            return;
+        }
+        item.panel.classList.add("mobile-drawer-open");
+        states.get(item.panel)?.setAttribute("aria-expanded", "true");
+        openPanel = item.panel;
+        backdrop.hidden = false;
+        document.body.classList.add("mobile-drawer-active");
+    }
+
+    drawerItems.forEach((item, index) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "mobile-drawer-toggle";
+        button.dataset.drawerSide = item.side;
+        button.textContent = item.icon ? `${item.icon} ${item.label}` : item.label;
+        button.setAttribute("aria-label", `Open ${item.label}`);
+        button.setAttribute("aria-expanded", "false");
+        button.title = item.label;
+        button.addEventListener("click", () => open(item));
+        controls.appendChild(button);
+        states.set(item.panel, button);
+    });
+
+    backdrop.addEventListener("click", closeAll);
+    document.addEventListener("keydown", event => {
+        if (event.key === "Escape") closeAll();
+    });
+
+    function sync() {
+        if (window.innerWidth > breakpoint) {
+            closeAll();
+            controls.hidden = true;
+        } else {
+            controls.hidden = false;
+        }
+    }
+
+    window.addEventListener("resize", sync);
+    sync();
+
+    return { open, closeAll, sync };
+}
+
 /* =========================================================
    STEP 2.5 — REUSABLE PANEL WIDTH TOGGLE
    Switches a panel between its remembered narrow width and a
@@ -3706,8 +3804,9 @@ function persistAlphaContent(){
 }
 
 
-// Start the Alpha notebook
-startApp();
+// Start the Alpha notebook only on the Home page. The reusable panel-width
+// toggle above is also consumed by mcq.html, where the Home app must not boot.
+if (studyTreeElement) startApp();
 
 
 /* =========================================================
@@ -4056,3 +4155,14 @@ function addRootSubject() {
 
 document.getElementById("add-subject")?.addEventListener("click", addRootSubject);
 
+
+
+/* PHASE 7 — Home mobile drawers: TOC + References/Index. */
+initMobileDrawers({
+    headerSelector: ".app-header",
+    breakpoint: 900,
+    drawers: [
+        { panel: "left-panel", label: "TOC", icon: "☰", side: "left" },
+        { panel: "right-panel", label: "References", icon: "▤", side: "right" }
+    ]
+});

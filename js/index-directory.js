@@ -991,3 +991,64 @@ initIndexDirectory();
         toggle.title = !collapsed ? "Expand search panel" : "Collapse search panel";
     });
 })();
+
+
+/* =========================================================
+   PHASE 7 — Mobile filter drawer
+   This page does not load app.js, so keep the controller local to this page.
+   ========================================================= */
+function initIndexMobileDrawer() {
+    const panel = document.getElementById("index-left-panel");
+    const header = document.querySelector(".app-header");
+    if (!panel || !header) return;
+
+    let backdrop = document.getElementById("mobile-drawer-backdrop");
+    if (!backdrop) {
+        backdrop = document.createElement("div");
+        backdrop.id = "mobile-drawer-backdrop";
+        backdrop.className = "mobile-drawer-backdrop";
+        backdrop.hidden = true;
+        document.body.appendChild(backdrop);
+    }
+
+    const controls = document.createElement("div");
+    controls.className = "mobile-drawer-controls";
+    header.appendChild(controls);
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "mobile-drawer-toggle";
+    button.textContent = "☰ Filter";
+    button.title = "Open filters";
+    button.setAttribute("aria-label", "Open filters");
+    button.setAttribute("aria-expanded", "false");
+    controls.appendChild(button);
+
+    function close() {
+        panel.classList.remove("mobile-drawer-open");
+        backdrop.hidden = true;
+        button.setAttribute("aria-expanded", "false");
+        document.body.classList.remove("mobile-drawer-active");
+    }
+    function toggle() {
+        if (window.innerWidth > 900) return;
+        if (panel.classList.contains("mobile-drawer-open")) close();
+        else {
+            panel.classList.add("mobile-drawer-open");
+            backdrop.hidden = false;
+            button.setAttribute("aria-expanded", "true");
+            document.body.classList.add("mobile-drawer-active");
+        }
+    }
+    button.addEventListener("click", toggle);
+    backdrop.addEventListener("click", close);
+    document.addEventListener("keydown", e => { if (e.key === "Escape") close(); });
+    function sync() {
+        if (window.innerWidth > 900) close();
+        controls.hidden = window.innerWidth > 900;
+    }
+    window.addEventListener("resize", sync);
+    sync();
+}
+
+initIndexMobileDrawer();
