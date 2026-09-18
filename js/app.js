@@ -5,6 +5,164 @@
 
 
 /* =========================================================
+   STEP 2.5 — REUSABLE PANEL WIDTH TOGGLE
+   Switches a panel between its remembered narrow width and a
+   responsive half-workspace width. Designed for reuse on other
+   pages/panels (e.g. the MCQ page in Phase 5).
+   ========================================================= */
+
+function enablePanelWidthToggle(panelOrId, widthVariableName, options = {}) {
+    const panel = typeof panelOrId === "string"
+        ? document.getElementById(panelOrId)
+        : panelOrId;
+
+    const workspace = typeof options.workspaceOrId === "string"
+        ? document.getElementById(options.workspaceOrId)
+        : (options.workspaceOrId || document.getElementById("study-workspace"));
+
+    if (!panel || !workspace || !widthVariableName) return null;
+
+    const button = options.buttonOrId
+        ? (typeof options.buttonOrId === "string"
+            ? document.getElementById(options.buttonOrId)
+            : options.buttonOrId)
+        : panel.querySelector(".panel-width-toggle");
+
+    if (!button) return null;
+
+    const MIN_MIDDLE = Number.isFinite(options.minMiddle)
+        ? options.minMiddle
+        : 300;
+    const MIN_PANEL = Number.isFinite(options.minPanel)
+        ? options.minPanel
+        : 260;
+    const panelLabel = options.panelLabel || "panel";
+
+    let state = panel.dataset.widthState === "half" ? "half" : "narrow";
+    let narrowWidth = parseFloat(getComputedStyle(workspace)
+        .getPropertyValue(widthVariableName)) || 360;
+
+    function getColumnWidths() {
+        const styles = getComputedStyle(workspace);
+        const columns = styles.gridTemplateColumns
+            .split(" ")
+            .map(value => parseFloat(value))
+            .filter(Number.isFinite);
+
+        return {
+            left: columns[0] || 0,
+            right: columns[columns.length - 1] || 0
+        };
+    }
+
+    function getHalfWidth() {
+        const rect = workspace.getBoundingClientRect();
+        const { left } = getColumnWidths();
+
+        // Keep the middle track at MIN_MIDDLE, matching the drag-resize
+        // constraint. Also respect the panel's existing minimum width.
+        const maxPanelWidth = Math.max(
+            MIN_PANEL,
+            rect.width - left - MIN_MIDDLE
+        );
+        return Math.min(rect.width / 2, maxPanelWidth);
+    }
+
+    function updateButton() {
+        const half = state === "half";
+        button.textContent = "⇔";
+        button.dataset.widthState = state;
+        panel.dataset.widthState = state;
+        button.setAttribute("aria-pressed", String(half));
+        button.setAttribute(
+            "aria-label",
+            half
+                ? `Return ${panelLabel} to previous width`
+                : `Expand ${panelLabel} to half workspace width`
+        );
+        button.title = half
+            ? `Return ${panelLabel} to previous width`
+            : `Expand ${panelLabel} to half workspace width`;
+    }
+
+    function setHalfWidth() {
+        workspace.style.setProperty(
+            widthVariableName,
+            `${getHalfWidth()}px`
+        );
+    }
+
+    function setState(nextState) {
+        if (window.innerWidth <= 900) return;
+
+        if (nextState === "half") {
+            const current = parseFloat(
+                getComputedStyle(workspace)
+                    .getPropertyValue(widthVariableName)
+            );
+            if (Number.isFinite(current) && current >= MIN_PANEL) {
+                narrowWidth = current;
+            }
+            state = "half";
+            setHalfWidth();
+        } else {
+            state = "narrow";
+            workspace.style.setProperty(
+                widthVariableName,
+                `${Math.max(MIN_PANEL, Math.min(
+                    narrowWidth,
+                    Math.max(MIN_PANEL, workspace.getBoundingClientRect().width
+                        - getColumnWidths().left - MIN_MIDDLE)
+                ))}px`
+            );
+        }
+
+        updateButton();
+    }
+
+    button.addEventListener("click", () => {
+        setState(state === "half" ? "narrow" : "half");
+    });
+
+    // Keep Half responsive when the workspace/window changes size.
+    function handleResize() {
+        if (window.innerWidth <= 900) return;
+        if (state === "half") setHalfWidth();
+    }
+
+    window.addEventListener("resize", handleResize);
+
+    // Drag-resize remains authoritative. If the user drags while in Half,
+    // treat the resulting width as the new explicit narrow width so the
+    // next toggle can return to that manually chosen width.
+    const resizer = options.resizerOrId
+        ? (typeof options.resizerOrId === "string"
+            ? document.getElementById(options.resizerOrId)
+            : options.resizerOrId)
+        : null;
+
+    if (resizer) {
+        resizer.addEventListener("mousedown", () => {
+            if (state === "half") {
+                state = "narrow";
+                narrowWidth = parseFloat(
+                    getComputedStyle(workspace)
+                        .getPropertyValue(widthVariableName)
+                ) || narrowWidth;
+                updateButton();
+            }
+        });
+    }
+
+    updateButton();
+
+    return {
+        setState,
+        getState: () => state
+    };
+}
+
+/* =========================================================
    STEP 2 — HORIZONTAL PANEL RESIZING
    ========================================================= */
 
@@ -151,6 +309,17 @@
         setRightCollapsed(!rightPanel.classList.contains("panel-collapsed"));
     });
 })();
+
+/* Home page only for Phase 3. The reusable function above is intentionally
+   generic so Phase 5 can attach the same behavior to the MCQ right panel. */
+enablePanelWidthToggle("right-panel", "--right-width", {
+    workspaceOrId: "study-workspace",
+    buttonOrId: "right-panel-width-toggle",
+    resizerOrId: "right-resizer",
+    panelLabel: "right panel",
+    minMiddle: 300,
+    minPanel: 260
+});
 
 
 /* =========================================================

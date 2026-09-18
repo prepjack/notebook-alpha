@@ -287,6 +287,7 @@ body {
     min-width: 0;
 }
 
+.panel-width-toggle,
 .panel-collapse-btn {
     flex: none;
     display: flex;
@@ -300,6 +301,17 @@ body {
     border-radius: 6px;
     color: var(--muted);
     cursor: pointer;
+}
+
+.panel-width-toggle {
+    font: 700 16px/1 Arial, sans-serif;
+    letter-spacing: -0.08em;
+}
+
+.panel-width-toggle:hover {
+    background: #f1f4ee;
+    color: var(--green);
+    border-color: #aebcb1;
 }
 
 .panel-collapse-btn:hover {
@@ -344,6 +356,7 @@ body {
 
 @media (max-width: 900px) {
     /* Collapse is a desktop feature, same scope as drag-resize (STEP 2). */
+    .panel-width-toggle,
     .panel-collapse-btn {
         display: none;
     }
