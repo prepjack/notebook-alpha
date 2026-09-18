@@ -20,7 +20,7 @@
 html,
 body {
     width: 100%;
-    height: 100%;
+    min-height: 100%;
     margin: 0;
 }
 
@@ -28,9 +28,10 @@ body {
     background: var(--page);
     color: var(--text);
     font-family: Georgia, "Times New Roman", serif;
-    /* The three panels below still fill the full viewport height (see
-       .workspace); this only lets the page scroll far enough to reach the
-       footer instead of clipping it off. */
+    /* Natural scroll: the workspace is no longer height-capped, so the
+       page grows to fit its content and the browser's own viewport
+       scrollbar handles it. overflow-x stays hidden to guard against any
+       stray horizontal overflow; overflow-y is left to the browser. */
     overflow-x: hidden;
     overflow-y: auto;
 }
@@ -48,12 +49,18 @@ body {
 
 /* Header */
 .app-header {
-    height: 110px;
+    /* 92px is the live height (also enforced by the STEP 25 override
+       below, which used to disagree with this rule's old 110px value —
+       reconciled here so there's a single source of truth). */
+    height: 92px;
     padding: 0 20px;
     display: flex;
     align-items: flex-start;
     background: var(--paper);
     border-bottom: 1px solid var(--line);
+    position: sticky;
+    top: 0;
+    z-index: 500;
 }
 
 .app-header h1 {
@@ -63,13 +70,14 @@ body {
     font-weight: 500;
 }
 
-/* Three-panel workspace */
+/* Three-panel workspace — natural height. The middle (content) panel
+   grows to fit its content and the page scrolls; the left/right panels
+   are pinned with position:sticky and capped to the viewport height
+   instead (see the min-width:901px block further down). */
 .workspace {
-    height: calc(100vh - 110px);
     display: grid;
     grid-template-columns: 360px minmax(300px, 1fr) 360px;
     gap: 0;
-    overflow: hidden;
 }
 
 /* Panels */
@@ -222,6 +230,23 @@ body {
            transition only visibly plays on the collapse/expand action
            (JS briefly disables it during drag — see enablePanelResizing). */
         transition: grid-template-columns 220ms ease;
+        /* Don't stretch grid items to a shared row height (the grid
+           default). The middle panel's natural content height still
+           drives the row; left/right opt into their own sticky/capped
+           sizing below instead of being forced to match it. */
+        align-items: start;
+    }
+
+    /* Left/right panels stay pinned in the viewport (under the sticky
+       header) while the middle panel's content scrolls past them. Each
+       is capped to the remaining viewport height so a long TOC/reference
+       list scrolls inside its own box instead of growing forever. */
+    #left-panel,
+    #right-panel {
+        position: sticky;
+        top: 92px;
+        max-height: calc(100vh - 92px);
+        overflow-y: auto;
     }
 }
 
@@ -1750,12 +1775,9 @@ body.index-directory-resizing .index-directory-workspace {
 .subject-add-button{
     padding:5px 12px !important;
 }
-.workspace{
-    /* Panels fill the full viewport height below the header. The footer no
-       longer eats into that height — it sits after the workspace instead,
-       and the page scrolls the extra bit to reach it. */
-    height:calc(100vh - 92px) !important;
-}
+/* .workspace no longer gets a fixed height here — see the base .workspace
+   rule and the min-width:901px sticky-panel block near the top of this
+   file (Phase 1 layout redesign). */
 .tree-row{
     display:flex;
     align-items:center;
@@ -1999,7 +2021,11 @@ body.index-directory-resizing .index-directory-workspace {
    ========================================================= */
 .content-panel-header{
     position:sticky;
-    top:0;
+    /* .app-header is sticky and 92px tall (see the STEP 25 rule); this
+       sticks right below it instead of at the true top:0, now that the
+       page scrolls naturally rather than #middle-panel scrolling inside
+       its own fixed-height box. */
+    top:92px;
     z-index:30;
     padding-top:16px;
     padding-bottom:0;

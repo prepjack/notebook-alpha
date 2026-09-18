@@ -382,14 +382,23 @@ let pendingScrollRestore = null;
 const HEADING_SELECTOR = "#rc-explanation h1, #rc-explanation h2, #rc-explanation h3, #rc-explanation h4, #rc-explanation h5, #rc-explanation h6";
 
 // The content-panel-header (CONTENT button + language row + progress
-// line) is position:sticky and stays pinned to the top of #middle-panel's
-// scroll viewport, physically covering that much of the top of the visible
+// line) is position:sticky and stays pinned just below the sticky
+// .app-header, physically covering that much of the top of the visible
 // area. Any scroll-to-heading math must clear this — a flat magic number
 // under-shoots whenever the row wraps, the language row is hidden, or the
 // page is on the narrower mobile layout — so measure it live instead.
 function getStickyHeaderOffset() {
     const header = document.querySelector("#middle-panel .content-panel-header");
     return header ? header.getBoundingClientRect().height : 0;
+}
+
+// Since Phase 1 of the layout redesign, the page itself scrolls (the
+// natural-height workspace) instead of #middle-panel scrolling inside a
+// fixed-height box. Anything that used to read/write host.scrollTop now
+// needs the combined height of BOTH stacked sticky headers (.app-header
+// + .content-panel-header) as the "top of the visible area" on screen.
+function getPageStickyTopOffset() {
+    return 92 + getStickyHeaderOffset();
 }
 
 // Reads a leading point-number off a heading's own text, e.g.
@@ -405,15 +414,15 @@ function contentScrollKey(topicId, language) {
     return `${topicId}::${language}`;
 }
 
-function findVisibleHeadingInfo(host) {
+function findVisibleHeadingInfo() {
     const headings = [...document.querySelectorAll(HEADING_SELECTOR)];
     let index = -1;
     let bestTop = -Infinity;
-    const hostTop = host.getBoundingClientRect().top;
+    const visibleTop = getPageStickyTopOffset();
 
     headings.forEach((heading, i) => {
         const top = heading.getBoundingClientRect().top;
-        if (top <= hostTop + 24 && top > bestTop) {
+        if (top <= visibleTop + 24 && top > bestTop) {
             bestTop = top;
             index = i;
         }
@@ -429,10 +438,10 @@ function captureContentScrollPosition() {
     const host = document.getElementById("middle-panel");
     if (!host || !selectedTopicNode) return null;
 
-    const info = findVisibleHeadingInfo(host);
+    const info = findVisibleHeadingInfo();
 
     const state = {
-        scrollTop: host.scrollTop,
+        scrollTop: window.scrollY,
         headingIndex: info.index,
         headingNumber: info.number
     };
@@ -449,12 +458,12 @@ function rememberBeforeContentVariantSwitch() {
     const host = document.getElementById("middle-panel");
     if (!host || !selectedTopicNode) return;
 
-    const info = findVisibleHeadingInfo(host);
+    const info = findVisibleHeadingInfo();
     pendingScrollRestore = {
         mode: "semantic",
         headingIndex: info.index,
         headingNumber: info.number,
-        fallbackScrollTop: host.scrollTop
+        fallbackScrollTop: window.scrollY
     };
 }
 
@@ -476,12 +485,12 @@ function restoreContentScrollPosition() {
         const target = contentScrollMemory.get(
             contentScrollKey(selectedTopicNode.id, currentContentLanguage)
         );
-        host.scrollTop = target ? target.scrollTop : 0;
+        window.scrollTo(0, target ? target.scrollTop : 0);
         return;
     }
 
     const headings = [...document.querySelectorAll(HEADING_SELECTOR)];
-    const hostRect = host.getBoundingClientRect();
+    const visibleTop = getPageStickyTopOffset();
 
     // 1. Preferred: find the SAME point-number in the new content,
     // wherever it now sits — robust to a different total heading
@@ -490,7 +499,7 @@ function restoreContentScrollPosition() {
         const match = headings.find(h => extractHeadingNumber(h.textContent) === pending.headingNumber);
         if (match) {
             const headingRect = match.getBoundingClientRect();
-            host.scrollTop += headingRect.top - hostRect.top - getStickyHeaderOffset() - 12;
+            window.scrollTo(0, window.scrollY + headingRect.top - visibleTop - 12);
             return;
         }
     }
@@ -499,12 +508,13 @@ function restoreContentScrollPosition() {
     // for headings that never carried a number to begin with.
     if (pending.headingIndex >= 0 && headings[pending.headingIndex]) {
         const headingRect = headings[pending.headingIndex].getBoundingClientRect();
-        host.scrollTop += headingRect.top - hostRect.top - getStickyHeaderOffset() - 12;
+        window.scrollTo(0, window.scrollY + headingRect.top - visibleTop - 12);
         return;
     }
 
-    // 3. Last resort: same scrollTop, clamped to the new content's height.
-    host.scrollTop = Math.min(pending.fallbackScrollTop || 0, Math.max(0, host.scrollHeight - host.clientHeight));
+    // 3. Last resort: same scroll position, clamped to the new page's height.
+    const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    window.scrollTo(0, Math.min(pending.fallbackScrollTop || 0, maxScroll));
 }
 
 function scheduleContentScrollRestore() {
@@ -877,14 +887,13 @@ function buildContentTocPanel() {
 }
 
 function scrollContentToHeading(headingEl) {
-    // #middle-panel is the actual scrollable element (.panel has
-    // overflow:auto) — same host restoreContentScrollPosition() uses,
-    // NOT #topic-content, which has no scroll of its own.
-    const host = document.getElementById("middle-panel");
-    if (!host || !headingEl) return;
-    const hostRect = host.getBoundingClientRect();
+    // The page itself scrolls now (Phase 1 layout redesign) — #middle-panel
+    // no longer has its own scroll viewport, so this scrolls the window
+    // and clears both stacked sticky headers instead.
+    if (!headingEl) return;
     const headingRect = headingEl.getBoundingClientRect();
-    host.scrollTop += headingRect.top - hostRect.top - getStickyHeaderOffset() - 12;
+    const visibleTop = getPageStickyTopOffset();
+    window.scrollTo(0, window.scrollY + headingRect.top - visibleTop - 12);
 }
 
 function toggleContentTocPanel() {
