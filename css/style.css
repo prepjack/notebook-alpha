@@ -37,14 +37,83 @@ body {
 }
 
 .app-footer {
-    height: 34px;
     margin-top: 14px;
+    padding: 18px 20px 22px;
+    border-top: 1px solid var(--line);
     box-sizing: border-box;
-    padding: 8px 20px;
-    text-align: center;
     color: var(--muted);
-    font: 11px/1 Arial, sans-serif;
-    letter-spacing: .3px;
+    font: 11px/1.45 Arial, sans-serif;
+}
+
+.app-footer-inner {
+    width: 100%;
+    max-width: 1400px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: center;
+    gap: 18px;
+}
+
+.app-footer-brand {
+    min-width: 0;
+}
+
+.app-footer-logo {
+    color: var(--green);
+    font: 600 13px/1.2 Georgia, serif;
+    letter-spacing: .02em;
+}
+
+.app-footer-tagline {
+    margin-top: 4px;
+    max-width: 430px;
+}
+
+.app-footer-nav {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 7px 16px;
+    white-space: nowrap;
+}
+
+.app-footer-nav a,
+.app-footer-current {
+    color: var(--muted);
+    text-decoration: none;
+}
+
+.app-footer-nav a:hover {
+    color: var(--green);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.app-footer-current {
+    color: var(--text);
+    font-weight: 600;
+}
+
+.app-footer-copy {
+    text-align: right;
+}
+
+@media (max-width: 760px) {
+    .app-footer-inner {
+        grid-template-columns: 1fr;
+        justify-items: center;
+        text-align: center;
+    }
+
+    .app-footer-tagline {
+        max-width: 100%;
+    }
+
+    .app-footer-copy {
+        text-align: center;
+    }
 }
 
 /* Header */
@@ -2381,6 +2450,34 @@ body.index-directory-resizing .index-directory-workspace {
     text-transform:uppercase;
 }
 .hierarchy-help span{color:#536258}
+
+/* PHASE 6 — shared header consistency across Home / Index / MCQ.
+   Page-specific content may differ, but the header shell itself does not. */
+.app-header,
+.index-directory-page .app-header,
+.mcq-page .app-header {
+    height: 92px !important;
+    min-height: 92px;
+    box-sizing: border-box;
+    position: sticky;
+    top: 0;
+    z-index: 500;
+    background: var(--paper);
+    border-bottom: 1px solid var(--line);
+}
+
+.app-header h1,
+.index-directory-page .app-header h1,
+.mcq-page .app-header h1 {
+    margin: 0 !important;
+    padding: 0 !important;
+    height: 32px;
+    line-height: 32px !important;
+    font-size: 27px !important;
+    font-weight: 500;
+    font-family: Georgia, "Times New Roman", serif;
+    color: var(--text);
+}
 
 /* =========================================================
    STEP 32 — MCQ TWO-PANEL PRACTICE INTERFACE
