@@ -2226,30 +2226,6 @@ body.index-directory-resizing .index-directory-workspace {
     color:var(--green);
 }
 
-/* =========================================================
-   "My reading time" — actual active-reading-time toggle.
-   Same visual language as .read-time-btn above, but placed
-   inline at the end of the article rather than pinned to a
-   corner. A completely separate feature from Read Time — see
-   reading-tools.js.
-   ========================================================= */
-.my-reading-time-row{
-    margin:22px 0 4px;
-    text-align:left;
-}
-.my-reading-time-btn{
-    padding:5px 12px;
-    border:1px solid var(--line);
-    border-radius:6px;
-    background:#fff;
-    color:var(--green);
-    cursor:pointer;
-    font:700 11px Arial,sans-serif;
-    letter-spacing:.04em;
-}
-.my-reading-time-btn:hover{
-    background:var(--green-soft);
-}
 .tree-label{
     display:flex !important;
     align-items:baseline;
