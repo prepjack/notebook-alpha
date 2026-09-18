@@ -2202,6 +2202,65 @@ body.index-directory-resizing .index-directory-workspace {
 }
 
 /* =========================================================
+   STEP 33 — PHASE 2: BOTTOM ACTION STRIP
+   Visual mirror of the top #content-toggle-row: same sticky
+   approach (against #middle-panel, the same containing block
+   .content-panel-header already relies on) but pinned to the
+   BOTTOM edge instead of the top, so it stays visible at the
+   bottom of the content panel without needing the user to
+   scroll all the way down to the true end of the article.
+   ========================================================= */
+.content-bottom-strip{
+    position:sticky;
+    bottom:0;
+    z-index:30;
+    display:flex;
+    align-items:center;
+    flex-wrap:wrap;
+    gap:10px;
+    margin-top:24px;
+    padding:10px 0;
+    background:var(--paper);
+    border-top:1px solid var(--line);
+}
+.bottom-strip-btn{
+    padding:4px 10px;
+    border:1px solid var(--line);
+    border-radius:7px;
+    background:#fff;
+    color:var(--green);
+    cursor:pointer;
+    font:700 10px Arial,sans-serif;
+    letter-spacing:.04em;
+    white-space:nowrap;
+}
+.bottom-strip-btn:hover:not(:disabled){
+    background:var(--green-soft);
+}
+.bottom-strip-btn:disabled{
+    color:#b7c2bb;
+    cursor:not-allowed;
+    background:#f5f7f5;
+}
+.reading-status-indicator{
+    font:700 10px Arial,sans-serif;
+    letter-spacing:.04em;
+    color:var(--green);
+}
+.reading-time-result{
+    font:700 11px Arial,sans-serif;
+    letter-spacing:.02em;
+    color:var(--text);
+}
+.post-read-actions{
+    display:inline-flex;
+    align-items:center;
+    flex-wrap:wrap;
+    gap:8px;
+    margin-left:auto;
+}
+
+/* =========================================================
    CONTENT outline (TOC) panel — opens as a "curtain" right
    under the sticky header (label + toggles + read-time +
    progress line), overlaying the article beneath it.

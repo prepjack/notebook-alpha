@@ -115,17 +115,204 @@
 
 
 // =========================================================
+// STEP 33 — PHASE 2: BOTTOM ACTION STRIP — Start/End Read
+//
+// Measures actual ACTIVE reading time for the current article, for
+// the #content-bottom-strip Start Read / End Read buttons. This is
+// a bounded, one-shot session (Start -> End), unlike the old,
+// removed "My reading time" feature it adapts, which ran
+// continuously and showed a live label the whole time — that live
+// display was an explicit design mistake we're not repeating here:
+// this feature NEVER shows a running/ticking number, only a static
+// "reading in progress" indicator while active and a single revealed
+// total once "End Read" is clicked.
+//
+// Activity is approximated the same way the old feature did (see
+// git history, commit 1096785, for that reference implementation):
+//   - the tab is visible (not backgrounded), AND
+//   - the user has interacted (scroll/mouse/keyboard/touch) within
+//     the last INACTIVITY_LIMIT_MS.
+// A 1-second ticker only accumulates seconds while both hold AND a
+// reading session is currently in progress.
+// =========================================================
+(function () {
+    const INACTIVITY_LIMIT_MS = 60 * 1000; // no activity for 60s = paused
+    const TICK_MS = 1000;
+
+    let activeSeconds = 0;
+    let isReading = false;
+    let lastActivityTs = Date.now();
+    let tickHandle = null;
+
+    function els() {
+        return {
+            startBtn: document.getElementById("start-read-btn"),
+            endBtn: document.getElementById("end-read-btn"),
+            status: document.getElementById("reading-status-indicator"),
+            result: document.getElementById("reading-time-result"),
+            postActions: document.getElementById("post-read-actions")
+        };
+    }
+
+    function formatDuration(totalSeconds) {
+        const m = Math.floor(totalSeconds / 60);
+        const s = totalSeconds % 60;
+        return `You read for ${m} min ${s} sec`;
+    }
+
+    function markActive() {
+        lastActivityTs = Date.now();
+    }
+
+    function isCurrentlyActive() {
+        if (document.hidden) return false;
+        return (Date.now() - lastActivityTs) < INACTIVITY_LIMIT_MS;
+    }
+
+    function tick() {
+        if (!isReading || !isCurrentlyActive()) return;
+        activeSeconds += 1; // accumulated silently — never displayed live
+    }
+
+    function startTicker() {
+        stopTicker();
+        tickHandle = setInterval(tick, TICK_MS);
+    }
+
+    function stopTicker() {
+        if (tickHandle) {
+            clearInterval(tickHandle);
+            tickHandle = null;
+        }
+    }
+
+    // Call at the START of rendering a (possibly new) topic's content —
+    // same lifecycle moment app.js already resets the Read Time button
+    // at — so switching topics OR switching EN/HI/AI fully resets the
+    // strip back to its initial "Start Read" state, exactly like the
+    // old reading-time features used to reset.
+    function onNewArticle() {
+        stopTicker();
+        activeSeconds = 0;
+        isReading = false;
+        markActive();
+
+        const { startBtn, endBtn, status, result, postActions } = els();
+        if (startBtn) {
+            startBtn.hidden = false;
+            startBtn.disabled = false;
+            startBtn.textContent = "Start Read";
+        }
+        if (endBtn) {
+            endBtn.hidden = true;
+            endBtn.disabled = true;
+        }
+        if (status) status.hidden = true;
+        if (result) {
+            result.hidden = true;
+            result.textContent = "";
+        }
+        if (postActions) postActions.hidden = true;
+    }
+
+    // Call AFTER the current topic's rendered Markdown is actually in
+    // the DOM. The strip's own state was already reset by onNewArticle()
+    // just before, so there's nothing to recompute here — this hook
+    // exists purely so app.js's single onContentRendered() call keeps
+    // reaching every reading-tools feature uniformly.
+    function onContentRendered() {
+        markActive();
+    }
+
+    function handleStartRead() {
+        if (isReading) return;
+        isReading = true;
+        activeSeconds = 0;
+        markActive();
+        startTicker();
+
+        const { startBtn, endBtn, status } = els();
+        if (startBtn) startBtn.hidden = true;
+        if (endBtn) {
+            endBtn.hidden = false;
+            endBtn.disabled = false;
+        }
+        if (status) {
+            status.hidden = false;
+            status.textContent = "● Reading…";
+        }
+    }
+
+    function handleEndRead() {
+        if (!isReading) return;
+        isReading = false;
+        stopTicker();
+
+        const { endBtn, status, result, postActions } = els();
+        if (endBtn) {
+            endBtn.hidden = true;
+            endBtn.disabled = true;
+        }
+        if (status) status.hidden = true;
+        if (result) {
+            result.hidden = false;
+            result.textContent = formatDuration(activeSeconds); // one-time reveal, not a running counter
+        }
+        if (postActions) postActions.hidden = false;
+    }
+
+    // Take Test / Revise / Flashcard: visually wired, functionally inert
+    // for this phase. Real behavior depends on systems (MCQ linking,
+    // revision view, flashcards) tracked separately, outside these
+    // layout phases.
+    function handlePostReadStub(action) {
+        console.log(`[Notebook Alpha] "${action}" clicked — not implemented yet (tracked separately from the layout phases).`);
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+        const { startBtn, endBtn, postActions } = els();
+        if (startBtn) startBtn.addEventListener("click", handleStartRead);
+        if (endBtn) endBtn.addEventListener("click", handleEndRead);
+        if (postActions) {
+            postActions.addEventListener("click", (event) => {
+                const btn = event.target.closest("[data-post-read-action]");
+                if (!btn) return;
+                handlePostReadStub(btn.dataset.postReadAction);
+            });
+        }
+
+        document.addEventListener("mousemove", markActive, { passive: true });
+        document.addEventListener("keydown", markActive, { passive: true });
+        document.addEventListener("touchstart", markActive, { passive: true });
+        document.addEventListener("touchmove", markActive, { passive: true });
+        window.addEventListener("scroll", markActive, { passive: true });
+
+        // Coming back to the tab counts as activity too, so the timer
+        // doesn't read as instantly idle the moment focus returns,
+        // before any mousemove has happened yet.
+        document.addEventListener("visibilitychange", () => {
+            if (!document.hidden) markActive();
+        });
+    });
+
+    window.__BottomStripReadFeature = { onNewArticle, onContentRendered };
+})();
+
+
+// =========================================================
 // Combined dispatcher — app.js only knows about (and only ever
 // calls) window.ReadingTools.onNewArticle() / onContentRendered().
-// Currently forwards to the "Read time" estimate feature above;
-// kept as a single dispatcher object so app.js's call sites don't
-// need to change if another reading-tools feature is added later.
+// Forwards to every reading-tools feature above; kept as a single
+// dispatcher object so app.js's call sites don't need to change if
+// another reading-tools feature is added later.
 // =========================================================
 window.ReadingTools = {
     onNewArticle() {
         window.__ReadTimeFeature.onNewArticle();
+        window.__BottomStripReadFeature.onNewArticle();
     },
     onContentRendered() {
         window.__ReadTimeFeature.onContentRendered();
+        window.__BottomStripReadFeature.onContentRendered();
     }
 };

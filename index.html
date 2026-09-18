@@ -89,6 +89,25 @@
                     <h2>Select a topic</h2>
                     <p>Topic content will appear here.</p>
                 </div>
+
+                <!-- STEP 33 — PHASE 2: bottom action-strip. Visual mirror of
+                     #content-toggle-row, pinned to the bottom of this panel.
+                     Reusable: later phases drop a differently-populated copy
+                     of this same pattern into index-directory.html / mcq.html.
+                     Hidden state is driven from js/app.js, mirroring exactly
+                     the condition that gates #content-toggle-row (search
+                     updateLanguageToggleUI() / hideLanguageToggleRow()). -->
+                <div id="content-bottom-strip" class="content-bottom-strip" hidden>
+                    <button type="button" id="start-read-btn" class="bottom-strip-btn start-read-btn">Start Read</button>
+                    <button type="button" id="end-read-btn" class="bottom-strip-btn end-read-btn" hidden disabled>End Read</button>
+                    <span id="reading-status-indicator" class="reading-status-indicator" hidden></span>
+                    <span id="reading-time-result" class="reading-time-result" hidden></span>
+                    <div id="post-read-actions" class="post-read-actions" hidden>
+                        <button type="button" class="bottom-strip-btn" data-post-read-action="test">Take Test</button>
+                        <button type="button" class="bottom-strip-btn" data-post-read-action="revise">Revise</button>
+                        <button type="button" class="bottom-strip-btn" data-post-read-action="flashcard">Flashcard</button>
+                    </div>
+                </div>
             </section>
 
             <!-- RIGHT: references / index -->

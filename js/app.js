@@ -940,14 +940,20 @@ function switchContentLanguage(lang) {
 
 function updateLanguageToggleUI() {
     const row = document.getElementById("content-toggle-row");
+    // STEP 33 — PHASE 2: the bottom action-strip appears/disappears under
+    // exactly the same condition as the top language-toggle row (actual
+    // article content loaded for the current topic).
+    const bottomStrip = document.getElementById("content-bottom-strip");
     if (!row) return;
 
     if (!currentLanguageSplit) {
         row.hidden = true;
+        if (bottomStrip) bottomStrip.hidden = true;
         return;
     }
 
     row.hidden = false;
+    if (bottomStrip) bottomStrip.hidden = false;
 
     const langButtons = {
         EN: document.getElementById("lang-toggle-en"),
@@ -970,6 +976,10 @@ function hideLanguageToggleRow() {
     currentLanguageSplit = null;
     const row = document.getElementById("content-toggle-row");
     if (row) row.hidden = true;
+    // STEP 33 — PHASE 2: keep the bottom action-strip's visibility in
+    // lockstep with the top row it mirrors.
+    const bottomStrip = document.getElementById("content-bottom-strip");
+    if (bottomStrip) bottomStrip.hidden = true;
     closeContentTocPanel();
     const tocList = document.getElementById("content-toc-list");
     if (tocList) tocList.innerHTML = "";
