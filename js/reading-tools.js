@@ -44,12 +44,21 @@
         btn.textContent = showingTime ? minutesLabel(currentWordCount) : "Read time";
     }
 
-    // .app-header is sticky at 92px tall; content-panel-header (holding
-    // this progress bar) is sticky right below it — together they cover
-    // this much of the top of the viewport.
+    // content-panel-header (holding this progress bar) is sticky and
+    // covers this much of the top of the viewport on its own.
+    //
+    // STEP 34: on desktop .app-header is no longer sticky, so once it's
+    // scrolled away it stops covering anything — read its own live
+    // remaining height instead of assuming a flat 92px. Below 901px the
+    // header is still sticky (mobile keeps the old behaviour), so its
+    // 92px still counts there.
     function visibleTopOffset() {
         const header = document.querySelector("#middle-panel .content-panel-header");
-        return 92 + (header ? header.getBoundingClientRect().height : 0);
+        const appHeader = document.querySelector(".app-header");
+        const headerOffset = window.innerWidth > 900
+            ? Math.max(0, Math.min(92, appHeader ? appHeader.getBoundingClientRect().bottom : 0))
+            : 92;
+        return headerOffset + (header ? header.getBoundingClientRect().height : 0);
     }
 
     function updateProgress() {

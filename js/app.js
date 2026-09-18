@@ -662,10 +662,18 @@ function getStickyHeaderOffset() {
 // Since Phase 1 of the layout redesign, the page itself scrolls (the
 // natural-height workspace) instead of #middle-panel scrolling inside a
 // fixed-height box. Anything that used to read/write host.scrollTop now
-// needs the combined height of BOTH stacked sticky headers (.app-header
-// + .content-panel-header) as the "top of the visible area" on screen.
+// needs the "top of the visible area" on screen.
+//
+// STEP 34: on desktop, .app-header is no longer sticky — it scrolls
+// away, so it only reserves its 92px above the fold while the page is
+// still scrolled near the very top. Below that, .content-panel-header
+// alone sits at the true top:0. Below 901px, the header stays sticky
+// (mobile keeps the pre-STEP-34 behaviour), so its 92px keeps counting.
 function getPageStickyTopOffset() {
-    return 92 + getStickyHeaderOffset();
+    const headerOffset = window.innerWidth > 900
+        ? Math.min(92, document.querySelector(".app-header")?.getBoundingClientRect().bottom ?? 0)
+        : 92;
+    return Math.max(0, headerOffset) + getStickyHeaderOffset();
 }
 
 // Reads a leading point-number off a heading's own text, e.g.
@@ -4166,3 +4174,5 @@ initMobileDrawers({
         { panel: "right-panel", label: "References", icon: "▤", side: "right" }
     ]
 });
+
+

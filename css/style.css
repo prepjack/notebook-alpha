@@ -41,6 +41,10 @@ body {
     padding: 18px 20px 22px;
     border-top: 1px solid var(--line);
     box-sizing: border-box;
+    /* Match the header's paper background instead of the page's plain
+       --page tint, so the footer reads as a deliberate bookend bar
+       rather than blank leftover space below the last panel. */
+    background: var(--paper);
     color: var(--muted);
     font: 11px/1.45 Arial, sans-serif;
 }
@@ -120,7 +124,14 @@ body {
 .app-header {
     /* 92px is the live height (also enforced by the STEP 25 override
        below, which used to disagree with this rule's old 110px value —
-       reconciled here so there's a single source of truth). */
+       reconciled here so there's a single source of truth).
+       On the Home page, desktop-only, STEP 34 (min-width:901px block,
+       near the #left-panel/#right-panel sticky rules) sets
+       position:static !important, so instead of staying pinned the
+       header just scrolls away like ordinary content, and everything
+       normally sitting sticky right below it clips up to the true top
+       to fill the freed space. Index-directory, MCQ and mobile keep
+       this sticky as-is. */
     height: 92px;
     padding: 0 20px;
     display: flex;
@@ -181,6 +192,16 @@ body {
     margin-left: 10px;
     margin-right: 10px;
     padding: 0 34px 34px;
+    /* .panel's base overflow:auto turns #middle-panel into a scroll
+       container the moment its content is tall enough to need one —
+       which is always, for an article. Since it never actually scrolls
+       itself (the page does), that container just quietly breaks
+       position:sticky on .content-panel-header inside it: sticky is
+       computed against the NEAREST scrolling ancestor, so it was
+       sticking to this invisible, non-scrolling box instead of the
+       viewport. overflow:visible here lets .content-panel-header's
+       stickiness resolve against the real page scroll instead. */
+    overflow: visible;
 }
 
 #right-panel {
@@ -306,15 +327,43 @@ body {
         align-items: start;
     }
 
-    /* Left/right panels stay pinned in the viewport (under the sticky
-       header) while the middle panel's content scrolls past them. Each
-       is capped to the remaining viewport height so a long TOC/reference
-       list scrolls inside its own box instead of growing forever. */
+    /* STEP 34 — HOME PAGE ONLY: HEADER SCROLLS AWAY, EVERYTHING ELSE
+       CLIPS TO THE TRUE TOP TO MATCH.
+       .app-header stops being sticky and just scrolls away like
+       ordinary content, freeing 92px of vertical space. Scoped away
+       from Index-directory/MCQ (body:not(...)): extending this to
+       those two pages caused regressions there, so for now they keep
+       their original always-visible sticky header untouched.
+       !important is kept even scoped to Home, defensively: without it
+       this tied on specificity with the plain ".app-header" selector
+       inside the STEP 25 rule below and only won by source order,
+       which is fragile if that rule ever moves.
+       To compensate for the freed space, .content-panel-header and
+       #left-panel/#right-panel all move from their old top:92px to
+       top:0, so they clip to the true top of the viewport the moment
+       you've scrolled 92px, exactly when the header has scrolled fully
+       out of view. Desktop-only (this whole block is inside the
+       min-width:901px guard); mobile keeps the header sticky, since
+       the Phase 7 drawer overlays are fixed at top:92px and assume
+       it's still there. */
+    body:not(.index-directory-page):not(.mcq-page) .app-header {
+        position: static !important;
+    }
+
+    body:not(.index-directory-page):not(.mcq-page) .content-panel-header {
+        top: 0;
+    }
+
+    /* Left/right panels stay pinned in the viewport (clipping to the
+       true top once the header above them scrolls away) while the
+       middle panel's content scrolls past them. Each is capped to the
+       remaining viewport height so a long TOC/reference list scrolls
+       inside its own box instead of growing forever. */
     #left-panel,
     #right-panel {
         position: sticky;
-        top: 92px;
-        max-height: calc(100vh - 92px);
+        top: 0;
+        max-height: 100vh;
         overflow-y: auto;
     }
 }
@@ -2119,10 +2168,11 @@ body.index-directory-resizing .index-directory-workspace {
    ========================================================= */
 .content-panel-header{
     position:sticky;
-    /* .app-header is sticky and 92px tall (see the STEP 25 rule); this
-       sticks right below it instead of at the true top:0, now that the
-       page scrolls naturally rather than #middle-panel scrolling inside
-       its own fixed-height box. */
+    /* Base value: .app-header is sticky and 92px tall (see the STEP 25
+       rule), so this sticks right below it. STEP 34 (min-width:901px
+       block, near #left-panel/#right-panel) overrides this to top:0 on
+       desktop, since .app-header stops being sticky there and this
+       becomes the topmost pinned element once it scrolls away. */
     top:92px;
     z-index:30;
     padding-top:16px;
