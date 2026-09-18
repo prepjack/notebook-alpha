@@ -814,11 +814,13 @@ body.resizing-panels .workspace {
 }
 
 .index-directory-workspace {
-    height: calc(100vh - 110px);
+    /* Phase 4: natural page scroll. The listing determines the page height;
+       only the filter sidebar is viewport-capped on desktop below. */
     display: grid;
     grid-template-columns: var(--idx-left-width, 320px) minmax(300px, 1fr);
     gap: 0;
-    overflow: hidden;
+    overflow: visible;
+    align-items: start;
 }
 
 @media (min-width: 901px) {
@@ -826,6 +828,7 @@ body.resizing-panels .workspace {
         --idx-left-width: 320px;
         transition: grid-template-columns 220ms ease;
     }
+
 }
 
 body.index-directory-resizing .index-directory-workspace {
@@ -840,6 +843,19 @@ body.index-directory-resizing .index-directory-workspace {
     overflow-x: hidden;
     display: flex;
     flex-direction: column;
+}
+
+@media (min-width: 901px) {
+    /* Keep this declaration after the shared base rule so position:relative
+       above cannot override the Phase 4 sticky behavior. */
+    .index-directory-left {
+        position: sticky;
+        top: 92px;
+        max-height: calc(100vh - 92px);
+        overflow-x: hidden;
+        overflow-y: auto;
+        align-self: start;
+    }
 }
 
 #index-directory-resizer {
@@ -2516,11 +2532,12 @@ body.index-directory-resizing .index-directory-workspace {
 
 .mcq-workspace{
     display:grid;
-    grid-template-columns:minmax(0,1fr) 300px;
+    --mcq-right-width:300px;
+    grid-template-columns:minmax(0,1fr) var(--mcq-right-width);
     gap:12px;
-    height:calc(100vh - 92px);
-    overflow:hidden;
-    align-items:stretch;
+    min-height:0;
+    overflow:visible;
+    align-items:start;
     transition:grid-template-columns .2s ease;
 }
 
@@ -2559,9 +2576,9 @@ body.index-directory-resizing .index-directory-workspace {
 
 #mcq-question{
     padding:22px 24px 30px;
-    flex:1;
+    flex:none;
     min-height:0;
-    overflow-y:auto;
+    overflow:visible;
 }
 
 .mcq-question-footer{
@@ -2712,9 +2729,50 @@ body.index-directory-resizing .index-directory-workspace {
     cursor:pointer;
 }
 
+/* Sticky bottom navigation/action strip. The question footer is rendered here
+   by mcq.js, preserving the existing Previous/Next handlers while keeping
+   Submit Attempt permanently reachable during long questions. */
+.mcq-action-strip{
+    position:sticky;
+    bottom:12px;
+    z-index:100;
+    display:flex;
+    align-items:center;
+    gap:12px;
+    min-height:52px;
+    margin-top:12px;
+    padding:7px 10px;
+    box-sizing:border-box;
+    border:1px solid #9aab93;
+    border-radius:7px;
+    background:rgba(253,253,248,.97);
+    box-shadow:0 4px 14px rgba(38,51,43,.10);
+}
+
+.mcq-action-strip .mcq-question-footer{
+    flex:1;
+    min-width:0;
+    padding:0;
+    border:0;
+    background:transparent;
+}
+
+.mcq-action-strip .mcq-question-footer:empty{
+    display:block;
+}
+
+.mcq-action-strip .mcq-submit{
+    width:auto;
+    min-width:150px;
+    margin:0;
+    flex:none;
+}
+
 /* Right question navigator */
 .mcq-navigator{
-    position:relative;
+    position:sticky;
+    top:108px;
+    max-height:calc(100vh - 120px);
     min-width:0;
     background:#fff;
     border:1px solid #d5ddd5;
@@ -2740,6 +2798,27 @@ body.index-directory-resizing .index-directory-workspace {
     padding:0 9px 0 13px;
     border-bottom:1px solid #d8ded8;
     flex:none;
+}
+
+.mcq-nav-header-actions{
+    display:flex;
+    align-items:center;
+    gap:5px;
+}
+
+.mcq-nav-width-toggle{
+    width:25px;
+    height:25px;
+    border:0;
+    border-radius:5px;
+    background:#eef2ed;
+    color:#526158;
+    cursor:pointer;
+    font:16px/25px Arial,sans-serif;
+}
+
+.mcq-nav-width-toggle:hover{
+    background:#dfe8df;
 }
 
 .mcq-nav-toggle{
@@ -2863,9 +2942,16 @@ body.index-directory-resizing .index-directory-workspace {
     display:none;
 }
 
+@media(max-width:900px){
+    .mcq-nav-width-toggle{
+        display:none;
+    }
+}
+
 @media(max-width:850px){
     .mcq-workspace{
-        grid-template-columns:minmax(0,1fr) 230px;
+        --mcq-right-width:230px;
+        grid-template-columns:minmax(0,1fr) var(--mcq-right-width);
     }
     .mcq-question-text{font-size:17px}
 }
@@ -2875,6 +2961,9 @@ body.index-directory-resizing .index-directory-workspace {
         grid-template-columns:1fr;
     }
     .mcq-navigator{
+        position:relative;
+        top:auto;
+        max-height:none;
         min-height:170px;
     }
     .mcq-navigator.collapsed{
@@ -3630,4 +3719,36 @@ button.danger:hover,.mcq-collection-link.danger:hover{background:#fdeceb}
 }
 @keyframes index-sync-warning-out {
     to { opacity: 0; transform: translateY(6px); }
+}
+
+/* PHASE 5 FIX — Submit Attempt belongs to the question navigator, not the global bottom strip. */
+.mcq-nav-submit{
+    flex:none;
+    padding:10px 12px 12px;
+    border-top:1px solid #cdd6c8;
+    background:#eef1e9;
+}
+.mcq-nav-submit .mcq-submit{
+    display:block;
+    width:100%;
+    min-width:0;
+    margin:0;
+    box-sizing:border-box;
+}
+.mcq-action-strip .mcq-submit{
+    display:none;
+}
+
+/* PHASE 5 PANEL-BOUNDARY FIX — each control strip belongs to its own panel. */
+.mcq-main-column{
+    min-width:0;
+    display:flex;
+    flex-direction:column;
+}
+.mcq-main-column .mcq-action-strip{
+    width:100%;
+    align-self:stretch;
+}
+.mcq-nav-submit{
+    margin-top:auto;
 }

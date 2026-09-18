@@ -82,7 +82,7 @@ function escapeHtml(value) {
         .replaceAll("'", "&#039;");
 }
 
-const GOOGLE_SHEET_API =
+const MCQ_GOOGLE_SHEET_API =
     "https://script.google.com/macros/s/AKfycbzE7zuqKXMmvfoP6LNCRw159odJsqWW9O0hEWm7uHIelnQJz4x7iFMnbTDKvm8lpIw5QA/exec";
 
 
@@ -90,7 +90,7 @@ const GOOGLE_SHEET_API =
 // through get_mcqs(); the default doGet response no longer contains them.
 async function loadStudyTree() {
 
-    const response = await fetch(GOOGLE_SHEET_API);
+    const response = await fetch(MCQ_GOOGLE_SHEET_API);
 
     if (!response.ok) {
         throw new Error(
@@ -117,7 +117,7 @@ async function loadStudyTree() {
 // the old full-dump load used to, but scoped to whatever was fetched.
 async function loadMcqsForTopic(topicId) {
 
-    const url = GOOGLE_SHEET_API + "?action=get_mcqs" +
+    const url = MCQ_GOOGLE_SHEET_API + "?action=get_mcqs" +
         (topicId ? "&node_id=" + encodeURIComponent(topicId) : "");
 
     const response = await fetch(url);
@@ -538,7 +538,7 @@ async function deleteMcqCollectionPermanently(collectionId, title) {
     if (typed !== title) return;
 
     try {
-        await fetch(GOOGLE_SHEET_API, {
+        await fetch(MCQ_GOOGLE_SHEET_API, {
             method: "POST",
             mode: "no-cors",
             body: JSON.stringify({ action: "delete_mcq_collection", collection_id: collectionId })
@@ -560,7 +560,7 @@ async function loadFullMcqCollection(collectionId) {
     try {
         currentCollectionViewBackup = allLoadedMcqs.slice();
         currentCollectionViewApiBackup = mcqApiData;
-        const response = await fetch(GOOGLE_SHEET_API + "?action=get_mcqs&collection_id=" + encodeURIComponent(collectionId));
+        const response = await fetch(MCQ_GOOGLE_SHEET_API + "?action=get_mcqs&collection_id=" + encodeURIComponent(collectionId));
         if (!response.ok) throw new Error(`Collection fetch failed (${response.status})`);
         const data = await response.json();
         mcqApiData = data || { mcqs: [], passages: [], collections: [] };
@@ -881,6 +881,15 @@ function answerQuestionInAllView(index, optionIndex) {
 }
 
 document.getElementById("mcq-start").addEventListener("click", startAttempt);
+
+const mcqNavigatorWidthToggle = window.enablePanelWidthToggle?.("mcq-navigator", "--mcq-right-width", {
+    workspaceOrId: "mcq-workspace",
+    buttonOrId: "mcq-nav-width-toggle",
+    panelLabel: "question navigator",
+    minMiddle: 300,
+    minPanel: 260
+});
+
 
 document.getElementById("mcq-nav-toggle")?.addEventListener("click", () => {
     const navigator = document.getElementById("mcq-navigator");
@@ -1561,7 +1570,7 @@ function copyMcqAiPrompt() {
 // — not on every page load. Fire-and-forget: the popup renders
 // immediately either way, suggestions just fill in once this resolves.
 function refreshSitewideMcqTagSuggestions() {
-    fetch(GOOGLE_SHEET_API + "?action=get_mcqs")
+    fetch(MCQ_GOOGLE_SHEET_API + "?action=get_mcqs")
         .then(response => response.ok ? response.json() : null)
         .then(data => {
             if (data && data.mcqs) {
@@ -1932,7 +1941,7 @@ function closeAddMcqModal() {
 // submitAddMcq(), so a folder that accumulates several papers over time
 // just means every .md in it gets picked up on the next fetch.
 async function fetchMcqSourceFiles(ref) {
-    const url = `${GOOGLE_SHEET_API}?action=get_mcq_source&ref=${encodeURIComponent(ref)}`;
+    const url = `${MCQ_GOOGLE_SHEET_API}?action=get_mcq_source&ref=${encodeURIComponent(ref)}`;
     const response = await fetch(url);
     if (!response.ok) throw new Error(`Could not fetch the Drive source (${response.status}).`);
     const result = await response.json();
@@ -2096,7 +2105,7 @@ async function openTopicMcqFolder() {
     if (btn) { btn.disabled = true; btn.textContent = "Opening…"; }
 
     try {
-        const url = `${GOOGLE_SHEET_API}?action=get_or_create_node_folder&node_id=${encodeURIComponent(topic.id)}&_=${Date.now()}`;
+        const url = `${MCQ_GOOGLE_SHEET_API}?action=get_or_create_node_folder&node_id=${encodeURIComponent(topic.id)}&_=${Date.now()}`;
         const response = await fetch(url, { cache: "no-store" });
         if (!response.ok) throw new Error(`Folder API failed (${response.status})`);
 
@@ -2227,7 +2236,7 @@ async function confirmSaveMcqs() {
     };
 
     try {
-        await fetch(GOOGLE_SHEET_API, {
+        await fetch(MCQ_GOOGLE_SHEET_API, {
             method: "POST",
             mode: "no-cors",
             body: JSON.stringify(payload)
@@ -2430,7 +2439,7 @@ async function deleteMcqPermanently(mcq) {
     if (btn) { btn.disabled = true; btn.textContent = "Deleting…"; }
 
     try {
-        await fetch(GOOGLE_SHEET_API, {
+        await fetch(MCQ_GOOGLE_SHEET_API, {
             method: "POST",
             mode: "no-cors",
             body: JSON.stringify({ action: "delete_mcq", mcq_id: mcq.id })
@@ -2503,14 +2512,14 @@ async function saveMcqMeta(mcq) {
 
     try {
         if (Object.keys(fields).length) {
-            await fetch(GOOGLE_SHEET_API, {
+            await fetch(MCQ_GOOGLE_SHEET_API, {
                 method: "POST",
                 mode: "no-cors",
                 body: JSON.stringify({ action: "update_mcq_meta", mcq_id: mcq.id, fields })
             });
         }
         if (Object.keys(contentFields).length) {
-            await fetch(GOOGLE_SHEET_API, {
+            await fetch(MCQ_GOOGLE_SHEET_API, {
                 method: "POST",
                 mode: "no-cors",
                 body: JSON.stringify({ action: "update_mcq_content", mcq_id: mcq.id, fields: contentFields })
