@@ -1,6 +1,7 @@
 // flashcards.js
 //
-// Phase 8 — Flashcards v1 (per-topic, fixed 5-box Leitner).
+// Phase 8 — Flashcards v2: ONE bilingual deck per topic (English / हिंदी),
+// fixed 5-box Leitner. The deck does not depend on the EN/HI/AI toggle.
 //
 // Everything for the feature lives here: .md parsing, card ids,
 // localStorage scheduling, and the flip-card modal. Frontend-only —
@@ -8,8 +9,8 @@
 //
 // Public surface (window.Flashcards):
 //   splitArticleAndCards(rawLangChunk) -> { article, cards }   (used by app.js)
-//   setContext(topicId, langTag, rawCardsBlock)                (app.js, after render)
-//   onNewArticle()                                             (app.js, topic/lang change)
+//   setContext(topicId, rawCardsBlock)                         (app.js, after render)
+//   onNewArticle()                                             (app.js, new topic / re-render)
 //   updateButtonState()                                        (enable/disable Flashcard btn)
 //   open()                                                     (reading-tools.js)
 (function () {
@@ -19,8 +20,8 @@
     const FLASHCARDS_MARKER_RE = /^[ \t]*<!--\s*===FLASHCARDS===\s*-->[ \t]*$/m;
     const CARD_MARKER_RE = /^[ \t]*<!--\s*CARD\s*-->[ \t]*$/m;
 
-    // ---------- current context (which topic + language is open) ----------
-    let ctx = { topicId: "", lang: "EN", cards: [] };
+    // ---------- current context (which topic is open) ----------
+    let ctx = { topicId: "", cards: [] };
     let modalEl = null;
     let keyHandler = null;
 
@@ -28,7 +29,7 @@
     // §2 — Parsing
     // =========================================================
 
-    // Separates one language chunk into "article markdown" (goes to the
+    // Separates the whole file into "article markdown" (goes to the
     // normal renderer) and the raw flashcard block (never rendered as
     // article). No marker => chunk is returned untouched.
     function splitArticleAndCards(chunk) {
@@ -81,11 +82,62 @@
     }
 
     // =========================================================
+    // Bilingual split: "English / हिंदी"
+    // =========================================================
+    // Cards are authored as "English text / हिंदी text". A "/" is the
+    // separator only if there is NO Devanagari before it and SOME after
+    // it; when several slashes qualify the LAST one wins, so
+    // "input/output / इनपुट/आउटपुट" splits after "output", and Hindi-side
+    // alternates ("a / b / c") stay together on the Hindi side.
+    const DEVANAGARI_RE = /[\u0900-\u097F]/;
+
+    function splitOneSegment(text) {
+        let cut = -1;
+        for (let i = 0; i < text.length; i++) {
+            if (text[i] !== "/") continue;
+            const before = text.slice(0, i);
+            const after = text.slice(i + 1);
+            if (!DEVANAGARI_RE.test(before) && DEVANAGARI_RE.test(after)) cut = i;
+        }
+        if (cut === -1) return { en: text.trim(), hi: "" }; // no Hindi part
+        return { en: text.slice(0, cut).trim(), hi: text.slice(cut + 1).trim() };
+    }
+
+    // Single-line fields: one split over the whole text. Multi-line
+    // fields where SEVERAL lines each carry their own "English / हिंदी"
+    // pair (e.g. numbered lists) are split line by line, so the English
+    // and Hindi lists come out as two clean lists. A line with no
+    // separator goes to Hindi if it contains Devanagari, else English.
+    function splitBilingual(raw) {
+        const text = String(raw || "").trim();
+        const lines = text.split(/\r?\n/);
+        const pairs = lines.map(splitOneSegment);
+        const pairedLines = pairs.filter(p => p.hi).length;
+
+        if (lines.length > 1 && pairedLines > 1) {
+            const en = [];
+            const hi = [];
+            lines.forEach((line, i) => {
+                if (pairs[i].hi) {
+                    en.push(pairs[i].en);
+                    hi.push(pairs[i].hi);
+                } else if (DEVANAGARI_RE.test(line)) {
+                    hi.push(line.trim());
+                } else {
+                    en.push(line.trim());
+                }
+            });
+            return { en: en.join("\n"), hi: hi.join("\n") };
+        }
+        return splitOneSegment(text);
+    }
+
+    // =========================================================
     // §3 — Card identity
     // =========================================================
 
     // FNV-1a 32-bit -> base36. Non-cryptographic; only needs to avoid
-    // accidental collisions inside one topic+language.
+    // accidental collisions inside one topic.
     function hashString(str) {
         let h = 0x811c9dc5;
         for (let i = 0; i < str.length; i++) {
@@ -95,12 +147,13 @@
         return (h >>> 0).toString(36);
     }
 
-    // INTENDED BEHAVIOUR (not a bug): the id is derived from the FRONT
-    // text only. Editing a question later creates a "new" card with fresh
-    // scheduling; editing only the answer keeps the id and its history.
-    function makeCardId(topicId, lang, front) {
-        const normalized = String(front).trim().replace(/\s+/g, " ");
-        return `${topicId}::${lang}::${hashString(normalized)}`;
+    // INTENDED BEHAVIOUR (not a bug): the id is derived from the ENGLISH
+    // part of the FRONT only (plus the topic). Editing the English
+    // question creates a "new" card with fresh scheduling; editing the
+    // Hindi wording or any answer keeps the id and its history.
+    function makeCardId(topicId, frontEn) {
+        const normalized = String(frontEn).trim().replace(/\s+/g, " ").toLowerCase();
+        return `${topicId}::${hashString(normalized)}`;
     }
 
     // =========================================================
@@ -182,22 +235,26 @@
     // Context (called from app.js)
     // =========================================================
 
-    function setContext(topicId, lang, rawCardsBlock) {
-        const tag = String(lang || "EN").toUpperCase();
-        const cards = parseFlashcards(rawCardsBlock).map(c => ({
-            id: makeCardId(topicId, tag, c.front),
-            front: c.front,
-            back: c.back
-        }));
-        ctx = { topicId: String(topicId || ""), lang: tag, cards };
+    function setContext(topicId, rawCardsBlock) {
+        const seen = new Set();
+        const cards = [];
+        parseFlashcards(rawCardsBlock).forEach(c => {
+            const front = splitBilingual(c.front);
+            const back = splitBilingual(c.back);
+            const id = makeCardId(topicId, front.en || c.front);
+            if (seen.has(id)) return; // duplicate English question: keep the first
+            seen.add(id);
+            cards.push({ id, front, back });
+        });
+        ctx = { topicId: String(topicId || ""), cards };
         updateButtonState();
     }
 
-    // Wipes the previous topic/language's deck so it can never leak
+    // Wipes the previous topic's deck so it can never leak
     // into a newly opened one.
     function onNewArticle() {
         closeModal();
-        ctx = { topicId: "", lang: "EN", cards: [] };
+        ctx = { topicId: "", cards: [] };
         updateButtonState();
     }
 
@@ -206,7 +263,7 @@
         if (!btn) return;
         const has = ctx.cards.length > 0;
         btn.disabled = !has;
-        btn.title = has ? "" : "No flashcards for this topic/language yet";
+        btn.title = has ? "" : "No flashcards for this topic yet";
     }
 
     // =========================================================
@@ -219,13 +276,33 @@
         ));
     }
 
+    // "->" typed in plain text becomes a proper arrow (only when spaced,
+    // so code-ish text like a->b is left alone).
+    function niceArrows(text) {
+        return String(text).replace(/\s(?:-|\u2013|\u2014)>\s/g, " \u2192 ");
+    }
+
+    // One language's text. Single lines render INLINE (so "1. Generation
+    // -> 2. Collection" isn't swallowed into a one-item ordered list);
+    // multi-line text renders as normal block Markdown (real lists work).
     function renderMd(text) {
+        const src = niceArrows(text);
         try {
             if (window.marked && window.DOMPurify) {
-                return window.DOMPurify.sanitize(window.marked.parse(String(text)));
+                const html = src.includes("\n")
+                    ? window.marked.parse(src)
+                    : window.marked.parseInline(src);
+                return window.DOMPurify.sanitize(html);
             }
         } catch (err) { /* fall through to plain text */ }
-        return escapeHtml(text).replace(/\n/g, "<br>");
+        return escapeHtml(src).replace(/\n/g, "<br>");
+    }
+
+    // English on top, thin divider, हिंदी below. No Hindi => English only.
+    function renderFaceText(pair) {
+        const en = pair.en ? `<div class="flashcard-en">${renderMd(pair.en)}</div>` : "";
+        const hi = pair.hi ? `<div class="flashcard-hi">${renderMd(pair.hi)}</div>` : "";
+        return en + hi;
     }
 
     function closeModal() {
@@ -299,11 +376,11 @@
                 <div class="flashcard-scene">
                     <div class="flashcard-card" id="flashcard-card" tabindex="0" role="button" aria-label="Flip card">
                         <div class="flashcard-face flashcard-front">
-                            <div class="flashcard-text">${renderMd(card.front)}</div>
+                            <div class="flashcard-text">${renderFaceText(card.front)}</div>
                             <span class="flashcard-hint">tap to flip</span>
                         </div>
                         <div class="flashcard-face flashcard-back">
-                            <div class="flashcard-text">${renderMd(card.back)}</div>
+                            <div class="flashcard-text">${renderFaceText(card.back)}</div>
                         </div>
                     </div>
                 </div>
@@ -358,5 +435,5 @@
     updateButtonState();
 
     // Exposed for tests only; harmless in production.
-    window.Flashcards.__test = { parseFlashcards, makeCardId, addDaysIso, onKnewIt, onForgot, isDue, readStore };
+    window.Flashcards.__test = { parseFlashcards, splitBilingual, makeCardId, addDaysIso, onKnewIt, onForgot, isDue, readStore };
 })();

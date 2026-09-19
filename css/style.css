@@ -4290,3 +4290,21 @@ button.danger:hover,.mcq-collection-link.danger:hover{background:#fdeceb}
     line-height:1.5;
     color:var(--text);
 }
+
+/* Flashcards v2 — bilingual faces (English on top, हिंदी below) */
+.flashcard-hi{
+    margin-top:12px;
+    padding-top:12px;
+    border-top:1px solid var(--line);
+}
+.flashcard-en > :last-child,
+.flashcard-hi > :last-child{
+    margin-bottom:0;
+}
+.flashcard-en ol,.flashcard-en ul,
+.flashcard-hi ol,.flashcard-hi ul{
+    display:inline-block;
+    margin:0;
+    padding-left:1.3em;
+    text-align:left;
+}

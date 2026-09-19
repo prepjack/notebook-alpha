@@ -1017,40 +1017,33 @@ async function loadAndRenderMdFileContent(node, mdLink, container, token) {
 
 const LANG_MARKER_RE = /^[ \t]*<!--\s*===LANG:(EN|HI|AI)===\s*-->[ \t]*$/gm;
 
-// Phase 8 (Flashcards): strips a trailing <!--===FLASHCARDS===--> section
-// off a language chunk BEFORE the article goes to the Markdown renderer,
-// so flashcard markup can never leak into the rendered article.
-function separateFlashcards(chunk) {
-    if (window.Flashcards && chunk) return window.Flashcards.splitArticleAndCards(chunk);
-    return { article: chunk, cards: "" };
+// Phase 8 (Flashcards v2, bilingual): the topic has ONE deck, in a single
+// <!--===FLASHCARDS===--> section at the very END of the file (after the
+// last language block). It is cut off the whole file BEFORE the language
+// split, so flashcard markup can never leak into any rendered article and
+// never gets attached to whichever language block happens to come last.
+function separateFlashcards(text) {
+    if (window.Flashcards && text) return window.Flashcards.splitArticleAndCards(text);
+    return { article: text, cards: "" };
 }
 
 function splitContentByLanguage(rawMarkdown) {
-    const text = String(rawMarkdown || "");
+    const parts = separateFlashcards(String(rawMarkdown || ""));
+    const text = parts.article;
     const matches = [...text.matchAll(LANG_MARKER_RE)];
 
     if (!matches.length) {
-        const single = separateFlashcards(text);
-        return {
-            en: single.article, hi: null, ai: null, hasLanguageMarkers: false,
-            flashcards: { en: single.cards, hi: "", ai: "" }
-        };
+        return { en: text, hi: null, ai: null, hasLanguageMarkers: false, flashcards: parts.cards };
     }
 
-    const result = {
-        en: null, hi: null, ai: null, hasLanguageMarkers: true,
-        flashcards: { en: "", hi: "", ai: "" }
-    };
+    const result = { en: null, hi: null, ai: null, hasLanguageMarkers: true, flashcards: parts.cards };
     const keyByTag = { EN: "en", HI: "hi", AI: "ai" };
 
     matches.forEach((match, i) => {
         const tag = keyByTag[match[1]];
         const start = match.index + match[0].length;
         const end = i + 1 < matches.length ? matches[i + 1].index : text.length;
-        const chunk = text.slice(start, end).trim();
-        const parts = separateFlashcards(chunk);
-        result[tag] = parts.article || null; // an authored-but-empty block still counts as null (nothing to show)
-        result.flashcards[tag] = parts.cards;
+        result[tag] = text.slice(start, end).trim() || null;
     });
 
     return result;
@@ -1107,12 +1100,12 @@ function renderCurrentLanguageBlock(container) {
     const text = languageBlockFor(currentContentLanguage, currentLanguageSplit) || currentLanguageSplit.en || "";
     renderRichContent(text, container, currentContentAssets, currentContentAssetData);
     renderAlphaContentDiagnostic(container);
-    // Phase 8: tell the flashcard feature which topic + language is now
-    // on screen (falls back to EN exactly like the article text does).
+    // Phase 8: hand the topic's (language-independent) flashcard deck over.
     if (window.Flashcards) {
-        const shownLang = languageBlockFor(currentContentLanguage, currentLanguageSplit) ? currentContentLanguage : "EN";
-        const cards = (currentLanguageSplit.flashcards || {})[shownLang.toLowerCase()] || "";
-        window.Flashcards.setContext(selectedTopicNode ? selectedTopicNode.id : "", shownLang, cards);
+        window.Flashcards.setContext(
+            selectedTopicNode ? selectedTopicNode.id : "",
+            (currentLanguageSplit && currentLanguageSplit.flashcards) || ""
+        );
     }
     if (window.ReadingTools) window.ReadingTools.onContentRendered();
     scheduleContentScrollRestore();
