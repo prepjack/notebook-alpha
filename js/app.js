@@ -1219,16 +1219,22 @@ function updateLanguageToggleUI() {
     // exactly the same condition as the top language-toggle row (actual
     // article content loaded for the current topic).
     const bottomStrip = document.getElementById("content-bottom-strip");
+    // STEP 35: Start Read moved up next to #read-time-btn, but it's
+    // still gated on the same condition — no point offering it before
+    // any article is actually loaded.
+    const startBtn = document.getElementById("start-read-btn");
     if (!row) return;
 
     if (!currentLanguageSplit) {
         row.hidden = true;
         if (bottomStrip) bottomStrip.hidden = true;
+        if (startBtn) startBtn.hidden = true;
         return;
     }
 
     row.hidden = false;
     if (bottomStrip) bottomStrip.hidden = false;
+    if (startBtn) startBtn.hidden = false;
 
     const langButtons = {
         EN: document.getElementById("lang-toggle-en"),
@@ -1255,6 +1261,9 @@ function hideLanguageToggleRow() {
     // lockstep with the top row it mirrors.
     const bottomStrip = document.getElementById("content-bottom-strip");
     if (bottomStrip) bottomStrip.hidden = true;
+    // STEP 35: Start Read moved up next to #read-time-btn — same rule.
+    const startBtn = document.getElementById("start-read-btn");
+    if (startBtn) startBtn.hidden = true;
     closeContentTocPanel();
     const tocList = document.getElementById("content-toc-list");
     if (tocList) tocList.innerHTML = "";

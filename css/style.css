@@ -2253,9 +2253,40 @@ body.index-directory-resizing .index-directory-workspace {
 .content-toc-btn:disabled{
     opacity:1;
 }
-.read-time-btn{
+.start-read-btn{
     position:static;
     margin-left:auto;
+    flex:0 0 auto;
+    padding:3px 10px;
+    border:1px solid var(--green);
+    border-radius:6px;
+    background:var(--green);
+    color:#fff;
+    cursor:pointer;
+    font:700 10px Arial,sans-serif;
+    letter-spacing:.04em;
+    white-space:nowrap;
+}
+.start-read-btn:hover:not(:disabled){
+    opacity:.85;
+}
+.start-read-btn:disabled{
+    opacity:.5;
+    cursor:not-allowed;
+}
+/* STEP 36: End Read moved up here too, right next to Start Read (only
+   one of the two is ever visible at a time — see reading-tools.js).
+   It needs the same margin-left:auto Start Read has, so the header
+   doesn't visually jump: without it, the moment Start Read (which
+   carries the auto margin) hides and End Read (which otherwise
+   wouldn't) takes its place, nothing in the row would be pushed to
+   the right anymore and Read time would jump left to sit right after
+   the language toggle instead of staying put next to it. */
+#end-read-btn{
+    margin-left:auto;
+}
+.read-time-btn{
+    position:static;
     flex:0 0 auto;
     padding:3px 9px;
     border:1px solid var(--line);
@@ -2406,6 +2437,34 @@ body.index-directory-resizing .index-directory-workspace {
     flex-wrap:wrap;
     gap:8px;
     margin-left:auto;
+}
+.post-read-suggestion{
+    flex:1 1 100%;
+    margin:0;
+    font:italic 400 11px/1.4 Arial,sans-serif;
+    color:var(--muted);
+}
+.post-read-suggestion strong{
+    font-style:normal;
+    color:var(--green);
+}
+.reread-btn{
+    margin-left:10px;
+    border-color:var(--muted);
+    color:var(--muted);
+}
+.reread-btn:hover:not(:disabled){
+    background:var(--green-soft);
+    color:var(--green);
+}
+.post-read-flashcard{
+    background:var(--green);
+    border-color:var(--green);
+    color:#fff;
+}
+.post-read-flashcard:hover:not(:disabled){
+    background:var(--green);
+    opacity:.85;
 }
 
 /* =========================================================

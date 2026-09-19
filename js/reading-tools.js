@@ -127,14 +127,23 @@
 // STEP 33 — PHASE 2: BOTTOM ACTION STRIP — Start/End Read
 //
 // Measures actual ACTIVE reading time for the current article, for
-// the #content-bottom-strip Start Read / End Read buttons. This is
-// a bounded, one-shot session (Start -> End), unlike the old,
-// removed "My reading time" feature it adapts, which ran
-// continuously and showed a live label the whole time — that live
-// display was an explicit design mistake we're not repeating here:
-// this feature NEVER shows a running/ticking number, only a static
-// "reading in progress" indicator while active and a single revealed
-// total once "End Read" is clicked.
+// the Start Read / End Read buttons. This is a bounded, one-shot
+// session (Start -> End), unlike the old, removed "My reading time"
+// feature it adapts, which ran continuously and showed a live label
+// the whole time — that live display was an explicit design mistake
+// we're not repeating here: this feature NEVER shows a running/
+// ticking number, only a static "reading in progress" indicator while
+// active and a single revealed total once "End Read" is clicked.
+//
+// STEP 36: #start-read-btn AND #end-read-btn both now live up in
+// .content-panel-heading, right next to #read-time-btn, as a single
+// toggle — clicking Start Read reveals End Read in the same spot, so
+// the whole session runs without ever scrolling down. The status
+// indicator, revealed result, Flashcard suggestion, Test/Revise/
+// Flashcard and "Read Again" still live in #content-bottom-strip.
+// Nothing below needed to change for the button move itself: every
+// element is still looked up by id via els(), so it doesn't matter
+// which container each one physically sits in.
 //
 // Activity is approximated the same way the old feature did (see
 // git history, commit 1096785, for that reference implementation):
@@ -159,7 +168,9 @@
             endBtn: document.getElementById("end-read-btn"),
             status: document.getElementById("reading-status-indicator"),
             result: document.getElementById("reading-time-result"),
-            postActions: document.getElementById("post-read-actions")
+            suggestion: document.getElementById("post-read-suggestion"),
+            postActions: document.getElementById("post-read-actions"),
+            rereadBtn: document.getElementById("reread-btn")
         };
     }
 
@@ -195,18 +206,17 @@
         }
     }
 
-    // Call at the START of rendering a (possibly new) topic's content —
-    // same lifecycle moment app.js already resets the Read Time button
-    // at — so switching topics OR switching EN/HI/AI fully resets the
-    // strip back to its initial "Start Read" state, exactly like the
-    // old reading-time features used to reset.
-    function onNewArticle() {
-        stopTicker();
-        activeSeconds = 0;
-        isReading = false;
-        markActive();
-
-        const { startBtn, endBtn, status, result, postActions } = els();
+    // Shared by onNewArticle() (new topic/language — also zeroes the
+    // clock) and handleReread() (re-arm for the SAME article — leaves
+    // activeSeconds/isReading to their callers, since handleReread()
+    // needs isReading already false and a fresh clock too, same as a
+    // new article — the only real difference is a new article also
+    // wants to move on from any previous topic's leftover state, which
+    // is naturally true here already since both callers reset the
+    // same way). Just the shared DOM reset: back to "Start Read"
+    // visible up top, everything from End Read onward hidden.
+    function resetToStartState() {
+        const { startBtn, endBtn, status, result, suggestion, postActions, rereadBtn } = els();
         if (startBtn) {
             startBtn.hidden = false;
             startBtn.disabled = false;
@@ -221,7 +231,22 @@
             result.hidden = true;
             result.textContent = "";
         }
+        if (suggestion) suggestion.hidden = true;
         if (postActions) postActions.hidden = true;
+        if (rereadBtn) rereadBtn.hidden = true;
+    }
+
+    // Call at the START of rendering a (possibly new) topic's content —
+    // same lifecycle moment app.js already resets the Read Time button
+    // at — so switching topics OR switching EN/HI/AI fully resets the
+    // strip back to its initial "Start Read" state, exactly like the
+    // old reading-time features used to reset.
+    function onNewArticle() {
+        stopTicker();
+        activeSeconds = 0;
+        isReading = false;
+        markActive();
+        resetToStartState();
     }
 
     // Call AFTER the current topic's rendered Markdown is actually in
@@ -257,7 +282,7 @@
         isReading = false;
         stopTicker();
 
-        const { endBtn, status, result, postActions } = els();
+        const { endBtn, status, result, suggestion, postActions, rereadBtn } = els();
         if (endBtn) {
             endBtn.hidden = true;
             endBtn.disabled = true;
@@ -267,7 +292,24 @@
             result.hidden = false;
             result.textContent = formatDuration(activeSeconds); // one-time reveal, not a running counter
         }
+        if (suggestion) suggestion.hidden = false;
         if (postActions) postActions.hidden = false;
+        // Re-arms Start Read for the same article — see handleReread().
+        if (rereadBtn) rereadBtn.hidden = false;
+    }
+
+    // "Read Again" — lets the person start a fresh timed session on the
+    // SAME article without switching topics/language (which would also
+    // work, via onNewArticle(), but throws away their place) or
+    // reloading the page. Just re-arms Start Read up top and hides
+    // everything End-Read-onward, exactly like a fresh article would,
+    // minus actually touching the article itself.
+    function handleReread() {
+        stopTicker();
+        activeSeconds = 0;
+        isReading = false;
+        markActive();
+        resetToStartState();
     }
 
     // Take Test / Revise / Flashcard: visually wired, functionally inert
@@ -279,9 +321,10 @@
     }
 
     document.addEventListener("DOMContentLoaded", () => {
-        const { startBtn, endBtn, postActions } = els();
+        const { startBtn, endBtn, postActions, rereadBtn } = els();
         if (startBtn) startBtn.addEventListener("click", handleStartRead);
         if (endBtn) endBtn.addEventListener("click", handleEndRead);
+        if (rereadBtn) rereadBtn.addEventListener("click", handleReread);
         if (postActions) {
             postActions.addEventListener("click", (event) => {
                 const btn = event.target.closest("[data-post-read-action]");

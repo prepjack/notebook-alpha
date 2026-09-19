@@ -73,6 +73,8 @@
                                         onclick="switchContentLanguage('AI')">AI</button>
                             </div>
                         </div>
+                        <button type="button" id="start-read-btn" class="start-read-btn" hidden>Start Read</button>
+                        <button type="button" id="end-read-btn" class="bottom-strip-btn end-read-btn" hidden disabled>End Read</button>
                         <button type="button" id="read-time-btn" class="read-time-btn">Read time</button>
                     </div>
                     <div class="reading-progress-track">
@@ -96,16 +98,29 @@
                      of this same pattern into index-directory.html / mcq.html.
                      Hidden state is driven from js/app.js, mirroring exactly
                      the condition that gates #content-toggle-row (search
-                     updateLanguageToggleUI() / hideLanguageToggleRow()). -->
+                     updateLanguageToggleUI() / hideLanguageToggleRow()).
+                     STEP 36: Start Read AND End Read both now live up in
+                     .content-panel-heading, next to #read-time-btn, as a
+                     single toggle — clicking Start Read there reveals End
+                     Read right in its place, so the whole session can be
+                     run without ever scrolling down here. What's left down
+                     here only shows up once End Read (up top) is clicked:
+                     the "reading in progress" status while active, then the
+                     revealed time + a Flashcard suggestion + Test/Revise/
+                     Flashcard + Read Again (which re-arms Start Read up top
+                     for the same article, without switching topics or
+                     reloading the page). -->
                 <div id="content-bottom-strip" class="content-bottom-strip" hidden>
-                    <button type="button" id="start-read-btn" class="bottom-strip-btn start-read-btn">Start Read</button>
-                    <button type="button" id="end-read-btn" class="bottom-strip-btn end-read-btn" hidden disabled>End Read</button>
                     <span id="reading-status-indicator" class="reading-status-indicator" hidden></span>
                     <span id="reading-time-result" class="reading-time-result" hidden></span>
+                    <p id="post-read-suggestion" class="post-read-suggestion" hidden>
+                        💡 Suggestion: try <strong>Flashcard</strong> next to reinforce what you just read.
+                    </p>
                     <div id="post-read-actions" class="post-read-actions" hidden>
                         <button type="button" class="bottom-strip-btn" data-post-read-action="test">Take Test</button>
                         <button type="button" class="bottom-strip-btn" data-post-read-action="revise">Revise</button>
-                        <button type="button" class="bottom-strip-btn" data-post-read-action="flashcard">Flashcard</button>
+                        <button type="button" class="bottom-strip-btn post-read-flashcard" data-post-read-action="flashcard">Flashcard</button>
+                        <button type="button" id="reread-btn" class="bottom-strip-btn reread-btn" hidden>↻ Read Again</button>
                     </div>
                 </div>
             </section>
