@@ -4197,3 +4197,96 @@ button.danger:hover,.mcq-collection-link.danger:hover{background:#fdeceb}
     .app-header h1{font-size:23px !important;}
     .mcq-page .app-header h1{font-size:22px !important;}
 }
+
+
+/* =========================================================
+   PHASE 8 — FLASHCARDS v1 (Leitner) modal
+   Reuses .add-resource-overlay / .add-resource-modal / .bottom-strip-btn.
+   ========================================================= */
+.add-resource-modal.flashcard-modal{
+    width:min(560px,92vw);
+}
+.flashcard-progress{
+    margin:0 26px 12px 0;
+    font:700 10px Arial,sans-serif;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+    color:var(--muted);
+}
+.flashcard-scene{
+    perspective:1200px;
+}
+.flashcard-card{
+    position:relative;
+    height:240px;
+    cursor:pointer;
+    transform-style:preserve-3d;
+    transition:transform .4s;
+    outline:none;
+}
+.flashcard-card.flipped{
+    transform:rotateY(180deg);
+}
+.flashcard-card:focus-visible .flashcard-face{
+    border-color:var(--green);
+}
+.flashcard-face{
+    position:absolute;
+    inset:0;
+    display:flex;
+    padding:22px 20px 26px;
+    overflow:auto;
+    border:1px solid var(--line);
+    border-radius:11px;
+    background:var(--paper);
+    color:var(--text);
+    text-align:center;
+    backface-visibility:hidden;
+    -webkit-backface-visibility:hidden;
+}
+.flashcard-back{
+    background:var(--green-soft);
+    transform:rotateY(180deg);
+}
+.flashcard-text{
+    margin:auto; /* centres short text, still scrolls tall text from the top */
+    font-size:17px;
+    line-height:1.5;
+}
+.flashcard-text p{
+    margin:0 0 .5em;
+}
+.flashcard-text p:last-child{
+    margin-bottom:0;
+}
+.flashcard-hint{
+    position:absolute;
+    right:12px;
+    bottom:8px;
+    font:400 10px Arial,sans-serif;
+    letter-spacing:.04em;
+    color:var(--muted);
+}
+.flashcard-answers{
+    display:flex;
+    justify-content:center;
+    gap:12px;
+    margin-top:16px;
+}
+.flashcard-answers[hidden]{
+    display:none;
+}
+.flashcard-answers .bottom-strip-btn{
+    padding:7px 16px;
+    font-size:11px;
+}
+.flashcard-forgot{
+    color:var(--muted);
+}
+.flashcard-message{
+    padding:34px 10px 18px;
+    text-align:center;
+    font-size:16px;
+    line-height:1.5;
+    color:var(--text);
+}

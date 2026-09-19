@@ -329,6 +329,11 @@
             postActions.addEventListener("click", (event) => {
                 const btn = event.target.closest("[data-post-read-action]");
                 if (!btn) return;
+                // Phase 8: Flashcard is real now; Test/Revise stay stubs.
+                if (btn.dataset.postReadAction === "flashcard" && window.Flashcards) {
+                    window.Flashcards.open();
+                    return;
+                }
                 handlePostReadStub(btn.dataset.postReadAction);
             });
         }

@@ -837,6 +837,7 @@ function renderContentLayer() {
     // (possibly new) topic before its content is even in the DOM, so
     // the previous topic's numbers never briefly carry over.
     if (window.ReadingTools) window.ReadingTools.onNewArticle();
+    if (window.Flashcards) window.Flashcards.onNewArticle();
 
     if (activeContentLayer === "core") {
         const c = node.content || {};
@@ -1016,15 +1017,30 @@ async function loadAndRenderMdFileContent(node, mdLink, container, token) {
 
 const LANG_MARKER_RE = /^[ \t]*<!--\s*===LANG:(EN|HI|AI)===\s*-->[ \t]*$/gm;
 
+// Phase 8 (Flashcards): strips a trailing <!--===FLASHCARDS===--> section
+// off a language chunk BEFORE the article goes to the Markdown renderer,
+// so flashcard markup can never leak into the rendered article.
+function separateFlashcards(chunk) {
+    if (window.Flashcards && chunk) return window.Flashcards.splitArticleAndCards(chunk);
+    return { article: chunk, cards: "" };
+}
+
 function splitContentByLanguage(rawMarkdown) {
     const text = String(rawMarkdown || "");
     const matches = [...text.matchAll(LANG_MARKER_RE)];
 
     if (!matches.length) {
-        return { en: text, hi: null, ai: null, hasLanguageMarkers: false };
+        const single = separateFlashcards(text);
+        return {
+            en: single.article, hi: null, ai: null, hasLanguageMarkers: false,
+            flashcards: { en: single.cards, hi: "", ai: "" }
+        };
     }
 
-    const result = { en: null, hi: null, ai: null, hasLanguageMarkers: true };
+    const result = {
+        en: null, hi: null, ai: null, hasLanguageMarkers: true,
+        flashcards: { en: "", hi: "", ai: "" }
+    };
     const keyByTag = { EN: "en", HI: "hi", AI: "ai" };
 
     matches.forEach((match, i) => {
@@ -1032,7 +1048,9 @@ function splitContentByLanguage(rawMarkdown) {
         const start = match.index + match[0].length;
         const end = i + 1 < matches.length ? matches[i + 1].index : text.length;
         const chunk = text.slice(start, end).trim();
-        result[tag] = chunk || null; // an authored-but-empty block still counts as null (nothing to show)
+        const parts = separateFlashcards(chunk);
+        result[tag] = parts.article || null; // an authored-but-empty block still counts as null (nothing to show)
+        result.flashcards[tag] = parts.cards;
     });
 
     return result;
@@ -1089,6 +1107,13 @@ function renderCurrentLanguageBlock(container) {
     const text = languageBlockFor(currentContentLanguage, currentLanguageSplit) || currentLanguageSplit.en || "";
     renderRichContent(text, container, currentContentAssets, currentContentAssetData);
     renderAlphaContentDiagnostic(container);
+    // Phase 8: tell the flashcard feature which topic + language is now
+    // on screen (falls back to EN exactly like the article text does).
+    if (window.Flashcards) {
+        const shownLang = languageBlockFor(currentContentLanguage, currentLanguageSplit) ? currentContentLanguage : "EN";
+        const cards = (currentLanguageSplit.flashcards || {})[shownLang.toLowerCase()] || "";
+        window.Flashcards.setContext(selectedTopicNode ? selectedTopicNode.id : "", shownLang, cards);
+    }
     if (window.ReadingTools) window.ReadingTools.onContentRendered();
     scheduleContentScrollRestore();
     buildContentTocPanel();
@@ -1209,6 +1234,7 @@ function switchContentLanguage(lang) {
     // Reset/recompute reading-time state before rendering the newly selected
     // language content, so all reading tools use the live DOM.
     if (window.ReadingTools) window.ReadingTools.onNewArticle();
+    if (window.Flashcards) window.Flashcards.onNewArticle();
     renderCurrentLanguageBlock(container);
     updateLanguageToggleUI();
 }
@@ -1255,6 +1281,7 @@ function updateLanguageToggleUI() {
 
 function hideLanguageToggleRow() {
     currentLanguageSplit = null;
+    if (window.Flashcards) window.Flashcards.onNewArticle();
     const row = document.getElementById("content-toggle-row");
     if (row) row.hidden = true;
     // STEP 33 — PHASE 2: keep the bottom action-strip's visibility in
