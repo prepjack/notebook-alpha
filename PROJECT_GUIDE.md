@@ -7,6 +7,9 @@ This is the current frozen UI prototype before Google Sheets + Apps Script integ
 - `index.html` — main Study Notebook interface.
 - `css/style.css` — main visual styling for the notebook, MCQ interface and the Index directory page.
 - `js/app.js` — main notebook behaviour: subject/tree/index, content, resources, user additions/deletions.
+- `js/reading-tools.js` — reading UI helpers on the CONTENT panel: "Read time" button, reading-progress bar, and the Start Read / End Read timer with the post-read strip (Take Test / Revise / Flashcard / Read Again). Flashcard is real (opens `js/flashcards.js`); Take Test and Revise are still inert stubs (`handlePostReadStub`).
+- `js/flashcards.js` — per-topic bilingual flashcards with a fixed 5-box Leitner schedule (see "Learning aids: prompts, companion files & flashcards" below). Also parses the flashcard deck format and registers with progress sync.
+- `js/progress-sync.js` — learner-progress sync across the owner's devices plus manual Export/Import backup (see "Progress sync & backup" below). Load order in `index.html`: `app.js` → `progress-sync.js` → `flashcards.js`.
 - `js/index-data.js` — shared Index registry module (term building/dedup/lookup), used by both `js/app.js` and `js/index-directory.js` so the logic exists in exactly one place. See "Index registry" below.
 - `mcq.html` — separate MCQ practice page.
 - `js/mcq.js` — MCQ attempt/navigation/display behaviour.
@@ -205,7 +208,7 @@ lens onto it:
   the original global view (`renderIndexAZList()`, unchanged). Both read the
   same registry; switching scope never re-fetches from a different source.
 - Public-write abuse guard: `checkIndexWriteRateLimit_()` in `Code.gs` is a
-  simple GLOBAL rate limit (20 writes/60s across all visitors, via
+  simple GLOBAL rate limit (40 writes/60s across all visitors, via
   `CacheService`) applied to `sync_index_term` / `unlink_index_term` only.
   Flagging as a known gap: no OTHER public write action in `Code.gs`
   (`save_core`, `save_resource`, `save_structure`, etc.) has any throttling
@@ -238,6 +241,8 @@ content's underlying text *lives*, not how it gets *registered*.
 | Reference (Resource) | "Add resource" popup | `Resources` row |
 | MCQ | "Add MCQ" popup, or bulk-import from pasted Markdown | `MCQs` row(s) |
 | Index Term | Right-click "Mark as index term" | `Index_Terms` row (if new term) + `Index_Node` link row |
+| Flashcard deck (companion file) | Saved BY HAND as `flashcards.md` (AI output of the Flashcard prompt) in the topic's Drive folder — no website action registers it | Nothing in Sheets. Read live by `get_markdown` folder mode (`companions.flashcards`) |
+| Learner progress | Reviewing a flashcard (automatic), "Sync now", or Import backup | A `localStorage` entry on the device; after sync also an entry in `notebook-alpha-progress.json` in the owner's My Drive |
 
 ### Deletion
 
@@ -283,3 +288,171 @@ Relevant `Code.gs` functions: `getOrAddColumn_`, `flagOrphanedRows_`,
 `unlinkIndexTermByTerm_` (#12), `deleteIndexTermCascade_` (#16),
 `backfillAllOrphans` (#17, run once after deploying this system and
 any time you suspect something predates it).
+
+### Flashcards & progress (added 2026-09-20)
+
+- **Flashcard deck / `flashcards.md`**: lives in the topic's Drive folder, so it follows the folder. "Delete topic" (#1) trashes the folder and the file with it; a Drive-side folder deletion (#2) takes it too. "Remove all content" (#3) only clears the Sheet row, so the Drive files (including `flashcards.md`) stay, same as the main `.md`.
+- **Progress entries are never cleaned up** when a topic or a card is deleted: entries for cards that no longer exist just sit in `localStorage` and in `notebook-alpha-progress.json`, harmless but unused. There are no tombstones, so a deletion is not synced either. Known gap, fine for now.
+
+## Learning aids: AI prompts, companion files & flashcards (2026-09-20)
+
+Goal of this whole area: fix the "content dead-end / low retention" problem (read a topic, then nothing brings you back to it) with zero-cost tooling — no live AI API, no server-side user data beyond the single-owner progress file. AI does the *authoring* offline through copy-paste prompts; the site only reads the results.
+
+### The four prompts (one prompt per job — decided 2026-09-20)
+
+Why separate prompts: a very long prompt makes AI drop instructions (index markers were missing in some outputs), and the aids are derived from the FINISHED article, so they should be regenerable without touching it. **Rule of thumb:** anything that sits *inside* the article at an exact spot (`{{Term}}`, images, headings) stays in `content.md`; anything *derived from* the article that can be edited on its own gets its own companion file.
+
+| # | Prompt | Where it lives | What the AI returns | Status |
+|---|---|---|---|---|
+| 1 | **Content** | `CONTENT_LINK_AI_PROMPT` in `js/app.js`; popup "Copy AI Prompt" (plain copy) | ZIP: `content.md` (EN / HI / AI blocks, inline `{{Term}}` index markers) + assets | Live, deliberately unchanged (~17.6k chars, ~4.4k tokens). Flashcards are NOT part of it. |
+| 2 | **Flashcards** | `FLASHCARD_AI_PROMPT` in `js/app.js`; popup "Copy Flashcard Prompt" (+ "EN only" checkbox) | The deck as TEXT in one code block. The AI does not create the file; the owner saves it as `flashcards.md` in the topic's Drive folder | Live, confirmed working by the owner |
+| 3 | **`index-term.md`** | not built | Per-term language forms + short hover intro | Planned; blocked on an open decision, see Roadmap |
+| 4 | **Quick quiz** | not on the site | A small interactive quiz shown inside Gemini (works on mobile) | Draft below; popup button not built yet |
+
+**Flashcard prompt mechanics** (`copyFlashcardPrompt()` in `js/app.js`): fills topic name + breadcrumb (`buildTopicBreadcrumb`) and pastes the CURRENTLY LOADED text of the open topic (EN + HI, or EN only) into the prompt, so it can be pasted into any AI with no file attached. `stripForFlashcardPrompt()` removes mermaid/lottie/chart fences, image links and `{{ }}` brackets from the COPY only (the article is never changed). Placeholders are replaced with function replacers so `$&`-style text inside the content can't corrupt the result. If the clipboard is blocked a select-all textarea appears; over ~30k characters the alert suggests "EN only". The AI block is never included (only EN + HI: Hindi terminology comes from the HI block).
+
+**Card count rule** (only in the prompt, the site does not enforce it): one card per key concept/definition/classification/sequence/distinction actually taught, minimum 5, maximum 20 (about 5–8 for short topics, 15–20 for long ones), in the content's order, no duplicates, nothing that isn't in the content.
+
+**Wording rule (added 2026-09-20, the most important rule of the flashcard prompt):** the cards are for REVISION, and a reader remembers the content's exact words in the order they read them, so cards must reuse the content's own wording instead of paraphrasing it. In the prompt: default card = sentence completion (question = the content's own lead-in words + at most a minimal stem like "is?" / "क्या है?"; answer = the rest of the sentence copied word for word, cutting only whole words/clauses from the very start or end); lists, classifications and sequences are copied complete, in the content's order, with its numbering and terms; terms, names, numbers and years exactly as written; nothing added that isn't in the content; every card must be traceable to a source sentence; the English side comes from the EN block and the Hindi side from the HI block's own sentence (not a fresh translation, unless no Hindi content was pasted). The prompt includes one GOOD vs BAD example and a "check before you answer" list. AI can still drift, so spot-check a few cards against the article. An automatic "verify deck against article" check was suggested but not built.
+
+**Quiz prompt draft** (to be added to the popup as "Copy Quiz Prompt", with the same "prompt + current content" mechanism; not yet tested in Gemini):
+
+```
+You are a quiz generator for UGC NET (Library & Information Science) practice.
+
+TASK:
+Using ONLY the study content at the bottom, create a short interactive practice quiz and show it right here in a live preview (Canvas / interactive view). If this interface cannot render HTML, give me one complete self-contained HTML file in a single code block instead.
+
+QUIZ:
+- 10 multiple-choice questions, 4 options each, exactly one correct answer.
+- Cover the whole content evenly; do not cluster on one section.
+- UGC NET style: definitions, distinctions, classifications, sequences, "which of the following..." plus a few application-type questions.
+- Wrong options must be plausible (common confusions from the content), never silly.
+- Never use a fact that is not in the content. If unsure about a question, skip it.
+- Every question in English with the Hindi version directly below it (Devanagari; keep standard English technical terms). Options likewise bilingual and short.
+- Ignore image links, Mermaid/chart blocks and {{ }} markers; use only the text.
+
+BEHAVIOUR:
+- One question at a time, with progress like "3 / 10".
+- Tapping an option instantly shows correct/wrong (green/red) and a one-line explanation (EN + HI); then lock the answer and show a "Next" button.
+- Shuffle option order. Never use "all of the above" or "none of the above".
+- End screen: score, the questions missed with correct answers, and a "Try again" button that reshuffles.
+
+DESIGN:
+- Mobile-first: single column, large tap targets (min 48px), readable font, works in portrait.
+- One self-contained file: inline CSS + JS, no external libraries, fonts, images or network calls, no localStorage.
+- Clean, calm, light background.
+
+CONTENT (topic: <TOPIC NAME>, path: <HIERARCHY PATH>):
+<PASTE EN + HI CONTENT HERE>
+```
+
+The quiz is NOT a site feature: no quiz code, no score storage. (An MCQ-format quiz plugged into the MCQ system was considered and rejected by the owner: this is only for quick practice.)
+
+### Companion files (`Code.gs`, `get_markdown` folder mode)
+
+A topic folder may hold extra learning-aid files next to the main `.md`:
+
+| File name(s), case-insensitive | Purpose | Status |
+|---|---|---|
+| `flashcards.md` or `_flashcards.md` | the topic's flashcard deck | in use |
+| `index-term.md` or `_index-term.md` | per-term language forms / hover intro | reserved, already returned by the server, the site ignores it |
+
+- `handleGetContentFolder_` now returns `companions: { "flashcards": "...", "index-term": "..." }` (plain names, only those that exist) in addition to `content`, `assets`, `assetData`. Only FOLDER links return companions; a single-file link never does.
+- **Naming rule:** companion files, and ANY `.md` whose name starts with `_`, are never chosen as the main article and never appear in `assets` (helpers: `companionKeyForFile_`, `isUnderscoreMd_`). Before this, "first `.md` Drive returns" could have picked `flashcards.md` as the article. Main file choice is unchanged otherwise: `content.md` / `index.md` preferred, else the first remaining `.md`.
+- If both `x.md` and `_x.md` exist, `_x.md` wins (it sorts first).
+- The AI does not create these files. The owner saves the AI's text under the right name. Name typos matter: `flashcard.md` (no "s") is NOT recognised and could even be picked as the main article.
+- Site side (`js/app.js`): the fetch stores `companions` in `markdownCache`, `applyMdTextToContentPanel(..., companions)` keeps them in `currentContentCompanions`, and `renderCurrentLanguageBlock()` hands the deck to `Flashcards.setContext()`. **Precedence: `flashcards.md` companion wins over a deck pasted at the end of `content.md`.**
+
+### Flashcard deck format and behaviour (`js/flashcards.js`)
+
+**One deck per topic, bilingual, independent of the EN/HI/AI toggle.** The Flashcard button is enabled exactly when the open topic has a deck.
+
+Deck source, either of:
+1. `flashcards.md` in the topic folder (file may or may not start with the marker line), or
+2. a section at the very END of `content.md`, starting with `<!--===FLASHCARDS===-->`. `splitContentByLanguage()` cuts everything from the first marker off the whole file BEFORE splitting into language blocks (`separateFlashcards()`), so it can never leak into an article or attach to the last language block.
+
+Format:
+```
+<!--===FLASHCARDS===-->
+<!--CARD-->
+Q: English question / हिंदी प्रश्न
+A: English answer / हिंदी उत्तर
+```
+- Q and A may span several lines. Parsing is tolerant: `<!--CARD-->` ends a card, and so does a new `Q:` after an `A:` (AI often forgets the separator). Cards missing a Q or an A are dropped.
+- **English/Hindi split** (`splitBilingual`): a `/` is the separator only if there is NO Devanagari before it and SOME after it; if several qualify, the LAST one wins. So `input/output / इनपुट`, Hindi-side alternates (`a/b/c`) and a Hindi side that starts with "1. उत्पादन" all work. Multi-line fields where several lines each carry their own pair are split line by line into two clean lists. No Hindi at all = English only.
+- **Rendering:** English on top, thin divider, Hindi below, on both faces. Single-line text renders inline (so `1. Generation → 2. Collection` isn't turned into a one-item list), multi-line text renders as normal Markdown; spaced `->` / `–>` become `→`. Sanitised through marked + DOMPurify.
+- **Card ID** = `topicId::hash(lowercased, whitespace-normalised ENGLISH front)`, no language part. Editing the Hindi wording or an answer keeps the review history; editing the English question makes a brand-new card. A duplicate English question inside one topic keeps only the first.
+- **Scheduling (Leitner, fixed):** 5 boxes with intervals 1 / 3 / 7 / 15 / 30 days. A card with no entry is NEW and implicitly in box 1, so its first "Yaad tha ✓" moves it to box 2 (due in 3 days). "Yaad tha ✓" = box + 1 (max 5); "Bhool gaya ✗" = box 1, due tomorrow. A session shows the cards that are due (or never reviewed) at the moment the modal opens, each answer is saved immediately (closing early loses nothing), and there are two end states ("Session complete!" / "All caught up! Next review due <date>").
+- **Storage:** `localStorage["flashcards:leitner:v1"]` = `{ cardId: { box, dueDate: "yyyy-mm-dd", lastReviewed: "yyyy-mm-dd", ts: <ms> } }`. `ts` (added with progress sync) says exactly when the entry last changed.
+- Keyboard: Space/Enter flips, Esc closes. Modal reuses `.add-resource-overlay` / `.add-resource-modal` / `.bottom-strip-btn`; flip-card CSS is at the end of `css/style.css`.
+- Code touchpoints: `js/flashcards.js` (`splitArticleAndCards`, `parseFlashcards`, `splitBilingual`, `setContext`, `open`, Leitner `onKnewIt`/`onForgot`), `js/app.js` (`separateFlashcards`, `splitContentByLanguage`, `renderCurrentLanguageBlock`, the `onNewArticle()` call sites and `hideLanguageToggleRow`), `js/reading-tools.js` (Flashcard button click).
+- Not verified in a real browser by the assistant: everything was tested in Node + jsdom; the owner confirmed on the live site that flashcards work.
+
+## Progress sync & backup (2026-09-20)
+
+What it is: the owner's learner progress (today only flashcard boxes) follows them across their own devices AND browsers without any login and without a key, plus a manual JSON backup. `localStorage` stays the source of truth on every device/browser (each browser has its own storage, so each one needs syncing once); the server only ever MERGES.
+
+**History:** the first version used a shared `SYNC_KEY` (Script Property, `setupSyncKey()`, a key field in the panel). The owner decided on 2026-09-20 to drop it: nothing else in `Code.gs` is protected by a key either, and typing it into every browser was friction. The key code was removed everywhere; the client deletes any old `notebookAlpha:syncKey` it finds, and a leftover `SYNC_KEY` Script Property is ignored (safe to delete).
+
+### Data shape (versioned; each feature adds one namespace)
+```
+{ "v": 1, "exportedAt": "...",
+  "flashcards": { "<cardId>": { "box": 2, "dueDate": "2026-09-23", "lastReviewed": "2026-09-20", "ts": 1758350000000 } } }
+```
+**Merge rule (client, server and import all use it):** per entry, the one with the newest `ts` wins; entries without `ts` (written before sync existed) fall back to the `lastReviewed` date at midnight. On an exact tie the copy already stored is kept. Never overwrite, so phone + laptop reviews and old backups can't erase newer work. Incoming entries are validated (`box` 1–5, `dueDate` yyyy-mm-dd) before being accepted.
+
+### Pieces
+- **Client `js/progress-sync.js`** (`window.ProgressSync`): `register(name, { export, merge })` for features, `markDirty()` when a feature changes data, `sync()`, `snapshot()`, `mergeSnapshot()`, `exportBackup()`, `importBackupText()`, `openPanel()`. `js/flashcards.js` registers `"flashcards"` and calls `markDirty()` after each answer.
+- **UI:** header button `#progress-sync-btn` ("⟳ Sync", in `.header-subjects`) shows a "•" while changes are waiting, the last sync errored, or this browser never synced. **Clicking it opens the panel AND immediately runs a sync**, so it is never silent. The panel has "Sync now", a result line, "Latest sync: <time>", Export backup and Import backup.
+- **Messages (`describeOk`)**: "✓ Up to date. This device and the cloud already have the same latest progress." / "✓ Synced. Sent N card(s) from this device to the cloud." / "✓ Synced. Received N card update(s) from your other devices." / both / "Nothing to sync yet…" / offline ("Couldn't reach the cloud… safe on this device; it will retry") / not-confirmed-yet / errors.
+- **Background syncs** (after reviews, on page load) show a short toast (`#progress-sync-toast`) only when something was sent/received or something went wrong; nothing changed = no toast. If the panel is open its status line is used instead.
+- **First-run banner** (`#progress-sync-banner`): a browser with no `notebookAlpha:lastSync` and no `notebookAlpha:syncIntroDone` gets a card ("First time on this browser?") with "⟳ Sync now" (runs a sync and shows the result inside the banner) and "Start fresh here" (dismiss for good). Why it matters: reviewing cards on a fresh browser BEFORE syncing gives those cards a newer timestamp, which replaces their older history. Banner state is cleared by any successful sync.
+- **localStorage keys:** `flashcards:leitner:v1` (the data), `notebookAlpha:lastSync`, `notebookAlpha:syncDirty`, `notebookAlpha:syncIntroDone`.
+- **Server (`Code.gs`, section "PROGRESS SYNC")**: GET `?action=get_progress` (returns `data` + `server_time`) and POST `save_progress` `{data}`; functions `checkProgressRateLimit_` (global 60/minute), `getProgressFile_`, `readProgress_`, `progressEntryTs_`, `isValidProgressEntry_`, `sanitizeIncomingProgress_`, `mergeProgress_`, `countProgressEntries_`, `handleGetProgress_`, `handleSaveProgress_` (takes `LockService` around read-merge-write, like `syncIndexTerm_`). Script Property: `PROGRESS_FILE_ID`.
+- **The file** `notebook-alpha-progress.json` is created by `DriveApp.createFile` in the ROOT of the owner's My Drive on purpose, NOT inside "Study Notebook Content" (that tree is shared "anyone with the link can view" and children inherit it). Its sharing was not verified by the assistant: check it in Drive once.
+- **Future features need no server change:** unknown namespaces (`reread`, `mcq`, ...) that are `{ id: entry }` objects are preserved. They only need `register()` + `markDirty()` on the client, and their entries must carry `ts`.
+
+### Sync flow
+- `sync()`: GET the server copy, merge it into local data, count local entries the server lacks (or holds older); if any, POST the full local snapshot (`mode:"no-cors"`, response unreadable like every write in `Code.gs`), wait 1.8 s, GET again and CHECK the server now covers everything. If not confirmed the dirty flag stays and a retry runs after 12 s (max 3 automatic retries; a manual sync resets the count; the browser's `online` event also triggers a sync when changes are pending).
+- After the last review, `markDirty()` waits 5 s (debounce) then syncs, so a whole review session is about one sync. A browser that has synced before also syncs ~1.5 s after page load to pick up other devices' progress.
+- Entries stamped more than a day ahead of the SERVER clock are clamped by the server; the client compares against `server_time` so such an entry counts as delivered instead of leaving sync stuck "pending".
+
+### If a device dies or is lost
+- **Any number of devices and browsers** can sync; all merge into the one file. One that was offline for weeks merges per card, it doesn't overwrite.
+- **Laptop dead / new phone / new browser:** open the site; the first-run banner appears; press "⟳ Sync now" (or the header ⟳ Sync). All progress comes back from the Drive file. Same laptop, different browser = a new browser, sync there once too.
+- **Drive file deleted/trashed:** the next sync from any device recreates it from that device's local copy (`getProgressFile_(true)`). If the file AND every browser's local data are gone, only a backup helps: keep an occasional **Export backup**.
+- Verified in the Node/jsdom test harness against the real `Code.gs`: conflict resolution, disjoint merges, stale-backup import, invalid/oversized/far-future input, offline + retry, trashed file, new browser, first-run banner, click-always-shows-a-message.
+
+### Limits and honest caveats
+- **No key = anyone who has the web-app URL (it is in `js/app.js` on GitHub) could read the progress or overwrite entries** with a timestamp up to a day ahead of the server clock. The server only limits damage (rate limit, size/entry caps, entry validation, future-timestamp clamp). The data is low-value review schedules, but keep a backup. If that ever matters, a key or Google Sign-in can be added back without changing the data format.
+- **Single-user design.** Everyone using the site would share ONE progress file. When the site becomes "by public for public", per-user progress needs real identity (e.g. Google Sign-in + each user's own Drive/app-data). Keep the JSON format; it carries over.
+- Conflicts are decided by each device's own clock (`ts = Date.now()`): a device with a badly wrong clock can make an older review win.
+- After 3 failed automatic retries a device stays "dirty" until the `online` event, a page load, a new review or a manual sync.
+- No deletions are synced (no tombstones), see the lifecycle note.
+- The file grows ~100 bytes per card. Apps Script quotas and execution time limits were not verified.
+- iPhone Safari may open the exported JSON in a tab instead of downloading it: use Share → Save to Files.
+- Only tested in Node/jsdom against mocked Apps Script services, not on real Drive.
+
+## Roadmap & open decisions (as of 2026-09-20)
+
+**Done:** flashcards (bilingual deck, Leitner, modal), flashcard prompt + popup button, companion-file support in `Code.gs`, progress sync + backup. Deployed and confirmed by the owner: `Code.gs` (new version), `app.js`, `flashcards.js`, `style.css` up to the flashcard work. The sync work (`progress-sync.js`, `index.html`, the PROGRESS SYNC part of `Code.gs`, first with a key, then key-less on 2026-09-20) was delivered after that and is not yet confirmed live; if it was deployed in its key version, redeploy `Code.gs` as a New version and replace the site files.
+
+**Next, in the agreed order:**
+1. **Revision page** (`revision.html`, index-directory style; keep the per-topic Flashcard button as it is). One place to see everything due: due today, overdue, next 7 days, grouped by the tree (Subject → Unit → Topic) with counts, a "Review all due" button, and a due-count badge in the header as the "intimation". Needs first: (a) card text for topics not currently open, either fetch each topic's deck from Drive (slow, one call per topic) or store a snapshot of each card's text at review time (preferred, but big collections may need IndexedDB instead of `localStorage`; keep the snapshot in step when a topic is reopened, because editing an English question orphans the old ID); (b) it can only see topics the owner has opened, since decks live in Drive; a `has_flashcards` flag in the Sheet may be needed later. Pending small question from the owner: header link only, or also a "Due today" panel on the home page?
+2. **Re-read reminders:** End Read stores topic id + date, same 1/3/7/15/30 schedule, as a new sync namespace (`reread`).
+3. **MCQ revise:** needs `js/mcq.js` to see whether wrong answers are stored anywhere.
+4. **Popup:** shared builder for "prompt + current content" buttons (flashcards, quiz; EN-only checkbox for both), an optional "Copy content only" button, and the quiz button (test the draft in mobile Gemini first). The index-term button waits for item 5.
+5. **`index-term.md`:** design leaning: the Sheet keeps a term's IDENTITY (Index_Terms/Index_Node, manual right-click only), the file only ENRICHES it (language forms EN/HI/AI, short hover intro; tap on mobile). Blocked on the owner's decision: should the hover intro be per-topic or one global definition per term (global would need a Sheet column + `Code.gs` change)? Files needed before starting: `js/richcontent.js`, `js/index-directory.js`, `index-directory.html`, and the `Index_Terms` / `Index_Node` header rows. Risks noted: Hindi text-matching is fragile (inflection), so the prompt must say "copy the term exactly from that block" and unmatched terms should be flagged; the same term in HI/AI blocks would become separate Sheet terms unless an alias model exists; that alias idea is the seed for the deferred right-click scopes.
+6. **Content prompt hygiene:** `{{Term}}` markers are working again (dotted underline confirmed by the owner). AI still tends to mark terms only in the EN block. Cheap fixes if it keeps happening: a checklist line near "FINAL PACKAGE OUTPUT RULES" ("`{{Term}}` in every language block?") and a console warning when a block renders zero `.rc-index-suggestion` spans. Moving index terms to a separate file was judged not worth it for prompt length alone (~12% of the prompt).
+
+**Deferred / stubs:** Take Test and Revise buttons (inert), right-click index scopes, Google Sign-in for a public multi-user version, cleanup of progress entries for deleted topics.
+
+## Working notes for a future AI session
+
+- **Owner:** Mahender, sole developer/author, communicates in Hinglish (Hindi-English) and likes the explanation first, then the implementation. UGC NET (Library & Information Science) prep site. Financial constraint = architectural rule: no live AI API, static hosting (GitHub Pages `prepjack/notebook-alpha`), `localStorage` over server-side user data, zero-cost solutions.
+- **Deploying `Code.gs`:** paste, save, then Deploy → Manage deployments → Edit → Version: **New version** → Deploy. Ctrl+S alone does not update the live URL. The owner usually wants the COMPLETE `Code.gs` back, not a patch.
+- **Before working on X, ask for these files:** index terms / hover intro → `js/richcontent.js`, `js/index-directory.js`, `index-directory.html`, sheet headers; MCQ features → `js/mcq.js`, `js/mcq-parse.js`, `mcq.html`; content rendering → `js/richcontent.js`; anything that changes behaviour of an existing file → the latest version of that file (the owner edits between sessions).
+- **Conventions:** every write from the site is a `no-cors` POST whose response is unreadable, so success is verified with a follow-up GET (index terms, progress sync). GET responses ARE readable. No endpoint uses a key; public write endpoints have only a global rate limit (`checkIndexWriteRateLimit_` 40/60 s, `checkProgressRateLimit_` 60/min). New sheet columns are added lazily with `getOrAddColumn_`.
+- **Testing done so far:** Node + jsdom harnesses (real `Code.gs` run against mocked Apps Script services, two simulated devices) for flashcards, companion files and sync. These are not in the repo and nothing has been verified against real Drive/Apps Script by the assistant; ask the owner to test on the live site after each deploy.
+- **Keep this guide current:** whenever something in this file changes, update the relevant section in the same change (the Data lifecycle tables are the model for that).

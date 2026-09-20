@@ -3,11 +3,13 @@
 // Learner progress that lives in localStorage (today: flashcard Leitner
 // boxes; later: re-read reminders, MCQ revise data) gets two safety nets:
 //
-//   1. SYNC  — optional, automatic, across your own devices, through the
-//      same Google Apps Script backend as everything else. One shared
-//      SYNC KEY (set once per device) is the only credential; there is
-//      no login. localStorage stays the source of truth on every device;
-//      the server only ever MERGES (newest change per card wins).
+//   1. SYNC  — across the owner's devices AND browsers, through the same
+//      Google Apps Script backend as everything else. No login, no key.
+//      localStorage stays the source of truth on every device; the server
+//      only ever MERGES (newest change per card wins). Sync is never
+//      silent: pressing "⟳ Sync" always shows what happened, background
+//      syncs show a short toast, and a brand-new browser is told to sync
+//      first so its old progress comes in.
 //   2. BACKUP — Export / Import a JSON file by hand. Import also MERGES,
 //      it never overwrites, so an old backup can't erase newer reviews.
 //
@@ -20,23 +22,29 @@
 //
 // Load order: this file must load BEFORE the features that register.
 (function () {
-    const KEY_STORAGE = "notebookAlpha:syncKey";
     const LAST_SYNC_STORAGE = "notebookAlpha:lastSync";
     const DIRTY_STORAGE = "notebookAlpha:syncDirty";
+    const INTRO_STORAGE = "notebookAlpha:syncIntroDone";
+    const OLD_KEY_STORAGE = "notebookAlpha:syncKey"; // an earlier version used a key; now removed
     const MAX_RETRIES = 3;
     const MAX_IMPORT_BYTES = 20 * 1024 * 1024;
+    const DAY_MS = 24 * 60 * 60 * 1000;
 
     // Mutable on purpose (tests shorten these).
     const config = {
         DEBOUNCE_MS: 5000,      // wait after the last review before pushing
         VERIFY_DELAY_MS: 1800,  // let the no-cors POST land before re-reading
-        RETRY_DELAY_MS: 12000
+        RETRY_DELAY_MS: 12000,
+        TOAST_MS: 4200,
+        LOAD_SYNC_DELAY_MS: 1500,
+        BANNER_DELAY_MS: 1200
     };
 
     const modules = {};
     let syncing = false;
     let debounceTimer = null;
     let retryTimer = null;
+    let toastTimer = null;
     let retryCount = 0;
     let status = { state: "idle", message: "" };
 
@@ -56,9 +64,6 @@
     function api() {
         return (typeof GOOGLE_SHEET_API === "string" && GOOGLE_SHEET_API) ? GOOGLE_SHEET_API : "";
     }
-    function getKey() {
-        return (lsGet(KEY_STORAGE) || "").trim();
-    }
     function isDirty() {
         return lsGet(DIRTY_STORAGE) === "1";
     }
@@ -69,6 +74,9 @@
     function todayIso() {
         const d = new Date();
         return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    }
+    function plural(n, word) {
+        return n + " " + word + (n === 1 ? "" : "s");
     }
 
     // Same rule as the features use: exact `ts` if present, else the
@@ -95,6 +103,13 @@
         return snap;
     }
 
+    function countEntries(snap) {
+        return Object.keys(modules).reduce((sum, name) => {
+            const part = snap && snap[name];
+            return sum + (part && typeof part === "object" ? Object.keys(part).length : 0);
+        }, 0);
+    }
+
     // Merges a snapshot into local data. Returns total entries changed.
     function mergeSnapshot(snap) {
         if (!snap || typeof snap !== "object") return 0;
@@ -108,40 +123,89 @@
         return total;
     }
 
-    // Does the server copy contain everything we have locally (at least
-    // as new)? This is how a no-cors POST — whose response we can't
-    // read — is confirmed to have landed.
-    function serverCovers(remote, localSnap) {
-        return Object.keys(modules).every(name => {
+    // How many local entries does the server copy lack (or hold an older
+    // version of)? This is how a no-cors POST — whose response can't be
+    // read — is confirmed to have landed. An entry stamped more than a
+    // day ahead of the SERVER's clock is deliberately clamped by the
+    // server, so once it exists there it counts as covered.
+    function countUncovered(remote, localSnap, serverTime) {
+        let missing = 0;
+        Object.keys(modules).forEach(name => {
             const local = localSnap[name] || {};
             const rem = (remote && remote[name]) || {};
-            return Object.keys(local).every(id => rem[id] && entryTs(rem[id]) >= entryTs(local[id]));
+            Object.keys(local).forEach(id => {
+                const lt = entryTs(local[id]);
+                const covered = !!rem[id] && (entryTs(rem[id]) >= lt || (serverTime > 0 && lt > serverTime + DAY_MS));
+                if (!covered) missing++;
+            });
         });
+        return missing;
     }
 
     // ---------- network ----------
     function fatal(message) {
         const err = new Error(message);
-        err.fatal = true; // wrong key / not set up: retrying won't help
+        err.fatal = true; // the server refused: retrying won't help
         return err;
     }
 
-    async function pull(key) {
-        const url = api() + "?action=get_progress&key=" + encodeURIComponent(key) + "&_=" + Date.now();
-        const res = await fetch(url);
+    async function pull() {
+        const res = await fetch(api() + "?action=get_progress&_=" + Date.now());
         const json = await res.json();
         if (!json || json.success !== true) throw fatal((json && json.error) || "The server refused the request.");
-        return json.data || {};
+        return { data: json.data || {}, serverTime: Number(json.server_time) || 0 };
     }
 
     // no-cors like every other write in this project: the response is
     // opaque, so success is confirmed by pulling afterwards.
-    async function push(key, snap) {
+    async function push(snap) {
         await fetch(api(), {
             method: "POST",
             mode: "no-cors",
-            body: JSON.stringify({ action: "save_progress", key: key, data: snap })
+            body: JSON.stringify({ action: "save_progress", data: snap })
         });
+    }
+
+    // ---------- messages ----------
+    function describeOk(r) {
+        if (r.localCount === 0 && r.remoteCount === 0) {
+            return "Nothing to sync yet: there is no progress on this device or in the cloud. Review some flashcards first.";
+        }
+        if (r.upToDate) return "✓ Up to date. This device and the cloud already have the same latest progress.";
+        if (r.sent > 0 && r.pulled > 0) {
+            return "✓ Synced. Sent " + plural(r.sent, "card") + " to the cloud and received " + plural(r.pulled, "card update") + " from your other devices.";
+        }
+        if (r.sent > 0) return "✓ Synced. Sent " + plural(r.sent, "card") + " from this device to the cloud.";
+        return "✓ Synced. Received " + plural(r.pulled, "card update") + " from your other devices.";
+    }
+
+    function formatLastSync() {
+        const iso = lsGet(LAST_SYNC_STORAGE);
+        if (!iso) return "Not synced on this browser yet.";
+        try {
+            return "Latest sync: " + new Date(iso).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" });
+        } catch (e) {
+            return "Latest sync: " + iso;
+        }
+    }
+
+    // ---------- UI: toast ----------
+    function toast(message, kind) {
+        if (!document.body) return;
+        let el = document.getElementById("progress-sync-toast");
+        if (!el) {
+            el = document.createElement("div");
+            el.id = "progress-sync-toast";
+            el.className = "progress-sync-toast";
+            el.setAttribute("role", "status");
+            el.setAttribute("aria-live", "polite");
+            document.body.appendChild(el);
+        }
+        el.textContent = message;
+        el.dataset.kind = kind || "info";
+        el.classList.add("show");
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => el.classList.remove("show"), config.TOAST_MS);
     }
 
     // ---------- sync engine ----------
@@ -159,56 +223,75 @@
         }, config.RETRY_DELAY_MS);
     }
 
-    // Pull-merge, and push first when something changed locally. Safe to
-    // call any time; concurrent calls are ignored.
+    function panelOpen() {
+        return !!document.getElementById("progress-sync-overlay");
+    }
+
+    // Two-way sync: pull + merge, then push only if the server lacks
+    // something we have, then re-read to confirm. Never silent: the result
+    // is stored in `status` (shown in the panel) and, for background syncs,
+    // announced with a toast when something happened. Concurrent calls are
+    // ignored.
     async function sync(opts) {
         opts = opts || {};
-        const key = getKey();
-        if (!key) return { ok: false, reason: "no_key" };
-        if (!api()) return { ok: false, reason: "no_api" };
+        if (!api()) {
+            setStatus("error", "Sync isn't available: the backend address is missing.");
+            return { ok: false, reason: "no_api" };
+        }
         if (syncing) return { ok: false, reason: "busy" };
 
         syncing = true;
         setStatus("syncing", "Syncing…");
         try {
-            let pushed = false;
-            if (isDirty() || opts.force) {
-                await push(key, snapshot());
-                pushed = true;
+            let { data: remote, serverTime } = await pull();
+            let pulled = mergeSnapshot(remote);
+            const remoteCount = countEntries(remote);
+            const toSend = countUncovered(remote, snapshot(), serverTime);
+            let sent = 0;
+
+            if (toSend > 0) {
+                await push(snapshot());
                 await sleep(config.VERIFY_DELAY_MS);
+                const again = await pull();
+                remote = again.data;
+                serverTime = again.serverTime;
+                pulled += mergeSnapshot(remote);
+                const stillMissing = countUncovered(remote, snapshot(), serverTime);
+                sent = toSend - stillMissing;
+
+                if (stillMissing > 0) {
+                    setDirty(true);
+                    setStatus("pending", "Saved on this device, but the cloud copy isn't confirmed yet (" + plural(stillMissing, "card") + " pending). Will retry shortly.");
+                    scheduleRetry();
+                    if (!opts.manual && !panelOpen()) toast("Sync not confirmed yet, retrying shortly.", "warn");
+                    return { ok: false, reason: "not_confirmed", pulled: pulled, sent: sent };
+                }
             }
 
-            let remote = await pull(key);
-            mergeSnapshot(remote);
+            setDirty(false);
+            retryCount = 0;
+            lsSet(LAST_SYNC_STORAGE, new Date().toISOString());
+            lsSet(INTRO_STORAGE, "1");
+            hideBanner();
 
-            // Server missing something we have (e.g. progress made before
-            // a key was ever set)? Push once, then re-check.
-            if (!serverCovers(remote, snapshot()) && !pushed) {
-                await push(key, snapshot());
-                pushed = true;
-                await sleep(config.VERIFY_DELAY_MS);
-                remote = await pull(key);
-                mergeSnapshot(remote);
-            }
-
-            if (serverCovers(remote, snapshot())) {
-                setDirty(false);
-                retryCount = 0;
-                lsSet(LAST_SYNC_STORAGE, new Date().toISOString());
-                setStatus("ok", "Synced.");
-                return { ok: true };
-            }
-
-            setDirty(true);
-            setStatus("pending", "Saved on this device; will retry syncing shortly.");
-            scheduleRetry();
-            return { ok: false, reason: "not_confirmed" };
+            const result = {
+                ok: true, pulled: pulled, sent: sent,
+                localCount: countEntries(snapshot()), remoteCount: countEntries(remote),
+                upToDate: pulled === 0 && sent === 0
+            };
+            const message = describeOk(result);
+            setStatus("ok", message);
+            if (!opts.manual && !panelOpen() && (pulled > 0 || sent > 0)) toast(message, "ok");
+            result.message = message;
+            return result;
         } catch (err) {
             const msg = err && err.message ? err.message : "Network error";
             if (err && err.fatal) {
-                setStatus("error", msg);
+                setStatus("error", "Sync failed: " + msg);
+                if (!opts.manual && !panelOpen()) toast("Sync failed: " + msg, "error");
             } else {
-                setStatus("pending", "Couldn't reach the server (" + msg + "). Progress is safe on this device.");
+                setStatus("pending", "Couldn't reach the cloud (" + msg + "). Your progress is safe on this device; it will retry.");
+                if (!opts.manual && !panelOpen()) toast("Couldn't sync (offline?). Progress is safe on this device.", "warn");
                 scheduleRetry();
             }
             return { ok: false, reason: err && err.fatal ? "fatal" : "network", error: msg };
@@ -221,7 +304,6 @@
     // whole review session becomes about one sync.
     function markDirty() {
         setDirty(true);
-        if (!getKey()) return;
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => sync(), config.DEBOUNCE_MS);
     }
@@ -259,41 +341,28 @@
         return { ok: true, changed: changed };
     }
 
-    // ---------- UI: header button + panel ----------
+    // ---------- UI: header button, panel, first-run banner ----------
     let overlayEl = null;
     let escHandler = null;
-
-    function formatLastSync() {
-        const iso = lsGet(LAST_SYNC_STORAGE);
-        if (!iso) return "Not synced yet";
-        try {
-            return "Last synced: " + new Date(iso).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" });
-        } catch (e) {
-            return "Last synced: " + iso;
-        }
-    }
-
-    function statusText() {
-        const parts = [];
-        if (!getKey()) parts.push("Sync is off (no key set). Backup below still works.");
-        else parts.push(formatLastSync());
-        if (isDirty() && getKey()) parts.push("Changes waiting to sync.");
-        if (status.message && status.state !== "ok") parts.push(status.message);
-        return parts.join(" ");
-    }
+    let bannerEl = null;
 
     function refreshUi() {
         const btn = document.getElementById("progress-sync-btn");
         if (btn) {
-            const state = !getKey() ? "off" : (status.state === "error" ? "error" : (isDirty() ? "dirty" : "ok"));
+            let state = "ok";
+            if (status.state === "error") state = "error";
+            else if (isDirty()) state = "dirty";
+            else if (!lsGet(LAST_SYNC_STORAGE)) state = "new";
             btn.dataset.state = state;
-            btn.title = "Progress sync & backup — " + statusText();
+            btn.title = "Progress sync & backup — " + (status.message || formatLastSync());
         }
         const line = document.getElementById("progress-sync-status");
         if (line) {
-            line.textContent = statusText();
+            line.textContent = status.message || (isDirty() ? "Changes on this device are waiting to sync." : "Press \"Sync now\" to check.");
             line.dataset.state = status.state;
         }
+        const last = document.getElementById("progress-sync-last");
+        if (last) last.textContent = formatLastSync();
     }
 
     function closePanel() {
@@ -307,7 +376,9 @@
         }
     }
 
-    function openPanel() {
+    // Opens the panel; if `syncNow`, also runs a manual sync right away so
+    // clicking ⟳ Sync always ends with a visible result.
+    function openPanel(syncNow) {
         closePanel();
         overlayEl = document.createElement("div");
         overlayEl.innerHTML = `
@@ -316,13 +387,12 @@
                     <button type="button" class="modal-close" id="progress-sync-close" aria-label="Close">×</button>
                     <div class="progress-sync-title">Progress sync &amp; backup</div>
 
-                    <label class="progress-sync-label" for="progress-sync-key">Sync key</label>
-                    <input type="password" id="progress-sync-key" class="progress-sync-input" autocomplete="off" spellcheck="false" placeholder="paste your sync key">
                     <div class="progress-sync-row">
-                        <button type="button" class="bottom-strip-btn" id="progress-sync-now">Save key &amp; sync now</button>
+                        <button type="button" class="bottom-strip-btn" id="progress-sync-now">⟳ Sync now</button>
                     </div>
-                    <div class="progress-sync-status" id="progress-sync-status"></div>
-                    <p class="progress-sync-help">Get the key once by running <code>setupSyncKey()</code> in the Apps Script editor (View → Logs), then paste the same key on each device. Leave it empty to turn sync off.</p>
+                    <div class="progress-sync-status" id="progress-sync-status" role="status" aria-live="polite"></div>
+                    <div class="progress-sync-last" id="progress-sync-last"></div>
+                    <p class="progress-sync-help">Sync keeps your review progress the same on every device and browser you use. Use it once when you start on a new browser, so your earlier progress comes in and you carry on from there.</p>
 
                     <div class="progress-sync-divider"></div>
 
@@ -337,22 +407,15 @@
                 </div>
             </div>`;
         document.body.appendChild(overlayEl);
-
-        const keyInput = overlayEl.querySelector("#progress-sync-key");
-        keyInput.value = getKey();
         refreshUi();
 
         overlayEl.querySelector("#progress-sync-close").addEventListener("click", closePanel);
         overlayEl.querySelector("#progress-sync-overlay").addEventListener("mousedown", e => {
             if (e.target.id === "progress-sync-overlay") closePanel();
         });
-
-        overlayEl.querySelector("#progress-sync-now").addEventListener("click", async () => {
-            const value = keyInput.value.trim();
-            if (value) lsSet(KEY_STORAGE, value); else lsRemove(KEY_STORAGE);
+        overlayEl.querySelector("#progress-sync-now").addEventListener("click", () => {
             retryCount = 0;
-            refreshUi();
-            if (value) await sync({ force: true });
+            runManualSync();
         });
 
         overlayEl.querySelector("#progress-export").addEventListener("click", () => {
@@ -377,8 +440,8 @@
                 const result = importBackupText(String(reader.result || ""));
                 if (!line) return;
                 if (!result.ok) line.textContent = result.error;
-                else if (result.changed > 0) line.textContent = "Imported: " + result.changed + " card" + (result.changed === 1 ? "" : "s") + " added or updated.";
-                else line.textContent = "Nothing to import — this device already has newer or equal progress.";
+                else if (result.changed > 0) line.textContent = "Imported: " + plural(result.changed, "card") + " added or updated. It will sync to the cloud in a few seconds.";
+                else line.textContent = "Nothing to import: this device already has newer or equal progress.";
             };
             reader.onerror = () => { if (line) line.textContent = "Couldn't read that file."; };
             reader.readAsText(file);
@@ -386,17 +449,78 @@
 
         escHandler = e => { if (e.key === "Escape") closePanel(); };
         document.addEventListener("keydown", escHandler);
+
+        if (syncNow) runManualSync();
+    }
+
+    async function runManualSync() {
+        retryCount = 0; // a person asking for a sync always gets a fresh set of automatic retries
+        const r = await sync({ manual: true });
+        if (r && r.reason === "busy") {
+            setStatus("syncing", "A sync is already running; the result will appear here in a moment.");
+        }
+        return r;
+    }
+
+    // ---- first-run banner: a brand-new browser is told to sync first ----
+    function hideBanner() {
+        if (bannerEl) {
+            bannerEl.remove();
+            bannerEl = null;
+        }
+    }
+
+    function showBanner() {
+        if (bannerEl || !document.body) return;
+        bannerEl = document.createElement("div");
+        bannerEl.className = "progress-sync-banner";
+        bannerEl.id = "progress-sync-banner";
+        bannerEl.setAttribute("role", "region");
+        bannerEl.setAttribute("aria-label", "Sync your progress");
+        bannerEl.innerHTML = `
+            <div class="progress-sync-banner-title">First time on this browser?</div>
+            <div class="progress-sync-banner-text" id="progress-sync-banner-text">Sync now to bring in your earlier progress from your other devices, so you carry on from where you left off. (If you review cards before syncing, those cards' older history can be replaced.)</div>
+            <div class="progress-sync-row">
+                <button type="button" class="bottom-strip-btn" id="progress-banner-sync">⟳ Sync now</button>
+                <button type="button" class="bottom-strip-btn" id="progress-banner-skip">Start fresh here</button>
+            </div>`;
+        document.body.appendChild(bannerEl);
+
+        bannerEl.querySelector("#progress-banner-skip").addEventListener("click", () => {
+            lsSet(INTRO_STORAGE, "1");
+            hideBanner();
+        });
+        bannerEl.querySelector("#progress-banner-sync").addEventListener("click", async () => {
+            const text = bannerEl && bannerEl.querySelector("#progress-sync-banner-text");
+            if (text) text.textContent = "Syncing…";
+            const r = await sync({ manual: true });
+            if (!bannerEl) return; // success already removed the banner
+            const t = bannerEl.querySelector("#progress-sync-banner-text");
+            if (t) t.textContent = r && r.ok ? r.message : (status.message || "Sync failed. Try again.");
+        });
+    }
+
+    function maybeShowFirstRunBanner() {
+        if (!api()) return;
+        if (lsGet(LAST_SYNC_STORAGE) || lsGet(INTRO_STORAGE) === "1") return;
+        showBanner();
     }
 
     function init() {
+        lsRemove(OLD_KEY_STORAGE); // an earlier version stored a sync key here
         const btn = document.getElementById("progress-sync-btn");
-        if (btn) btn.addEventListener("click", openPanel);
+        if (btn) btn.addEventListener("click", () => openPanel(true));
         refreshUi();
 
-        // Pick up other devices' progress shortly after load (and push
-        // anything left over from a session that closed before syncing).
-        if (getKey()) setTimeout(() => sync(), 1500);
-        window.addEventListener("online", () => { if (getKey() && isDirty()) sync(); });
+        if (lsGet(LAST_SYNC_STORAGE)) {
+            // A browser that has synced before: quietly pick up other
+            // devices' progress (a toast appears only if something changed).
+            setTimeout(() => sync(), config.LOAD_SYNC_DELAY_MS);
+        } else {
+            // First time here: tell the person to sync so old progress comes in.
+            setTimeout(maybeShowFirstRunBanner, config.BANNER_DELAY_MS);
+        }
+        window.addEventListener("online", () => { if (isDirty()) sync(); });
     }
 
     window.ProgressSync = {

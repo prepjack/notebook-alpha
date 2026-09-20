@@ -1692,11 +1692,30 @@ PATH: <PUT HIERARCHY PATH HERE>
 TASK
 Create ONE bilingual flashcard deck from the study content at the bottom. Output ONLY the deck, inside a single Markdown code block, with no commentary before or after. I will save it as flashcards.md.
 
+THE MOST IMPORTANT RULE: USE THE CONTENT'S OWN WORDS
+These cards are for REVISION of a topic the reader has just read. The reader remembers the content's exact words in the exact order they appeared, so a card only works if it triggers that memory. Do not paraphrase, summarise, simplify, translate afresh or "improve" anything.
+- Default card = SENTENCE COMPLETION. Pick a sentence (or a heading with its list) from the content. The question is the content's own lead-in words; the answer is the rest of that sentence, copied word for word.
+- QUESTION: the content's own term or opening words, in the content's own order, with its own spelling and abbreviations. The only thing you may add is a minimal question stem such as "is?", "refers to?", "types of ...?" (Hindi: "क्या है?", "किसे कहते हैं?").
+- ANSWER: copy the content's own words. You may cut whole words or clauses from the very start or very end to keep it short, but never reword, never swap a word for a synonym, never change the order of words, never cut from the middle.
+- LISTS, CLASSIFICATIONS, SEQUENCES: copy every item, in the content's order, with the content's numbering and terms. Never reorder, merge, skip or add items.
+- Terms, names, numbers and years exactly as written in the content.
+- Add nothing that is not in the content: no extra examples, no explanations, no helpful context.
+- Before writing a card, find its source sentence in the content. If you cannot point to it, do not write the card.
+
+EXAMPLE (illustration only, do not reuse)
+Content (EN): "Iconic memory is the visual sensory memory that holds an image for a fraction of a second."
+Content (HI): "आइकॉनिक स्मृति वह दृश्य संवेदी स्मृति है जो किसी छवि को एक सेकंड के अंश भर के लिए रोके रखती है।"
+GOOD
+Q: Iconic memory is? / आइकॉनिक स्मृति क्या है?
+A: the visual sensory memory that holds an image for a fraction of a second / वह दृश्य संवेदी स्मृति है जो किसी छवि को एक सेकंड के अंश भर के लिए रोके रखती है
+BAD (paraphrased: different words, different order)
+Q: Which short-lived store keeps pictures briefly? / कौन सा भंडार चित्र थोड़ी देर रखता है?
+A: Iconic memory / आइकॉनिक स्मृति
+
 HOW MANY CARDS
 - One card per key concept, definition, classification, sequence or distinction that the content actually teaches.
 - Minimum 5, maximum 20. Short topics: about 5-8 cards. Long topics: about 15-20.
 - Follow the order of the content.
-- Never make a card about something that is not in the content. If unsure, skip it.
 - No duplicate questions.
 
 EXACT FORMAT
@@ -1710,14 +1729,17 @@ A: English answer / हिंदी उत्तर
 Q: ...
 A: ...
 
-RULES FOR EVERY Q AND EVERY A
+FORMAT RULES FOR EVERY Q AND EVERY A
 - Every Q and every A is written as: English text, then " / " (space, slash, space), then Hindi text. English first, Hindi last, always both.
-- The Hindi part is written in Devanagari and uses the same Hindi terminology as the Hindi content below. If no Hindi content is provided, write standard UGC NET Hindi terminology yourself.
-- Keep it simple recall: the question asks for one thing; the answer is short (a term, a one-line definition, or a short list). No long paragraphs.
-- For sequences or lists, put them on ONE line using the arrow "→" (not "->"), e.g. 1. Generation → 2. Collection → 3. Storage → 4. Dissemination / 1. उत्पादन → 2. संग्रह → 3. भंडारण → 4. प्रसार
+- The English side is copied from the ENGLISH content. The Hindi side is copied from the HINDI content, using that block's own sentence and terminology for the same idea (do not translate the English). Only if no Hindi content is provided, write standard UGC NET Hindi terminology yourself.
+- Keep answers short: a term, one sentence, or a short list. No long paragraphs.
+- Sequences go on ONE line, in the content's order, keeping its numbering and terms, joined with the arrow "→" (not "->"), e.g. 1. Generation → 2. Collection → 3. Storage → 4. Dissemination / 1. उत्पादन → 2. संग्रह → 3. भंडारण → 4. प्रसार
 - Do not use " / " anywhere except as the single English/Hindi separator. A slash inside a term with no spaces (like input/output) is fine.
 - Each card must stand alone: no "as above", no section numbers, no references to the article.
 - No images, tables, Mermaid, HTML or {{ }} markers. Standard Markdown bold/italic is fine.
+
+CHECK BEFORE YOU ANSWER
+For every card confirm: (1) each answer word appears in the source in the same order; (2) any list is complete and in the content's order; (3) every term is spelled exactly as in the content; (4) nothing was added. Fix or delete any card that fails.
 
 STUDY CONTENT (the source of truth for every card)
 

@@ -155,10 +155,10 @@ function doGet(e) {
   }
 
   // PROGRESS SYNC (2026-09): learner progress (flashcard boxes, later
-  // re-read/MCQ revise data). Needs the SYNC_KEY set by setupSyncKey().
-  // See the PROGRESS SYNC section near the end of this file.
+  // re-read/MCQ revise data). No key/login: see the PROGRESS SYNC section
+  // near the end of this file for what protects it instead.
   if (action === "get_progress") {
-    return jsonResponse_(handleGetProgress_(e.parameter.key));
+    return jsonResponse_(handleGetProgress_());
   }
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -386,7 +386,7 @@ function doPost(e) {
     // response is never read; the client re-reads with get_progress
     // afterwards to verify the merge landed.
     if (data.action === "save_progress") {
-      return jsonResponse_(handleSaveProgress_(data.key, data.data));
+      return jsonResponse_(handleSaveProgress_(data.data));
     }
 
     // Unknown / unhandled action - no legacy Community fallback anymore
@@ -3429,27 +3429,35 @@ function backfillAllOrphans() {
 
    Lets ONE person's learner progress (flashcard Leitner boxes today;
    re-read reminders / MCQ revise data later) follow them across their
-   own devices without any login and without per-user server tables.
+   own devices and browsers, with no login and no key, and without
+   per-user server tables.
 
    HOW IT WORKS
    - localStorage on each device stays the source of truth. The server
      only stores one small JSON file and MERGES into it: per entry, the
      one with the newest `ts` (or, for old entries, lastReviewed date)
      wins. So phone + laptop reviews never erase each other.
-   - The only credential is a shared SYNC KEY kept in Script Properties.
-     Run setupSyncKey() ONCE from the editor, read the key in the
-     Execution log, paste it on each device (site header -> Sync).
-     Running setupSyncKey() again ROTATES the key (old devices stop
-     working until they get the new one).
    - The file is created in the ROOT of the owner's My Drive, on purpose
      NOT inside "Study Notebook Content": that tree is shared "anyone
-     with the link can view" and children inherit it — progress must
-     stay private.
+     with the link can view" and children inherit it.
 
-   SECURITY NOTE: the web app endpoint is public and the key travels in
-   the URL of get_progress (same style as get_markdown). That is fine
-   for a personal tool; if the key ever leaks, run setupSyncKey() again.
-   This is NOT a multi-user design: every user would share one file.
+   NO KEY, SO WHAT PROTECTS IT? Not much, and that is a deliberate
+   trade-off for a single-owner, low-value dataset (review schedules).
+   The web app URL is public (it is in js/app.js), so anyone who has it
+   could read or write this file. The server therefore only limits the
+   damage:
+     - a global rate limit (checkProgressRateLimit_),
+     - a payload size / entry count cap,
+     - entries are sanitised (flashcards must look like real flashcard
+       entries; every entry must be a plain object),
+     - `ts` values in the future (> 24h ahead of the SERVER clock) are
+       clamped to "now", so nobody can plant an entry that would beat
+       every real review forever.
+   What it does NOT prevent: someone overwriting entries with a timestamp
+   up to a day ahead, or reading the progress. Keep an occasional Export
+   backup. This is NOT a multi-user design: everyone shares one file.
+   (Older versions of this file used a SYNC_KEY script property; it is no
+   longer read and can be deleted from Script Properties.)
 
    NAMESPACES: the payload is { v:1, <namespace>: { <id>: entry } }.
    Unknown namespaces are preserved as long as they have this shape, so
@@ -3458,27 +3466,9 @@ function backfillAllOrphans() {
 
 const PROGRESS_FILE_NAME_ = "notebook-alpha-progress.json";
 const PROGRESS_FILE_ID_PROP_ = "PROGRESS_FILE_ID";
-const SYNC_KEY_PROP_ = "SYNC_KEY";
-
-// ONE-TIME SETUP (and key rotation). Select it in the function
-// dropdown, Run, then read the key in View -> Logs / Execution log.
-function setupSyncKey() {
-  const key = (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, "");
-  PropertiesService.getScriptProperties().setProperty(SYNC_KEY_PROP_, key);
-  Logger.log("SYNC KEY (paste into the website on each device): %s", key);
-  return { success: true, key: key };
-}
-
-function checkProgressKey_(key) {
-  const expected = PropertiesService.getScriptProperties().getProperty(SYNC_KEY_PROP_);
-  if (!expected || expected.length < 16) {
-    return { ok: false, error: "Sync is not set up yet. Run setupSyncKey() once in the Apps Script editor." };
-  }
-  if (String(key || "") !== expected) {
-    return { ok: false, error: "Wrong sync key." };
-  }
-  return { ok: true };
-}
+const PROGRESS_FUTURE_TOLERANCE_MS_ = 24 * 60 * 60 * 1000;
+const PROGRESS_MAX_PAYLOAD_CHARS_ = 3000000;
+const PROGRESS_MAX_ENTRIES_ = 100000;
 
 // Same idea as checkIndexWriteRateLimit_: a cheap GLOBAL guard against a
 // runaway loop. A normal session is a handful of calls a minute.
@@ -3508,7 +3498,7 @@ function getProgressFile_(createIfMissing) {
 
   if (!createIfMissing) return null;
 
-  // DriveApp.createFile puts it in the root of My Drive: private.
+  // DriveApp.createFile puts it in the root of My Drive.
   const file = DriveApp.createFile(PROGRESS_FILE_NAME_, JSON.stringify({ v: 1 }), "application/json");
   props.setProperty(PROGRESS_FILE_ID_PROP_, file.getId());
   return file;
@@ -3545,6 +3535,38 @@ function progressEntryTs_(entry) {
   return isNaN(d) ? 0 : d;
 }
 
+// Is this a believable entry for this namespace? Flashcards are strict;
+// other (future) namespaces only need to be plain objects.
+function isValidProgressEntry_(ns, entry) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
+  if (ns === "flashcards") {
+    const box = Number(entry.box);
+    return Number.isInteger(box) && box >= 1 && box <= 5 &&
+      /^\d{4}-\d{2}-\d{2}$/.test(String(entry.dueDate || ""));
+  }
+  return true;
+}
+
+// Cleans an INCOMING payload: drops invalid entries and clamps a `ts`
+// that is more than a day ahead of the server clock down to "now".
+function sanitizeIncomingProgress_(incoming, nowMs) {
+  const out = { v: 1 };
+  Object.keys(incoming || {}).forEach(function(ns) {
+    if (ns === "v" || ns === "exportedAt") return;
+    const map = incoming[ns];
+    if (!map || typeof map !== "object" || Array.isArray(map)) return;
+    out[ns] = {};
+    Object.keys(map).forEach(function(id) {
+      const entry = map[id];
+      if (!isValidProgressEntry_(ns, entry)) return;
+      const clean = Object.assign({}, entry);
+      if (Number(clean.ts) > nowMs + PROGRESS_FUTURE_TOLERANCE_MS_) clean.ts = nowMs;
+      out[ns][id] = clean;
+    });
+  });
+  return out;
+}
+
 // Per-entry newest-wins merge across every namespace. `a` is the copy
 // already stored: on an exact tie it is kept. Non-object entries and
 // non-object namespaces are dropped.
@@ -3576,26 +3598,29 @@ function countProgressEntries_(obj) {
   return n;
 }
 
-function handleGetProgress_(key) {
+// Includes server_time so the client can tell "the server clamped my
+// far-future timestamp" apart from "my push didn't land".
+function handleGetProgress_() {
   try {
-    const auth = checkProgressKey_(key);
-    if (!auth.ok) return { success: false, error: auth.error };
     if (!checkProgressRateLimit_()) return { success: false, error: "Rate limit exceeded. Please slow down." };
-
-    return { success: true, data: readProgress_() };
+    return { success: true, data: readProgress_(), server_time: Date.now() };
   } catch (error) {
     return { success: false, error: error.message };
   }
 }
 
-function handleSaveProgress_(key, incoming) {
+function handleSaveProgress_(incoming) {
   try {
-    const auth = checkProgressKey_(key);
-    if (!auth.ok) return { success: false, error: auth.error };
     if (!checkProgressRateLimit_()) return { success: false, error: "Rate limit exceeded. Please slow down." };
     if (!incoming || typeof incoming !== "object" || Array.isArray(incoming)) {
       return { success: false, error: "data must be an object." };
     }
+    if (JSON.stringify(incoming).length > PROGRESS_MAX_PAYLOAD_CHARS_ ||
+        countProgressEntries_(incoming) > PROGRESS_MAX_ENTRIES_) {
+      return { success: false, error: "Payload too large." };
+    }
+
+    const clean = sanitizeIncomingProgress_(incoming, Date.now());
 
     // Two devices syncing at the same instant must not interleave a
     // read-merge-write (same reason syncIndexTerm_ takes this lock).
@@ -3603,7 +3628,7 @@ function handleSaveProgress_(key, incoming) {
     lock.waitLock(10000);
     try {
       const current = readProgress_();
-      const merged = mergeProgress_(current, incoming);
+      const merged = mergeProgress_(current, clean);
 
       if (JSON.stringify(merged) !== JSON.stringify(mergeProgress_(current, {}))) {
         getProgressFile_(true).setContent(JSON.stringify(merged));

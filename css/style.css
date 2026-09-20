@@ -4388,3 +4388,63 @@ button.danger:hover,.mcq-collection-link.danger:hover{background:#fdeceb}
     margin:16px 0 4px;
     border-top:1px solid var(--line);
 }
+
+/* Progress sync: state dots, result lines, toast, first-run banner */
+.progress-sync-btn[data-state="new"]::after{
+    content:" •";
+}
+.progress-sync-last{
+    margin-top:4px;
+    font:11px/1.4 Arial,sans-serif;
+    color:var(--muted);
+}
+.progress-sync-status[data-state="syncing"]{
+    font-style:italic;
+}
+.progress-sync-status[data-state="error"],
+.progress-sync-status[data-state="pending"]{
+    color:var(--text);
+}
+.progress-sync-toast{
+    position:fixed;
+    left:16px;
+    bottom:16px;
+    z-index:99998;
+    max-width:min(360px,calc(100vw - 32px));
+    padding:10px 14px;
+    border:1px solid var(--line);
+    border-radius:10px;
+    background:var(--paper);
+    color:var(--text);
+    font:12px/1.45 Arial,sans-serif;
+    box-shadow:0 6px 20px rgba(0,0,0,.14);
+    opacity:0;
+    transform:translateY(8px);
+    pointer-events:none;
+    transition:opacity .2s,transform .2s;
+}
+.progress-sync-toast.show{
+    opacity:1;
+    transform:none;
+}
+.progress-sync-banner{
+    position:fixed;
+    right:16px;
+    bottom:16px;
+    z-index:99997;
+    width:min(340px,calc(100vw - 32px));
+    padding:14px 16px;
+    border:1px solid var(--line);
+    border-radius:12px;
+    background:var(--paper);
+    color:var(--text);
+    box-shadow:0 8px 26px rgba(0,0,0,.16);
+}
+.progress-sync-banner-title{
+    margin-bottom:6px;
+    font:700 13px Arial,sans-serif;
+}
+.progress-sync-banner-text{
+    font:12px/1.5 Arial,sans-serif;
+    color:var(--muted);
+}
