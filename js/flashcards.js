@@ -231,14 +231,73 @@
         entry.box = Math.min((Number(entry.box) || 1) + 1, 5);
         entry.dueDate = addDaysIso(today, INTERVALS_DAYS[entry.box - 1]);
         entry.lastReviewed = today;
+        entry.ts = Date.now(); // exact moment, so sync can tell which device reviewed last
         store[card.id] = entry;
         writeStore(store);
+        notifyChanged();
     }
 
     function onForgot(card, today) {
         const store = readStore();
-        store[card.id] = { box: 1, dueDate: addDaysIso(today, 1), lastReviewed: today };
+        store[card.id] = { box: 1, dueDate: addDaysIso(today, 1), lastReviewed: today, ts: Date.now() };
         writeStore(store);
+        notifyChanged();
+    }
+
+    // =========================================================
+    // Progress sync / backup hooks (see js/progress-sync.js)
+    // =========================================================
+
+    // Tells the sync layer that review progress changed (it debounces).
+    function notifyChanged() {
+        if (window.ProgressSync && typeof window.ProgressSync.markDirty === "function") {
+            window.ProgressSync.markDirty();
+        }
+    }
+
+    // When did this card entry last change? Entries from before sync
+    // existed have no `ts`, so fall back to the review date (midnight).
+    function entryTs(entry) {
+        if (!entry || typeof entry !== "object") return 0;
+        const t = Number(entry.ts);
+        if (t > 0) return t;
+        const d = Date.parse(String(entry.lastReviewed || "") + "T00:00:00");
+        return isNaN(d) ? 0 : d;
+    }
+
+    // Never trust incoming data (import file / server): must look exactly
+    // like something this module itself would have written.
+    function isValidEntry(e) {
+        return !!e && typeof e === "object" &&
+            Number.isInteger(Number(e.box)) && Number(e.box) >= 1 && Number(e.box) <= 5 &&
+            /^\d{4}-\d{2}-\d{2}$/.test(String(e.dueDate || ""));
+    }
+
+    // MERGE, never overwrite: per card, whichever side reviewed most
+    // recently wins. Returns how many local entries were added/updated.
+    function mergeRemoteStore(remote) {
+        if (!remote || typeof remote !== "object") return 0;
+        const local = readStore();
+        let changed = 0;
+
+        Object.keys(remote).forEach(id => {
+            const r = remote[id];
+            if (!isValidEntry(r)) return;
+            const l = local[id];
+            if (l && entryTs(r) <= entryTs(l)) return;
+
+            const clean = {
+                box: Number(r.box),
+                dueDate: String(r.dueDate),
+                lastReviewed: String(r.lastReviewed || "")
+            };
+            if (Number(r.ts) > 0) clean.ts = Number(r.ts);
+            local[id] = clean;
+            changed++;
+        });
+
+        if (changed) writeStore(local);
+        return changed;
     }
 
     // =========================================================
@@ -448,6 +507,11 @@
     // Flashcard button starts disabled until a topic with cards is open.
     updateButtonState();
 
+    // Join the progress sync/backup system (js/progress-sync.js loads first).
+    if (window.ProgressSync && typeof window.ProgressSync.register === "function") {
+        window.ProgressSync.register("flashcards", { export: readStore, merge: mergeRemoteStore });
+    }
+
     // Exposed for tests only; harmless in production.
-    window.Flashcards.__test = { parseFlashcards, splitBilingual, makeCardId, addDaysIso, onKnewIt, onForgot, isDue, readStore };
+    window.Flashcards.__test = { parseFlashcards, splitBilingual, makeCardId, mergeRemoteStore, entryTs, addDaysIso, onKnewIt, onForgot, isDue, readStore };
 })();

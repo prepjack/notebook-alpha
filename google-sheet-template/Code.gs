@@ -154,6 +154,13 @@ function doGet(e) {
     });
   }
 
+  // PROGRESS SYNC (2026-09): learner progress (flashcard boxes, later
+  // re-read/MCQ revise data). Needs the SYNC_KEY set by setupSyncKey().
+  // See the PROGRESS SYNC section near the end of this file.
+  if (action === "get_progress") {
+    return jsonResponse_(handleGetProgress_(e.parameter.key));
+  }
+
   const ss = SpreadsheetApp.getActiveSpreadsheet();
 
   const data = {
@@ -373,6 +380,13 @@ function doPost(e) {
     if (data.action === "update_mcq_content") {
       const result = updateMcqContent(data);
       return jsonResponse_(result);
+    }
+
+    // PROGRESS SYNC (2026-09): the client POSTs with mode:"no-cors", so this
+    // response is never read; the client re-reads with get_progress
+    // afterwards to verify the merge landed.
+    if (data.action === "save_progress") {
+      return jsonResponse_(handleSaveProgress_(data.key, data.data));
     }
 
     // Unknown / unhandled action - no legacy Community fallback anymore
@@ -1911,6 +1925,30 @@ function handleGetMarkdown(ref) {
 // by its plain filename — so the .md can reference "neuron.png" or
 // "mitosis.json" by name alone, with no separate per-file share link.
 // See README.txt section 7 for the authoring workflow this backs.
+//
+// FLASHCARDS / COMPANION FILES (2026-09): a topic folder may also hold
+// extra learning-aid files next to the main .md:
+//     flashcards.md   (or _flashcards.md)
+//     index-term.md   (or _index-term.md)   <- reserved for later
+// Their text is returned in `companions` ({ "flashcards": "...",
+// "index-term": "..." } — plain names, only the ones that exist). They
+// are never picked as the main article and never listed in `assets`.
+// Any OTHER .md whose name starts with "_" is treated as a helper file
+// too: it is neither the article nor an asset. If both "x.md" and
+// "_x.md" exist, "_x.md" wins (it sorts first).
+
+// "flashcards.md" / "_flashcards.md" / "index-term.md" / "_index-term.md"
+// (case-insensitive) -> "flashcards" / "index-term". Anything else -> null.
+function companionKeyForFile_(name) {
+  const m = String(name || "").toLowerCase().match(/^_?(flashcards|index-term)\.md$/);
+  return m ? m[1] : null;
+}
+
+// Any .md whose name starts with "_" is a helper file, never the article.
+function isUnderscoreMd_(name) {
+  return /^_.*\.md$/i.test(String(name || ""));
+}
+
 function handleGetContentFolder_(folderId) {
   let folder;
   try {
@@ -1927,9 +1965,16 @@ function handleGetContentFolder_(folderId) {
   const allFiles = [];
   while (iterator.hasNext()) allFiles.push(iterator.next());
 
+  // Helper files (companions and any "_"-prefixed .md) can never be the
+  // main article, whatever the folder's file order happens to be.
+  const isHelperMd = function(f) {
+    const n = f.getName();
+    return !!companionKeyForFile_(n) || isUnderscoreMd_(n);
+  };
+
   // Prefer a file literally named content.md / index.md if one exists;
-  // otherwise just take the first .md file Drive returns.
-  const mdFiles = allFiles.filter(f => /\.md$/i.test(f.getName()));
+  // otherwise just take the first remaining .md file Drive returns.
+  const mdFiles = allFiles.filter(f => /\.md$/i.test(f.getName()) && !isHelperMd(f));
   const mdFile = mdFiles.find(f => /^(content|index)\.md$/i.test(f.getName())) || mdFiles[0] || null;
 
   if (!mdFile) {
@@ -1941,10 +1986,28 @@ function handleGetContentFolder_(folderId) {
     });
   }
 
+  // Companion files: read as text, keyed by their plain name. Sorted by
+  // file name so the result is deterministic when both "_x.md" and
+  // "x.md" exist (the underscore one sorts first and is kept).
+  const companions = {};
+  allFiles
+    .filter(f => !!companionKeyForFile_(f.getName()))
+    .sort(function(a, b) { return a.getName() < b.getName() ? -1 : 1; })
+    .forEach(function(f) {
+      const key = companionKeyForFile_(f.getName());
+      if (companions[key] !== undefined) return;
+      try {
+        companions[key] = f.getBlob().getDataAsString("UTF-8");
+      } catch (readError) {
+        // Unreadable companion: skip it, the main content still loads.
+      }
+    });
+
   const assets = {};
   const assetData = {};
   allFiles.forEach(function(f) {
     if (f.getId() === mdFile.getId()) return;
+    if (isHelperMd(f)) return; // companions are returned above, not as assets
     // Use a browser-friendly URL per asset type. Drive's `view` endpoint can
     // return an HTML viewer for JSON, which breaks Lottie fetch(). Images are
     // better served through the thumbnail endpoint; JSON is downloaded as
@@ -1972,7 +2035,7 @@ function handleGetContentFolder_(folderId) {
   });
 
   const text = mdFile.getBlob().getDataAsString("UTF-8");
-  return jsonResponse_({ ok: true, content: text, assets: assets, assetData: assetData });
+  return jsonResponse_({ ok: true, content: text, assets: assets, assetData: assetData, companions: companions });
 }
 
 // Returns a Drive JSON asset as parsed JSON through the same Apps Script
@@ -2846,7 +2909,11 @@ function testDoPostResource() {
 const MCQ_BANK_NEW_COLUMNS_ = [
   "question_type", "passage_id", "collection_id", "question_no",
   "difficulty", "language", "tags", "description", "exam", "year",
-  "session", "source", "source_question_no"
+  "session", "source", "source_question_no",
+  // PHASE — language-linking: shared by 2+ rows that are translation/
+  // variant pairs of the SAME question (see js/mcq-parse.js header for
+  // how it's derived); blank for a standalone, ungrouped question.
+  "question_group_id"
 ];
 
 // Idempotent: adds any of MCQ_BANK_NEW_COLUMNS_ missing from row 1,
@@ -3355,4 +3422,200 @@ function backfillAllOrphans() {
   const summary = { success: true, ...results };
   Logger.log("Orphan backfill complete: %s", JSON.stringify(summary));
   return summary;
+}
+
+/* =========================================================
+   PROGRESS SYNC (2026-09)
+
+   Lets ONE person's learner progress (flashcard Leitner boxes today;
+   re-read reminders / MCQ revise data later) follow them across their
+   own devices without any login and without per-user server tables.
+
+   HOW IT WORKS
+   - localStorage on each device stays the source of truth. The server
+     only stores one small JSON file and MERGES into it: per entry, the
+     one with the newest `ts` (or, for old entries, lastReviewed date)
+     wins. So phone + laptop reviews never erase each other.
+   - The only credential is a shared SYNC KEY kept in Script Properties.
+     Run setupSyncKey() ONCE from the editor, read the key in the
+     Execution log, paste it on each device (site header -> Sync).
+     Running setupSyncKey() again ROTATES the key (old devices stop
+     working until they get the new one).
+   - The file is created in the ROOT of the owner's My Drive, on purpose
+     NOT inside "Study Notebook Content": that tree is shared "anyone
+     with the link can view" and children inherit it — progress must
+     stay private.
+
+   SECURITY NOTE: the web app endpoint is public and the key travels in
+   the URL of get_progress (same style as get_markdown). That is fine
+   for a personal tool; if the key ever leaks, run setupSyncKey() again.
+   This is NOT a multi-user design: every user would share one file.
+
+   NAMESPACES: the payload is { v:1, <namespace>: { <id>: entry } }.
+   Unknown namespaces are preserved as long as they have this shape, so
+   new features (reread, mcq...) need NO change here, only in the client.
+   ========================================================= */
+
+const PROGRESS_FILE_NAME_ = "notebook-alpha-progress.json";
+const PROGRESS_FILE_ID_PROP_ = "PROGRESS_FILE_ID";
+const SYNC_KEY_PROP_ = "SYNC_KEY";
+
+// ONE-TIME SETUP (and key rotation). Select it in the function
+// dropdown, Run, then read the key in View -> Logs / Execution log.
+function setupSyncKey() {
+  const key = (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, "");
+  PropertiesService.getScriptProperties().setProperty(SYNC_KEY_PROP_, key);
+  Logger.log("SYNC KEY (paste into the website on each device): %s", key);
+  return { success: true, key: key };
+}
+
+function checkProgressKey_(key) {
+  const expected = PropertiesService.getScriptProperties().getProperty(SYNC_KEY_PROP_);
+  if (!expected || expected.length < 16) {
+    return { ok: false, error: "Sync is not set up yet. Run setupSyncKey() once in the Apps Script editor." };
+  }
+  if (String(key || "") !== expected) {
+    return { ok: false, error: "Wrong sync key." };
+  }
+  return { ok: true };
+}
+
+// Same idea as checkIndexWriteRateLimit_: a cheap GLOBAL guard against a
+// runaway loop. A normal session is a handful of calls a minute.
+function checkProgressRateLimit_() {
+  const LIMIT_PER_MINUTE = 60;
+  const cache = CacheService.getScriptCache();
+  const cacheKey = "progressCount_" + Math.floor(Date.now() / 60000);
+  const current = Number(cache.get(cacheKey) || 0);
+  if (current >= LIMIT_PER_MINUTE) return false;
+  cache.put(cacheKey, String(current + 1), 60);
+  return true;
+}
+
+// createIfMissing=false -> null when there is no file yet.
+function getProgressFile_(createIfMissing) {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty(PROGRESS_FILE_ID_PROP_);
+
+  if (id) {
+    try {
+      const existing = DriveApp.getFileById(id);
+      if (!existing.isTrashed()) return existing;
+    } catch (e) {
+      // Stale id: fall through and (maybe) recreate.
+    }
+  }
+
+  if (!createIfMissing) return null;
+
+  // DriveApp.createFile puts it in the root of My Drive: private.
+  const file = DriveApp.createFile(PROGRESS_FILE_NAME_, JSON.stringify({ v: 1 }), "application/json");
+  props.setProperty(PROGRESS_FILE_ID_PROP_, file.getId());
+  return file;
+}
+
+// Throws on a corrupted file instead of silently starting over: a
+// silent reset here would wipe everyone's progress on the next save.
+function readProgress_() {
+  const file = getProgressFile_(false);
+  if (!file) return { v: 1 };
+
+  const text = file.getBlob().getDataAsString("UTF-8");
+  if (!String(text).trim()) return { v: 1 };
+
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    throw new Error("The stored progress file is not valid JSON. Fix or delete " + PROGRESS_FILE_NAME_ + " in Drive.");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("The stored progress file has an unexpected shape.");
+  }
+  return parsed;
+}
+
+// When did this entry last change? `ts` (ms) if present, else the
+// lastReviewed date (entries from before sync existed have no ts).
+function progressEntryTs_(entry) {
+  if (!entry || typeof entry !== "object") return 0;
+  const t = Number(entry.ts);
+  if (t > 0) return t;
+  const d = Date.parse(String(entry.lastReviewed || "") + "T00:00:00");
+  return isNaN(d) ? 0 : d;
+}
+
+// Per-entry newest-wins merge across every namespace. `a` is the copy
+// already stored: on an exact tie it is kept. Non-object entries and
+// non-object namespaces are dropped.
+function mergeProgress_(a, b) {
+  const out = { v: 1 };
+  [a, b].forEach(function(src) {
+    Object.keys(src || {}).forEach(function(ns) {
+      if (ns === "v" || ns === "exportedAt") return;
+      const map = src[ns];
+      if (!map || typeof map !== "object" || Array.isArray(map)) return;
+      out[ns] = out[ns] || {};
+      Object.keys(map).forEach(function(id) {
+        const entry = map[id];
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) return;
+        const current = out[ns][id];
+        if (!current || progressEntryTs_(entry) > progressEntryTs_(current)) out[ns][id] = entry;
+      });
+    });
+  });
+  return out;
+}
+
+function countProgressEntries_(obj) {
+  let n = 0;
+  Object.keys(obj || {}).forEach(function(ns) {
+    if (ns === "v" || ns === "exportedAt") return;
+    if (obj[ns] && typeof obj[ns] === "object") n += Object.keys(obj[ns]).length;
+  });
+  return n;
+}
+
+function handleGetProgress_(key) {
+  try {
+    const auth = checkProgressKey_(key);
+    if (!auth.ok) return { success: false, error: auth.error };
+    if (!checkProgressRateLimit_()) return { success: false, error: "Rate limit exceeded. Please slow down." };
+
+    return { success: true, data: readProgress_() };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+function handleSaveProgress_(key, incoming) {
+  try {
+    const auth = checkProgressKey_(key);
+    if (!auth.ok) return { success: false, error: auth.error };
+    if (!checkProgressRateLimit_()) return { success: false, error: "Rate limit exceeded. Please slow down." };
+    if (!incoming || typeof incoming !== "object" || Array.isArray(incoming)) {
+      return { success: false, error: "data must be an object." };
+    }
+
+    // Two devices syncing at the same instant must not interleave a
+    // read-merge-write (same reason syncIndexTerm_ takes this lock).
+    const lock = LockService.getScriptLock();
+    lock.waitLock(10000);
+    try {
+      const current = readProgress_();
+      const merged = mergeProgress_(current, incoming);
+
+      if (JSON.stringify(merged) !== JSON.stringify(mergeProgress_(current, {}))) {
+        getProgressFile_(true).setContent(JSON.stringify(merged));
+      } else if (!getProgressFile_(false)) {
+        getProgressFile_(true).setContent(JSON.stringify(merged)); // first ever save with nothing new
+      }
+
+      return { success: true, entries: countProgressEntries_(merged) };
+    } finally {
+      lock.releaseLock();
+    }
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
 }
