@@ -303,6 +303,8 @@
     // Features call this after every change; the push is debounced so a
     // whole review session becomes about one sync.
     function markDirty() {
+        // A previous "✓ Up to date" is no longer true once something changed.
+        if (status.state === "ok") status = { state: "idle", message: "" };
         setDirty(true);
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => sync(), config.DEBOUNCE_MS);
@@ -346,6 +348,17 @@
     let escHandler = null;
     let bannerEl = null;
 
+    // Built from the CURRENT facts (in progress / error / changes waiting /
+    // never synced / synced), never from the last sync's result text, which
+    // goes stale as soon as you review another card.
+    function tooltipText() {
+        if (status.state === "syncing") return "Syncing…";
+        if (status.state === "error" || status.state === "pending") return status.message;
+        if (isDirty()) return "Changes on this device are waiting to sync. " + formatLastSync();
+        if (!lsGet(LAST_SYNC_STORAGE)) return "Not synced on this browser yet. Click to sync.";
+        return "Synced. " + formatLastSync();
+    }
+
     function refreshUi() {
         const btn = document.getElementById("progress-sync-btn");
         if (btn) {
@@ -354,7 +367,7 @@
             else if (isDirty()) state = "dirty";
             else if (!lsGet(LAST_SYNC_STORAGE)) state = "new";
             btn.dataset.state = state;
-            btn.title = "Progress sync & backup — " + (status.message || formatLastSync());
+            btn.title = "Progress sync & backup — " + tooltipText();
         }
         const line = document.getElementById("progress-sync-status");
         if (line) {
@@ -479,10 +492,10 @@
         bannerEl.setAttribute("aria-label", "Sync your progress");
         bannerEl.innerHTML = `
             <div class="progress-sync-banner-title">First time on this browser?</div>
-            <div class="progress-sync-banner-text" id="progress-sync-banner-text">Sync now to bring in your earlier progress from your other devices, so you carry on from where you left off. (If you review cards before syncing, those cards' older history can be replaced.)</div>
+            <div class="progress-sync-banner-text" id="progress-sync-banner-text">Sync now to bring in your earlier progress from your other devices, so you carry on from where you left off. (If you review cards before syncing, those cards' older history can be replaced.) You can also sync any time from ⟳ Sync in the header.</div>
             <div class="progress-sync-row">
                 <button type="button" class="bottom-strip-btn" id="progress-banner-sync">⟳ Sync now</button>
-                <button type="button" class="bottom-strip-btn" id="progress-banner-skip">Start fresh here</button>
+                <button type="button" class="bottom-strip-btn" id="progress-banner-skip">Skip for now</button>
             </div>`;
         document.body.appendChild(bannerEl);
 

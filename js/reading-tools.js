@@ -312,10 +312,23 @@
         resetToStartState();
     }
 
-    // Take Test / Revise / Flashcard: visually wired, functionally inert
-    // for this phase. Real behavior depends on systems (MCQ linking,
-    // revision view, flashcards) tracked separately, outside these
-    // layout phases.
+    // "Revise": the Revision page (revision.html) lists every topic with
+    // flashcards due. Opened in a new tab (same pattern as the Index tab's
+    // "Open in new tab"); ?topic=<id> makes it highlight the topic that is
+    // open right now. selectedTopicNode is app.js's global.
+    function openRevisionPage() {
+        let topicId = "";
+        try {
+            if (typeof selectedTopicNode !== "undefined" && selectedTopicNode && selectedTopicNode.id) {
+                topicId = String(selectedTopicNode.id);
+            }
+        } catch (e) { /* no topic open: open the page without a highlight */ }
+        window.open("revision.html" + (topicId ? "?topic=" + encodeURIComponent(topicId) : ""), "_blank");
+    }
+
+    // Take Test: visually wired, functionally inert for now. Its real
+    // behavior depends on the MCQ linking system, tracked separately.
+    // (Flashcard and Revise are real; see the click handler below.)
     function handlePostReadStub(action) {
         console.log(`[Notebook Alpha] "${action}" clicked — not implemented yet (tracked separately from the layout phases).`);
     }
@@ -329,9 +342,14 @@
             postActions.addEventListener("click", (event) => {
                 const btn = event.target.closest("[data-post-read-action]");
                 if (!btn) return;
-                // Phase 8: Flashcard is real now; Test/Revise stay stubs.
+                // Phase 8: Flashcard is real now; only Take Test is still a stub.
                 if (btn.dataset.postReadAction === "flashcard" && window.Flashcards) {
                     window.Flashcards.open();
+                    return;
+                }
+                // Revise opens the Revision page in a new tab, with this topic highlighted.
+                if (btn.dataset.postReadAction === "revise") {
+                    openRevisionPage();
                     return;
                 }
                 handlePostReadStub(btn.dataset.postReadAction);

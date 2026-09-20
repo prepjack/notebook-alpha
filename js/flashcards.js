@@ -186,6 +186,37 @@
         } catch (err) {
             console.warn("[Notebook Alpha] Could not save flashcard progress:", err);
         }
+        // Lets the header badge / Revision page refresh (own answers AND
+        // progress merged in from another device both come through here).
+        try {
+            window.dispatchEvent(new CustomEvent("flashcards-progress-changed"));
+        } catch (err) { /* very old browser: no live refresh, everything else works */ }
+    }
+
+    // ---- known decks (IDs only, no text) ----------------------------
+    // Progress entries outlive edits: if a deck is rewritten, the old
+    // cards' entries stay in the store but no longer exist in the deck.
+    // Remembering which IDs each topic's CURRENT deck has (refreshed every
+    // time the topic is opened) lets the due counts ignore those ghosts,
+    // so the header badge never promises cards the topic can't show.
+    const DECKS_KEY = "flashcards:decks:v1";
+
+    function readKnownDecks() {
+        try {
+            const raw = JSON.parse(localStorage.getItem(DECKS_KEY) || "{}");
+            return raw && typeof raw === "object" ? raw : {};
+        } catch (err) {
+            return {};
+        }
+    }
+
+    function saveKnownDeck(topicId, ids) {
+        if (!topicId || !ids.length) return; // never record an empty deck (could be a half-loaded page)
+        try {
+            const all = readKnownDecks();
+            all[topicId] = ids;
+            localStorage.setItem(DECKS_KEY, JSON.stringify(all));
+        } catch (err) { /* storage blocked: counts just include ghosts */ }
     }
 
     function pad(n) {
@@ -320,7 +351,9 @@
             cards.push({ id, front, back });
         });
         ctx = { topicId: String(topicId || ""), cards };
+        saveKnownDeck(ctx.topicId, cards.map(c => c.id));
         updateButtonState();
+        updateRevisionBadge();
     }
 
     // Wipes the previous topic's deck so it can never leak
@@ -329,6 +362,60 @@
         closeModal();
         ctx = { topicId: "", cards: [] };
         updateButtonState();
+    }
+
+    // =========================================================
+    // Due summary (header badge + Revision page)
+    // =========================================================
+
+    // Reviewed cards only (a card never reviewed has no entry yet). "Due"
+    // = dueDate <= today; overdue = before today; upcoming = the next 7
+    // days. Grouped by topic (the topic id is the part of the card id
+    // before the last "::"). Ghost entries of decks that were rewritten
+    // are skipped for topics whose current deck is known.
+    function getDueSummary(todayStr) {
+        const today = todayStr || todayIso();
+        const soon = addDaysIso(today, 7);
+        const store = readStore();
+        const known = readKnownDecks();
+        const knownSets = {};
+        const summary = { today: today, total: 0, overdue: 0, dueToday: 0, upcoming: 0, topics: {} };
+
+        Object.keys(store).forEach(id => {
+            const e = store[id];
+            if (!isValidEntry(e)) return;
+            const cut = id.lastIndexOf("::");
+            if (cut <= 0) return;
+            const topicId = id.slice(0, cut);
+
+            if (Array.isArray(known[topicId])) {
+                knownSets[topicId] = knownSets[topicId] || new Set(known[topicId]);
+                if (!knownSets[topicId].has(id)) return; // ghost of an edited/removed card
+            }
+
+            const due = String(e.dueDate);
+            const t = summary.topics[topicId] || (summary.topics[topicId] = {
+                topicId: topicId, overdue: 0, dueToday: 0, upcoming: 0, nextFuture: ""
+            });
+            if (due < today) { t.overdue++; summary.overdue++; summary.total++; }
+            else if (due === today) { t.dueToday++; summary.dueToday++; summary.total++; }
+            else {
+                if (due <= soon) { t.upcoming++; summary.upcoming++; }
+                if (!t.nextFuture || due < t.nextFuture) t.nextFuture = due;
+            }
+        });
+        return summary;
+    }
+
+    // "Revision · 12" link in the header (only present on pages that have it).
+    function updateRevisionBadge() {
+        const badge = document.getElementById("revision-badge");
+        if (!badge) return;
+        const total = getDueSummary().total;
+        badge.textContent = total > 99 ? "99+" : String(total);
+        badge.hidden = total === 0;
+        const link = document.getElementById("revision-link");
+        if (link) link.title = total === 0 ? "Revision: nothing due right now" : "Revision: " + total + " card" + (total === 1 ? "" : "s") + " due";
     }
 
     function updateButtonState() {
@@ -415,18 +502,28 @@
         });
 
         let index = 0;
-        let flipped = false;
+        let showingBack = false; // which side is facing the reader right now
+        let revealed = false;    // has the answer side been seen at least once for this card?
 
         const progressEl = modalEl.querySelector("#flashcard-progress");
         const bodyEl = modalEl.querySelector("#flashcard-body");
 
+        // Unlimited flips: every tap / Space / Enter turns the card over
+        // again, front <-> back, as often as wanted. The first time the
+        // answer side is shown, "Yaad tha / Bhool gaya" appear and then STAY
+        // (even while the question side faces you again), so you can
+        // re-read the question, then answer.
         function flip() {
             const card = bodyEl.querySelector("#flashcard-card");
             const answers = bodyEl.querySelector("#flashcard-answers");
-            if (!card || !answers || flipped) return;
-            flipped = true;
-            card.classList.add("flipped");
-            answers.hidden = false;
+            if (!card || !answers) return;
+            showingBack = !showingBack;
+            card.classList.toggle("flipped", showingBack);
+            card.setAttribute("aria-pressed", showingBack ? "true" : "false");
+            if (showingBack && !revealed) {
+                revealed = true;
+                answers.hidden = false;
+            }
         }
 
         function showMessage(html) {
@@ -442,18 +539,20 @@
                 showMessage(`Session complete! Reviewed ${deck.length} card${deck.length === 1 ? "" : "s"}.`);
                 return;
             }
-            flipped = false;
+            showingBack = false;
+            revealed = false;
             const card = deck[index];
             progressEl.textContent = `Card ${index + 1} of ${deck.length}`;
             bodyEl.innerHTML = `
                 <div class="flashcard-scene">
-                    <div class="flashcard-card" id="flashcard-card" tabindex="0" role="button" aria-label="Flip card">
+                    <div class="flashcard-card" id="flashcard-card" tabindex="0" role="button" aria-pressed="false" aria-label="Flip card">
                         <div class="flashcard-face flashcard-front">
                             <div class="flashcard-text">${renderFaceText(card.front)}</div>
                             <span class="flashcard-hint">tap to flip</span>
                         </div>
                         <div class="flashcard-face flashcard-back">
                             <div class="flashcard-text">${renderFaceText(card.back)}</div>
+                            <span class="flashcard-hint">tap to flip back</span>
                         </div>
                     </div>
                 </div>
@@ -468,7 +567,7 @@
         }
 
         function answer(knew) {
-            if (!flipped) return;
+            if (!revealed) return; // never grade a card whose answer was not looked at
             const card = deck[index];
             // Persisted immediately — closing early loses nothing.
             if (knew) onKnewIt(card, todayIso());
@@ -482,7 +581,9 @@
                 closeModal();
                 return;
             }
-            if ((e.key === " " || e.key === "Enter") && !e.target.closest("button")) {
+            const t = e.target;
+            const onButton = !!(t && typeof t.closest === "function" && t.closest("button"));
+            if ((e.key === " " || e.key === "Enter") && !onButton) {
                 e.preventDefault();
                 flip();
             }
@@ -502,10 +603,14 @@
         showCard();
     }
 
-    window.Flashcards = { splitArticleAndCards, setContext, onNewArticle, updateButtonState, open };
+    window.Flashcards = { splitArticleAndCards, setContext, onNewArticle, updateButtonState, open, getDueSummary, updateRevisionBadge };
 
     // Flashcard button starts disabled until a topic with cards is open.
     updateButtonState();
+    updateRevisionBadge();
+    try {
+        window.addEventListener("flashcards-progress-changed", updateRevisionBadge);
+    } catch (err) { /* no live badge refresh */ }
 
     // Join the progress sync/backup system (js/progress-sync.js loads first).
     if (window.ProgressSync && typeof window.ProgressSync.register === "function") {
