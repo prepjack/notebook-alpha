@@ -18,7 +18,7 @@
     const INTERVALS_DAYS = [1, 3, 7, 15, 30]; // index 0 = box 1 ... index 4 = box 5
 
     const FLASHCARDS_MARKER_RE = /^[ \t]*<!--\s*===FLASHCARDS===\s*-->[ \t]*$/m;
-    const CARD_MARKER_RE = /^[ \t]*<!--\s*CARD\s*-->[ \t]*$/m;
+    const CARD_LINE_RE = /^[ \t]*<!--\s*CARD\s*-->[ \t]*$/;
 
     // ---------- current context (which topic is open) ----------
     let ctx = { topicId: "", cards: [] };
@@ -44,39 +44,49 @@
 
     // Q:/A: values may span multiple lines: everything up to the next
     // Q:/A:/<!--CARD--> belongs to whichever started most recently.
+    // Tolerant on purpose (AI output varies): a <!--CARD--> line ends the
+    // current card, AND so does a new "Q:" that follows an "A:" even when
+    // the <!--CARD--> separator was forgotten. Cards missing a Q or an A
+    // are dropped.
     function parseFlashcards(rawBlock) {
         const block = String(rawBlock || "");
         if (!block.trim()) return [];
 
-        const splitter = new RegExp(CARD_MARKER_RE.source, "gm");
-        const segments = block.split(splitter);
         const cards = [];
+        let front = null;
+        let back = null;
+        let current = null;
 
-        segments.forEach(segment => {
-            let front = null;
-            let back = null;
-            let current = null;
+        const flush = () => {
+            const f = (front || "").trim();
+            const b = (back || "").trim();
+            if (f && b) cards.push({ front: f, back: b });
+            front = null;
+            back = null;
+            current = null;
+        };
 
-            segment.split(/\r?\n/).forEach(line => {
-                const q = line.match(/^\s*Q:\s?(.*)$/);
-                const a = line.match(/^\s*A:\s?(.*)$/);
-                if (q) {
-                    front = q[1];
-                    current = "front";
-                } else if (a) {
-                    back = a[1];
-                    current = "back";
-                } else if (current === "front") {
-                    front += "\n" + line;
-                } else if (current === "back") {
-                    back += "\n" + line;
-                }
-            });
-
-            front = (front || "").trim();
-            back = (back || "").trim();
-            if (front && back) cards.push({ front, back });
+        block.split(/\r?\n/).forEach(line => {
+            if (CARD_LINE_RE.test(line)) {
+                flush();
+                return;
+            }
+            const q = line.match(/^\s*Q:\s?(.*)$/);
+            const a = line.match(/^\s*A:\s?(.*)$/);
+            if (q) {
+                if (back !== null) flush(); // new question after an answer = new card
+                front = q[1];
+                current = "front";
+            } else if (a) {
+                back = a[1];
+                current = "back";
+            } else if (current === "front") {
+                front += "\n" + line;
+            } else if (current === "back") {
+                back += "\n" + line;
+            }
         });
+        flush();
 
         return cards;
     }
@@ -238,7 +248,11 @@
     function setContext(topicId, rawCardsBlock) {
         const seen = new Set();
         const cards = [];
-        parseFlashcards(rawCardsBlock).forEach(c => {
+        // A flashcards.md companion may or may not begin with the
+        // <!--===FLASHCARDS===--> line; both are fine.
+        const raw = String(rawCardsBlock || "");
+        const block = FLASHCARDS_MARKER_RE.test(raw) ? splitArticleAndCards(raw).cards : raw;
+        parseFlashcards(block).forEach(c => {
             const front = splitBilingual(c.front);
             const back = splitBilingual(c.back);
             const id = makeCardId(topicId, front.en || c.front);

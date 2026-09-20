@@ -4308,3 +4308,14 @@ button.danger:hover,.mcq-collection-link.danger:hover{background:#fdeceb}
     padding-left:1.3em;
     text-align:left;
 }
+
+/* Add Content popup: Flashcard prompt row */
+.flashcard-enonly{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    margin-left:4px;
+    font:400 12px Arial,sans-serif;
+    color:var(--muted);
+    cursor:pointer;
+}

@@ -926,7 +926,7 @@ async function loadAndRenderMdFileContent(node, mdLink, container, token) {
             assetsKeys: Object.keys(cached.assets || {}),
             assetDataKeys: Object.keys(cached.assetData || {})
         };
-        applyMdTextToContentPanel(cached.text, container, cached.assets, cached.assetData);
+        applyMdTextToContentPanel(cached.text, container, cached.assets, cached.assetData, cached.companions);
         return;
     }
 
@@ -980,13 +980,16 @@ async function loadAndRenderMdFileContent(node, mdLink, container, token) {
                 assetsKeys: currentContentDebug.assetsKeys,
                 assetDataKeys: currentContentDebug.assetDataKeys, data
             });
-            markdownCache.set(cacheKey, { text, assets, assetData });
+            // Companion files (flashcards.md, later index-term.md) sitting
+            // next to the main .md — see Code.gs handleGetContentFolder_().
+            const companions = (data.companions && typeof data.companions === "object") ? data.companions : {};
+            markdownCache.set(cacheKey, { text, assets, assetData, companions });
 
             if (!text.trim()) {
                 container.innerHTML = `<p class="rc-error">This file is empty.</p>`;
                 hideLanguageToggleRow();
             } else {
-                applyMdTextToContentPanel(text, container, assets, assetData);
+                applyMdTextToContentPanel(text, container, assets, assetData, companions);
             }
         } else {
             const reason = (data && data.error) || "Could not read this file.";
@@ -1061,6 +1064,8 @@ let currentContentLanguage = "EN";
 // loadAndRenderMdFileContent(). See richcontent.js resolveAssetRefs().
 let currentContentAssets = {};
 let currentContentAssetData = {};
+// Phase 8: extra files next to the main .md, e.g. { flashcards: "..." }.
+let currentContentCompanions = {};
 // TEMPORARY LOTTIE/API DIAGNOSTIC — traces the exact runtime path from
 // Apps Script response -> extracted maps -> content renderer.
 let currentContentDebug = null;
@@ -1070,7 +1075,8 @@ let currentContentDebug = null;
 // to EN for topics that don't have that language authored.
 const lastLanguagePerTopic = new Map();
 
-function applyMdTextToContentPanel(rawText, container, assets, assetData) {
+function applyMdTextToContentPanel(rawText, container, assets, assetData, companions) {
+    currentContentCompanions = (companions && typeof companions === "object") ? companions : {};
     currentContentAssets = (assets && typeof assets === "object") ? assets : {};
     currentContentAssetData = (assetData && typeof assetData === "object") ? assetData : {};
     currentContentDebug = {
@@ -1104,7 +1110,11 @@ function renderCurrentLanguageBlock(container) {
     if (window.Flashcards) {
         window.Flashcards.setContext(
             selectedTopicNode ? selectedTopicNode.id : "",
-            (currentLanguageSplit && currentLanguageSplit.flashcards) || ""
+            // A flashcards.md companion (if the folder has one) wins over a
+            // deck pasted at the end of content.md.
+            (currentContentCompanions.flashcards && String(currentContentCompanions.flashcards).trim())
+                ? currentContentCompanions.flashcards
+                : ((currentLanguageSplit && currentLanguageSplit.flashcards) || "")
         );
     }
     if (window.ReadingTools) window.ReadingTools.onContentRendered();
@@ -1674,6 +1684,45 @@ Before finishing, verify:
 
 Create the complete Notebook Alpha study-content ZIP package for the topic and source material provided.`;
 
+const FLASHCARD_AI_PROMPT = `You are creating revision flashcards for Notebook Alpha, a UGC NET (Library & Information Science) exam-preparation site.
+
+TOPIC: <PUT TOPIC NAME HERE>
+PATH: <PUT HIERARCHY PATH HERE>
+
+TASK
+Create ONE bilingual flashcard deck from the study content at the bottom. Output ONLY the deck, inside a single Markdown code block, with no commentary before or after. I will save it as flashcards.md.
+
+HOW MANY CARDS
+- One card per key concept, definition, classification, sequence or distinction that the content actually teaches.
+- Minimum 5, maximum 20. Short topics: about 5-8 cards. Long topics: about 15-20.
+- Follow the order of the content.
+- Never make a card about something that is not in the content. If unsure, skip it.
+- No duplicate questions.
+
+EXACT FORMAT
+The deck starts with this line, then every card is written like this:
+
+<!--===FLASHCARDS===-->
+<!--CARD-->
+Q: English question / हिंदी प्रश्न
+A: English answer / हिंदी उत्तर
+<!--CARD-->
+Q: ...
+A: ...
+
+RULES FOR EVERY Q AND EVERY A
+- Every Q and every A is written as: English text, then " / " (space, slash, space), then Hindi text. English first, Hindi last, always both.
+- The Hindi part is written in Devanagari and uses the same Hindi terminology as the Hindi content below. If no Hindi content is provided, write standard UGC NET Hindi terminology yourself.
+- Keep it simple recall: the question asks for one thing; the answer is short (a term, a one-line definition, or a short list). No long paragraphs.
+- For sequences or lists, put them on ONE line using the arrow "→" (not "->"), e.g. 1. Generation → 2. Collection → 3. Storage → 4. Dissemination / 1. उत्पादन → 2. संग्रह → 3. भंडारण → 4. प्रसार
+- Do not use " / " anywhere except as the single English/Hindi separator. A slash inside a term with no spaces (like input/output) is fine.
+- Each card must stand alone: no "as above", no section numbers, no references to the article.
+- No images, tables, Mermaid, HTML or {{ }} markers. Standard Markdown bold/italic is fine.
+
+STUDY CONTENT (the source of truth for every card)
+
+<PASTE CONTENT HERE>`;
+
 function openAddContentLink() {
     if (!selectedTopicNode) return;
     document.getElementById("add-content-link-modal")?.remove();
@@ -1699,6 +1748,11 @@ function openAddContentLink() {
                     <button type="button" class="content-action primary" onclick="copyContentLinkAiPrompt()">📋 Copy AI Prompt</button>
                     <button type="button" class="content-action" onclick="openTopicDriveFolder()">📁 Open Topic Folder</button>
                 </div>
+                <div class="content-action-row content-folder-tools">
+                    <button type="button" class="content-action" id="copy-flashcard-prompt-btn" onclick="copyFlashcardPrompt()">🃏 Copy Flashcard Prompt</button>
+                    <label class="flashcard-enonly"><input type="checkbox" id="flashcard-en-only"> EN only (shorter)</label>
+                </div>
+                <p class="drive-note">Flashcards: once this topic's content is live, copy the Flashcard Prompt (it already includes the topic's text), paste it into any AI, and save the result as <code>flashcards.md</code> in the same Drive folder.</p>
 
                 <label for="content-link-url">Google Drive folder link</label>
                 <input id="content-link-url" type="url" value="${escapeHtml(existingLink)}"
@@ -1836,6 +1890,82 @@ function copyContentLinkAiPrompt() {
         navigator.clipboard.writeText(prompt)
             .then(done)
             .catch(() => fallbackCopyText(prompt, done, manual));
+    } else {
+        fallbackCopyText(prompt, done, manual);
+    }
+}
+
+// Phase 8: "Copy Flashcard Prompt". Builds the flashcard prompt with the
+// topic's CURRENTLY LOADED text (EN + HI, or EN only) baked in, so it can be
+// pasted into any AI app with no file attached. Deployed content in, cards out.
+function stripForFlashcardPrompt(text) {
+    return String(text || "")
+        .replace(/```(?:mermaid|lottie|chart)[\s\S]*?```/gi, "")   // diagram/animation/chart blocks
+        .replace(/!\[[^\]]*\]\([^)]*\)/g, "")                      // image references
+        .replace(/\{\{([^}]+)\}\}/g, "$1")                         // {{Term}} -> Term
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+}
+
+function copyFlashcardPrompt() {
+    if (!selectedTopicNode) {
+        alert("Please select a topic first.");
+        return;
+    }
+    if (!currentLanguageSplit || !String(currentLanguageSplit.en || "").trim()) {
+        alert("This topic has no content loaded yet. Add and open its content first — the flashcard prompt is built from that text.");
+        return;
+    }
+
+    const enOnly = !!document.getElementById("flashcard-en-only")?.checked;
+    const en = stripForFlashcardPrompt(currentLanguageSplit.en);
+    const hi = enOnly ? "" : stripForFlashcardPrompt(currentLanguageSplit.hi);
+
+    let contentBlock = "=== CONTENT (ENGLISH) ===\n" + en;
+    if (hi) contentBlock += "\n\n=== CONTENT (हिंदी) ===\n" + hi;
+
+    const topicTitle = selectedTopicNode.title || "";
+    const breadcrumb = buildTopicBreadcrumb(selectedTopicNode);
+    // Function replacers, so "$&"-style sequences inside the content are never interpreted.
+    const prompt = FLASHCARD_AI_PROMPT
+        .replace("<PUT HIERARCHY PATH HERE>", () => breadcrumb)
+        .replace("<PUT TOPIC NAME HERE>", () => topicTitle)
+        .replace("<PASTE CONTENT HERE>", () => contentBlock);
+
+    const button = document.getElementById("copy-flashcard-prompt-btn");
+    const originalLabel = button ? button.innerHTML : "";
+
+    const done = () => {
+        if (button) {
+            button.innerHTML = "✓ Prompt Copied";
+            button.disabled = true;
+            setTimeout(() => {
+                if (button && document.body.contains(button)) {
+                    button.innerHTML = originalLabel;
+                    button.disabled = false;
+                }
+            }, 1800);
+        }
+        const sizeNote = prompt.length > 30000
+            ? "\n\nThis is a long paste (" + Math.round(prompt.length / 1000) + "k characters). If your AI app truncates it, tick \"EN only\" and copy again."
+            : "";
+        alert("Flashcard prompt copied" + (hi ? " (English + Hindi content included)." : " (English content only — the AI will write the Hindi side).") +
+              "\n\nPaste it into any AI, then save its output as flashcards.md in this topic's Drive folder." + sizeNote);
+    };
+
+    const manual = () => {
+        const box = document.createElement("textarea");
+        box.value = prompt;
+        box.style.cssText = "position:fixed;inset:8%;width:84%;height:70%;z-index:99999;padding:16px;font-family:monospace;font-size:13px;background:#fff;border:2px solid #2f5b52;border-radius:10px";
+        document.body.appendChild(box);
+        box.focus();
+        box.select();
+        alert("Automatic clipboard access was blocked. The full prompt is selected in the text box — press Ctrl+C (or Cmd+C) to copy it, then click outside the box.");
+        box.addEventListener("blur", () => setTimeout(() => box.remove(), 300));
+    };
+
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(prompt).then(done).catch(() => fallbackCopyText(prompt, done, manual));
     } else {
         fallbackCopyText(prompt, done, manual);
     }
