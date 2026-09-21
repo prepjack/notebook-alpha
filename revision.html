@@ -2,54 +2,19 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Revision — Study Notebook</title>
-
-    <link rel="stylesheet" href="css/style.css">
+    <title>Moved to Practice</title>
+    <!-- The Revision page became "Practice" (Progress view). Old links and
+         bookmarks land here and are forwarded, keeping ?topic=<id>. -->
+    <meta http-equiv="refresh" content="0; url=practice.html?view=due">
+    <script>
+        (function () {
+            var topic = "";
+            try { topic = new URLSearchParams(location.search).get("topic") || ""; } catch (e) {}
+            location.replace("practice.html?view=due" + (topic ? "&topic=" + encodeURIComponent(topic) : ""));
+        })();
+    </script>
 </head>
-
-<body class="index-directory-page revision-page">
-
-    <header class="app-header">
-        <h1>Revision</h1>
-        <div class="header-subjects">
-            <a href="index.html" class="subject-add-button revision-link">← Home</a>
-            <button id="progress-sync-btn" type="button" class="subject-add-button progress-sync-btn" data-state="new" title="Progress sync & backup">⟳ Sync</button>
-        </div>
-    </header>
-
-    <main class="revision-shell">
-        <section class="panel revision-panel">
-            <div class="panel-heading-row">
-                <div class="panel-heading">DUE FOR REVISION</div>
-            </div>
-
-            <div id="revision-summary" class="revision-summary" aria-live="polite"></div>
-            <div id="revision-note" class="revision-note" hidden></div>
-            <div id="revision-list" class="revision-list"></div>
-            <p class="revision-footnote">Only cards you have already reviewed appear here. New cards stay inside their topic. Progress from your other devices arrives after a sync (⟳ Sync).</p>
-        </section>
-    </main>
-
-    <footer class="app-footer">
-        <div class="app-footer-inner">
-            <div class="app-footer-brand">
-                <div class="app-footer-logo">Notebook</div>
-                <div class="app-footer-tagline">A focused space for learning, revision, and practice.</div>
-            </div>
-            <nav class="app-footer-nav" aria-label="Footer navigation">
-                <a href="index.html">Home</a>
-                <a href="index-directory.html">Index</a>
-                <a href="mcq.html">MCQ Practice</a>
-                <span class="app-footer-current" aria-current="page">Revision</span>
-            </nav>
-            <div class="app-footer-copy">© 2026 Notebook.</div>
-        </div>
-    </footer>
-
-    <script src="data/study-data.js"></script>
-    <script src="js/progress-sync.js"></script>
-    <script src="js/flashcards.js"></script>
-    <script src="js/revision.js"></script>
+<body>
+    <p>The Revision page is now <a href="practice.html?view=due">Practice</a>.</p>
 </body>
 </html>

@@ -312,18 +312,19 @@
         resetToStartState();
     }
 
-    // "Revise": the Revision page (revision.html) lists every topic with
-    // flashcards due. Opened in a new tab (same pattern as the Index tab's
-    // "Open in new tab"); ?topic=<id> makes it highlight the topic that is
-    // open right now. selectedTopicNode is app.js's global.
-    function openRevisionPage() {
+    // "Revise": the Practice page (practice.html) shows what is due, by
+    // hierarchy or by date, plus flashcards and MCQs. Opened in a new tab
+    // (same pattern as the Index tab's "Open in new tab"); ?topic=<id> makes
+    // it highlight the topic that is open right now. selectedTopicNode is
+    // app.js's global.
+    function openPracticePage() {
         let topicId = "";
         try {
             if (typeof selectedTopicNode !== "undefined" && selectedTopicNode && selectedTopicNode.id) {
                 topicId = String(selectedTopicNode.id);
             }
         } catch (e) { /* no topic open: open the page without a highlight */ }
-        window.open("revision.html" + (topicId ? "?topic=" + encodeURIComponent(topicId) : ""), "_blank");
+        window.open("practice.html?view=due" + (topicId ? "&topic=" + encodeURIComponent(topicId) : ""), "_blank");
     }
 
     // Take Test: visually wired, functionally inert for now. Its real
@@ -347,9 +348,9 @@
                     window.Flashcards.open();
                     return;
                 }
-                // Revise opens the Revision page in a new tab, with this topic highlighted.
+                // Revise opens the Practice page in a new tab, with this topic highlighted.
                 if (btn.dataset.postReadAction === "revise") {
-                    openRevisionPage();
+                    openPracticePage();
                     return;
                 }
                 handlePostReadStub(btn.dataset.postReadAction);

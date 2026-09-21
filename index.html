@@ -17,7 +17,7 @@
         <div id="subject-strip" class="subject-strip-list"></div>
         <button id="add-subject" type="button" class="subject-add-button">+ Subject</button>
         <button id="progress-sync-btn" type="button" class="subject-add-button progress-sync-btn" data-state="new" title="Progress sync & backup">⟳ Sync</button>
-        <a href="revision.html" id="revision-link" class="subject-add-button revision-link" title="Revision: cards due for review">Revision <span id="revision-badge" class="revision-badge" hidden></span></a>
+        <a href="practice.html?view=due" id="practice-link" class="subject-add-button practice-link" title="Practice: cards due for review">Practice <span id="practice-badge" class="practice-badge" hidden></span></a>
     </div>
     </header>
 <main class="app-shell">
@@ -120,7 +120,7 @@
                     </p>
                     <div id="post-read-actions" class="post-read-actions" hidden>
                         <button type="button" class="bottom-strip-btn" data-post-read-action="test">Take Test</button>
-                        <button type="button" class="bottom-strip-btn" data-post-read-action="revise" title="Opens the Revision page in a new tab">Open Revision in new tab ↗</button>
+                        <button type="button" class="bottom-strip-btn" data-post-read-action="revise" title="Opens the Practice page in a new tab">Open practice in new tab ↗</button>
                         <button type="button" class="bottom-strip-btn post-read-flashcard" data-post-read-action="flashcard">Flashcard</button>
                         <button type="button" id="reread-btn" class="bottom-strip-btn reread-btn" hidden>↻ Read Again</button>
                     </div>
@@ -200,7 +200,7 @@
             <span class="app-footer-current" aria-current="page">Home</span>
             <a href="index-directory.html">Index</a>
             <a href="mcq.html">MCQ Practice</a>
-            <a href="revision.html">Revision</a>
+            <a href="practice.html">Practice</a>
         </nav>
         <div class="app-footer-copy">© 2026 Notebook.</div>
     </div>

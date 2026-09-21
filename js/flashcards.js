@@ -186,7 +186,7 @@
         } catch (err) {
             console.warn("[Notebook Alpha] Could not save flashcard progress:", err);
         }
-        // Lets the header badge / Revision page refresh (own answers AND
+        // Lets the header badge / Practice page refresh (own answers AND
         // progress merged in from another device both come through here).
         try {
             window.dispatchEvent(new CustomEvent("flashcards-progress-changed"));
@@ -353,7 +353,7 @@
         ctx = { topicId: String(topicId || ""), cards };
         saveKnownDeck(ctx.topicId, cards.map(c => c.id));
         updateButtonState();
-        updateRevisionBadge();
+        updatePracticeBadge();
     }
 
     // Wipes the previous topic's deck so it can never leak
@@ -365,7 +365,7 @@
     }
 
     // =========================================================
-    // Due summary (header badge + Revision page)
+    // Due summary (header badge + Practice page)
     // =========================================================
 
     // Reviewed cards only (a card never reviewed has no entry yet). "Due"
@@ -379,7 +379,7 @@
         const store = readStore();
         const known = readKnownDecks();
         const knownSets = {};
-        const summary = { today: today, total: 0, overdue: 0, dueToday: 0, upcoming: 0, topics: {} };
+        const summary = { today: today, total: 0, overdue: 0, dueToday: 0, upcoming: 0, later: 0, reviewed: 0, topics: {} };
 
         Object.keys(store).forEach(id => {
             const e = store[id];
@@ -395,27 +395,29 @@
 
             const due = String(e.dueDate);
             const t = summary.topics[topicId] || (summary.topics[topicId] = {
-                topicId: topicId, overdue: 0, dueToday: 0, upcoming: 0, nextFuture: ""
+                topicId: topicId, overdue: 0, dueToday: 0, upcoming: 0, later: 0, reviewed: 0, nextFuture: ""
             });
+            t.reviewed++; summary.reviewed++;
             if (due < today) { t.overdue++; summary.overdue++; summary.total++; }
             else if (due === today) { t.dueToday++; summary.dueToday++; summary.total++; }
             else {
                 if (due <= soon) { t.upcoming++; summary.upcoming++; }
+                else { t.later++; summary.later++; }
                 if (!t.nextFuture || due < t.nextFuture) t.nextFuture = due;
             }
         });
         return summary;
     }
 
-    // "Revision · 12" link in the header (only present on pages that have it).
-    function updateRevisionBadge() {
-        const badge = document.getElementById("revision-badge");
+    // "Practice · 12" link in the header (only present on pages that have it).
+    function updatePracticeBadge() {
+        const badge = document.getElementById("practice-badge");
         if (!badge) return;
         const total = getDueSummary().total;
         badge.textContent = total > 99 ? "99+" : String(total);
         badge.hidden = total === 0;
-        const link = document.getElementById("revision-link");
-        if (link) link.title = total === 0 ? "Revision: nothing due right now" : "Revision: " + total + " card" + (total === 1 ? "" : "s") + " due";
+        const link = document.getElementById("practice-link");
+        if (link) link.title = total === 0 ? "Practice: nothing due right now" : "Practice: " + total + " card" + (total === 1 ? "" : "s") + " due";
     }
 
     function updateButtonState() {
@@ -603,13 +605,13 @@
         showCard();
     }
 
-    window.Flashcards = { splitArticleAndCards, setContext, onNewArticle, updateButtonState, open, getDueSummary, updateRevisionBadge };
+    window.Flashcards = { splitArticleAndCards, setContext, onNewArticle, updateButtonState, open, getDueSummary, updatePracticeBadge };
 
     // Flashcard button starts disabled until a topic with cards is open.
     updateButtonState();
-    updateRevisionBadge();
+    updatePracticeBadge();
     try {
-        window.addEventListener("flashcards-progress-changed", updateRevisionBadge);
+        window.addEventListener("flashcards-progress-changed", updatePracticeBadge);
     } catch (err) { /* no live badge refresh */ }
 
     // Join the progress sync/backup system (js/progress-sync.js loads first).
