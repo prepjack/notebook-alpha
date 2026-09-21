@@ -4590,3 +4590,29 @@ a.bottom-strip-btn.revision-open{
         align-items:stretch;
     }
 }
+
+/* Add Content popup: one block per AI prompt (button + what it does / what to do) */
+.prompt-block{
+    margin:0 0 14px;
+    padding:11px 12px;
+    border:1px solid var(--line);
+    border-radius:9px;
+    background:#fafaf6;
+}
+.prompt-block-row{
+    display:flex;
+    flex-wrap:wrap;
+    align-items:center;
+    gap:8px;
+}
+.prompt-block-desc{
+    margin:8px 0 0;
+    font:11px/1.55 Arial,sans-serif;
+    color:var(--muted);
+}
+.prompt-block-desc strong{
+    color:#354239;
+}
+.prompt-block-desc code{
+    font-size:11px;
+}

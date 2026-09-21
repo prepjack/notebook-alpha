@@ -1745,6 +1745,38 @@ STUDY CONTENT (the source of truth for every card)
 
 <PASTE CONTENT HERE>`;
 
+const QUIZ_AI_PROMPT = `You are a quiz generator for UGC NET (Library & Information Science) practice.
+
+TOPIC: <PUT TOPIC NAME HERE>
+PATH: <PUT HIERARCHY PATH HERE>
+
+TASK
+Using ONLY the study content at the bottom, create a short interactive practice quiz and show it right here in a live preview (Canvas / interactive view). If this interface cannot render HTML, give me one complete self-contained HTML file in a single code block instead. Do not ask me any questions first; build the quiz right away.
+
+QUIZ
+- 10 multiple-choice questions, 4 options each, exactly one correct answer.
+- Cover the whole content evenly; do not cluster on one section.
+- UGC NET style: definitions, distinctions, classifications, sequences, "which of the following..." plus a few application-type questions.
+- Wrong options must be plausible (common confusions from the content), never silly.
+- Never use a fact that is not in the content. If unsure about a question, skip it.
+- Every question in English with the Hindi version directly below it (Devanagari; keep standard English technical terms). Options likewise bilingual and short. If no Hindi content is provided, write the Hindi yourself in standard UGC NET terminology.
+- Ignore image links, Mermaid/chart blocks and {{ }} markers; use only the text.
+
+BEHAVIOUR
+- One question at a time, with progress like "3 / 10".
+- Tapping an option instantly shows correct/wrong (green/red) and a one-line explanation (EN + HI); then lock the answer and show a "Next" button.
+- Shuffle option order. Never use "all of the above" or "none of the above".
+- End screen: score, the questions missed with the correct answers, and a "Try again" button that reshuffles.
+
+DESIGN
+- Mobile-first: single column, large tap targets (min 48px), readable font, works in portrait.
+- One self-contained file: inline CSS + JS, no external libraries, fonts, images or network calls, no localStorage.
+- Clean, calm, light background.
+
+STUDY CONTENT (the only source for every question)
+
+<PASTE CONTENT HERE>`;
+
 function openAddContentLink() {
     if (!selectedTopicNode) return;
     document.getElementById("add-content-link-modal")?.remove();
@@ -1761,20 +1793,38 @@ function openAddContentLink() {
                 <p class="add-resource-scope">Adding to: <strong>${escapeHtml(selectedTopicNode.title)}</strong></p>
 
                 <div class="content-folder-steps">
-                    <div class="content-folder-step"><span>1</span><div><strong>Copy the AI prompt</strong><small>Generates a ZIP with the Markdown and any images needed for this topic.</small></div></div>
+                    <div class="content-folder-step"><span>1</span><div><strong>Copy the Content Generation Prompt</strong><small>Generates a ZIP with the Markdown and any images needed for this topic.</small></div></div>
                     <div class="content-folder-step"><span>2</span><div><strong>Open this topic's Google Drive folder</strong><small>Unzip the downloaded package, then drag the <code>.md</code> file and all assets into that same folder.</small></div></div>
                     <div class="content-folder-step"><span>3</span><div><strong>Share the folder and paste its link below</strong><small>Set the folder to <strong>Anyone with the link can view</strong>.</small></div></div>
                 </div>
 
                 <div class="content-action-row content-folder-tools">
-                    <button type="button" class="content-action primary" onclick="copyContentLinkAiPrompt()">📋 Copy AI Prompt</button>
                     <button type="button" class="content-action" onclick="openTopicDriveFolder()">📁 Open Topic Folder</button>
                 </div>
-                <div class="content-action-row content-folder-tools">
-                    <button type="button" class="content-action" id="copy-flashcard-prompt-btn" onclick="copyFlashcardPrompt()">🃏 Copy Flashcard Prompt</button>
-                    <label class="flashcard-enonly"><input type="checkbox" id="flashcard-en-only"> EN only (shorter)</label>
+
+                <div class="prompt-block">
+                    <button type="button" class="content-action primary" onclick="copyContentLinkAiPrompt()">📋 Copy Content Generation Prompt</button>
+                    <p class="prompt-block-desc"><strong>What it does:</strong> copies a ready-made prompt for this topic (its name and place in the hierarchy are already filled in). The AI turns your source material into a study package: <code>content.md</code> with English, Hindi and AI-explainer versions, plus any images or animations.</p>
+                    <p class="prompt-block-desc"><strong>What to do:</strong> paste it into an AI that can create files (Claude, or ChatGPT with code execution), attach your notes or PDF, download the ZIP it returns, unzip it, and drag the files into this topic's Drive folder. Then paste the folder link below.</p>
                 </div>
-                <p class="drive-note">Flashcards: once this topic's content is live, copy the Flashcard Prompt (it already includes the topic's text), paste it into any AI, and save the result as <code>flashcards.md</code> in the same Drive folder.</p>
+
+                <div class="prompt-block">
+                    <div class="prompt-block-row">
+                        <button type="button" class="content-action" id="copy-flashcard-prompt-btn" onclick="copyFlashcardPrompt()">🃏 Copy Flashcard Prompt</button>
+                        <label class="flashcard-enonly"><input type="checkbox" id="flashcard-en-only"> EN only (shorter)</label>
+                    </div>
+                    <p class="prompt-block-desc"><strong>What it does:</strong> copies a prompt that already contains this topic's English and Hindi text. The AI writes 5 to 20 bilingual revision cards (English / हिंदी) that reuse the content's own wording.</p>
+                    <p class="prompt-block-desc"><strong>What to do:</strong> use it once the content is live. Paste it into any AI, save the cards it returns as <code>flashcards.md</code> in the same Drive folder, then reload the topic. Tick "EN only" for a shorter paste.</p>
+                </div>
+
+                <div class="prompt-block">
+                    <div class="prompt-block-row">
+                        <button type="button" class="content-action" id="copy-quiz-prompt-btn" onclick="copyQuizPrompt()">📝 Copy Small Quiz Prompt</button>
+                        <label class="flashcard-enonly"><input type="checkbox" id="quiz-en-only"> EN only (shorter)</label>
+                    </div>
+                    <p class="prompt-block-desc"><strong>What it does:</strong> copies a prompt that already contains this topic's text. Pasted into Gemini, it builds a quick 10-question bilingual practice quiz with instant feedback and a score at the end.</p>
+                    <p class="prompt-block-desc"><strong>What to do:</strong> paste it into Gemini (or another AI that can show a live preview) and take the quiz right there, on your phone or laptop. Nothing is saved on this site, and every run makes fresh questions. Tick "EN only" for a shorter paste.</p>
+                </div>
 
                 <label for="content-link-url">Google Drive folder link</label>
                 <input id="content-link-url" type="url" value="${escapeHtml(existingLink)}"
@@ -1853,20 +1903,21 @@ function buildTopicBreadcrumb(node) {
 
 function copyContentLinkAiPrompt() {
     if (!selectedTopicNode) {
-        alert("Please select a topic before copying the AI prompt.");
+        alert("Please select a topic before copying the prompt.");
         return;
     }
 
     const topicTitle = selectedTopicNode.title || "<PUT TOPIC NAME HERE>";
     const breadcrumb = buildTopicBreadcrumb(selectedTopicNode);
+    // Function replacers, so "$"-sequences inside a title can't be misread.
     const prompt = CONTENT_LINK_AI_PROMPT
-        .replace("<PUT HIERARCHY PATH HERE>", breadcrumb)
-        .replace("<PUT TOPIC NAME HERE>", topicTitle);
+        .replace("<PUT HIERARCHY PATH HERE>", () => breadcrumb)
+        .replace("<PUT TOPIC NAME HERE>", () => topicTitle);
 
     const button = document.querySelector(
         "#add-content-link-modal button[onclick='copyContentLinkAiPrompt()']"
     );
-    const originalLabel = button?.innerHTML || "📋 Copy AI Prompt";
+    const originalLabel = button?.innerHTML || "📋 Copy Content Generation Prompt";
 
     const done = () => {
         if (button) {
@@ -1880,7 +1931,7 @@ function copyContentLinkAiPrompt() {
             }, 1800);
         }
 
-        alert("Prompt copied! Paste it into an AI tool that can create and download files — like Claude or ChatGPT with code execution enabled — then attach or paste the source PDF (or other material) in the same message. It will generate a ZIP; unzip it and drag the files into your Drive folder.");
+        alert("Content Generation Prompt copied! Paste it into an AI tool that can create and download files — like Claude or ChatGPT with code execution enabled — then attach or paste the source PDF (or other material) in the same message. It will generate a ZIP; unzip it and drag the files into your Drive folder.");
     };
 
     const manual = () => {
@@ -1917,10 +1968,14 @@ function copyContentLinkAiPrompt() {
     }
 }
 
-// Phase 8: "Copy Flashcard Prompt". Builds the flashcard prompt with the
-// topic's CURRENTLY LOADED text (EN + HI, or EN only) baked in, so it can be
-// pasted into any AI app with no file attached. Deployed content in, cards out.
-function stripForFlashcardPrompt(text) {
+// "Prompt + this topic's text" buttons (Flashcard prompt, Small Quiz prompt).
+// Builds the prompt with the topic's CURRENTLY LOADED text (EN + HI, or EN
+// only) baked in, so it can be pasted into any AI app with no file attached.
+// Deployed content in, cards / quiz out. One builder, one config per kind.
+
+// Removes what the AI can't use from the COPY only (the article is never
+// changed): diagram/animation/chart blocks, image links, and {{ }} brackets.
+function cleanContentForPrompt(text) {
     return String(text || "")
         .replace(/```(?:mermaid|lottie|chart)[\s\S]*?```/gi, "")   // diagram/animation/chart blocks
         .replace(/!\[[^\]]*\]\([^)]*\)/g, "")                      // image references
@@ -1929,19 +1984,39 @@ function stripForFlashcardPrompt(text) {
         .trim();
 }
 
-function copyFlashcardPrompt() {
+const TOPIC_PROMPT_KINDS = {
+    flashcard: {
+        template: FLASHCARD_AI_PROMPT,
+        buttonId: "copy-flashcard-prompt-btn",
+        enOnlyId: "flashcard-en-only",
+        name: "Flashcard prompt",
+        next: "Paste it into any AI, then save its output as flashcards.md in this topic's Drive folder."
+    },
+    quiz: {
+        template: QUIZ_AI_PROMPT,
+        buttonId: "copy-quiz-prompt-btn",
+        enOnlyId: "quiz-en-only",
+        name: "Small quiz prompt",
+        next: "Paste it into Gemini (or another AI that can show a live preview) and take the quiz there. Nothing from it is saved on this site."
+    }
+};
+
+function copyTopicContentPrompt(kind) {
+    const cfg = TOPIC_PROMPT_KINDS[kind];
+    if (!cfg) return;
+
     if (!selectedTopicNode) {
         alert("Please select a topic first.");
         return;
     }
     if (!currentLanguageSplit || !String(currentLanguageSplit.en || "").trim()) {
-        alert("This topic has no content loaded yet. Add and open its content first — the flashcard prompt is built from that text.");
+        alert("This topic has no content loaded yet. Add and open its content first — the " + cfg.name.toLowerCase() + " is built from that text.");
         return;
     }
 
-    const enOnly = !!document.getElementById("flashcard-en-only")?.checked;
-    const en = stripForFlashcardPrompt(currentLanguageSplit.en);
-    const hi = enOnly ? "" : stripForFlashcardPrompt(currentLanguageSplit.hi);
+    const enOnly = !!document.getElementById(cfg.enOnlyId)?.checked;
+    const en = cleanContentForPrompt(currentLanguageSplit.en);
+    const hi = enOnly ? "" : cleanContentForPrompt(currentLanguageSplit.hi);
 
     let contentBlock = "=== CONTENT (ENGLISH) ===\n" + en;
     if (hi) contentBlock += "\n\n=== CONTENT (हिंदी) ===\n" + hi;
@@ -1949,12 +2024,12 @@ function copyFlashcardPrompt() {
     const topicTitle = selectedTopicNode.title || "";
     const breadcrumb = buildTopicBreadcrumb(selectedTopicNode);
     // Function replacers, so "$&"-style sequences inside the content are never interpreted.
-    const prompt = FLASHCARD_AI_PROMPT
+    const prompt = cfg.template
         .replace("<PUT HIERARCHY PATH HERE>", () => breadcrumb)
         .replace("<PUT TOPIC NAME HERE>", () => topicTitle)
         .replace("<PASTE CONTENT HERE>", () => contentBlock);
 
-    const button = document.getElementById("copy-flashcard-prompt-btn");
+    const button = document.getElementById(cfg.buttonId);
     const originalLabel = button ? button.innerHTML : "";
 
     const done = () => {
@@ -1971,8 +2046,8 @@ function copyFlashcardPrompt() {
         const sizeNote = prompt.length > 30000
             ? "\n\nThis is a long paste (" + Math.round(prompt.length / 1000) + "k characters). If your AI app truncates it, tick \"EN only\" and copy again."
             : "";
-        alert("Flashcard prompt copied" + (hi ? " (English + Hindi content included)." : " (English content only — the AI will write the Hindi side).") +
-              "\n\nPaste it into any AI, then save its output as flashcards.md in this topic's Drive folder." + sizeNote);
+        alert(cfg.name + " copied" + (hi ? " (English + Hindi content included)." : " (English content only — the AI will write the Hindi side).") +
+              "\n\n" + cfg.next + sizeNote);
     };
 
     const manual = () => {
@@ -1992,6 +2067,9 @@ function copyFlashcardPrompt() {
         fallbackCopyText(prompt, done, manual);
     }
 }
+
+function copyFlashcardPrompt() { copyTopicContentPrompt("flashcard"); }
+function copyQuizPrompt() { copyTopicContentPrompt("quiz"); }
 
 function fallbackCopyText(text, onSuccess, onFailure) {
     const ta = document.createElement("textarea");
