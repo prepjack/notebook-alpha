@@ -219,6 +219,33 @@
         } catch (err) { /* storage blocked: counts just include ghosts */ }
     }
 
+    // Drops localStorage progress entries that belong to THIS topic but
+    // whose card id is no longer in the deck just loaded (the question was
+    // reworded, or the card was removed, since the .md was last read).
+    // Only ever touches ids under "topicId::…" — every other topic's
+    // entries are left alone, including topics not opened this session.
+    // Called right after a fresh deck is parsed, so the id set is
+    // authoritative at that moment. Safe to run on every open: a no-op
+    // when nothing changed.
+    function pruneOrphansForTopic(topicId, currentIds) {
+        if (!topicId) return 0;
+        const keep = new Set(currentIds);
+        const store = readStore();
+        const prefix = topicId + "::";
+        let removed = 0;
+        Object.keys(store).forEach(id => {
+            if (id.indexOf(prefix) !== 0) return; // not this topic
+            if (keep.has(id)) return;             // still in the deck
+            delete store[id];
+            removed++;
+        });
+        if (removed) {
+            writeStore(store);
+            notifyChanged();
+        }
+        return removed;
+    }
+
     function pad(n) {
         return String(n).padStart(2, "0");
     }
@@ -351,7 +378,9 @@
             cards.push({ id, front, back });
         });
         ctx = { topicId: String(topicId || ""), cards };
-        saveKnownDeck(ctx.topicId, cards.map(c => c.id));
+        const ids = cards.map(c => c.id);
+        saveKnownDeck(ctx.topicId, ids);
+        pruneOrphansForTopic(ctx.topicId, ids);
         updateButtonState();
         updatePracticeBadge();
     }
@@ -620,5 +649,5 @@
     }
 
     // Exposed for tests only; harmless in production.
-    window.Flashcards.__test = { parseFlashcards, splitBilingual, makeCardId, mergeRemoteStore, entryTs, addDaysIso, onKnewIt, onForgot, isDue, readStore };
+    window.Flashcards.__test = { parseFlashcards, splitBilingual, makeCardId, mergeRemoteStore, entryTs, addDaysIso, onKnewIt, onForgot, isDue, readStore, pruneOrphansForTopic };
 })();
