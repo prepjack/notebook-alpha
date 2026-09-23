@@ -64,6 +64,14 @@ function prettyDate(iso) {
     }
 }
 
+function prettyDateTime(ms) {
+    try {
+        return new Date(ms).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
+    } catch (e) {
+        return new Date(ms).toString();
+    }
+}
+
 /* -----------------------------------------------------
    Notebook data: tree + content links
    ----------------------------------------------------- */
@@ -242,13 +250,6 @@ function fmtHMS(ms) {
     return h + ":" + m + ":" + sec;
 }
 
-// A waiting card's dueDate is a calendar date only (no time-of-day); it
-// counts as Ready from local midnight on that date.
-function dueDateStartMs(iso) {
-    const [y, m, d] = String(iso).split("-").map(Number);
-    return new Date(y, m - 1, d).getTime();
-}
-
 function cardRowHtml(id, statusHtml) {
     return '<div class="box-card-row"><span class="box-card-id">' + escapeHtml(shortId(id)) +
         '</span><span class="box-card-status">' + statusHtml + "</span></div>";
@@ -267,8 +268,11 @@ function groupHtml(topicId, boxNum, key, label, rows) {
     return html;
 }
 
-function timerSpan(kind, dueDate) {
-    return '<span class="box-timer box-timer-' + kind + '" data-timer-kind="' + kind + '" data-due-at="' + dueDateStartMs(dueDate) + '">…</span>';
+// getBoxSummary() already returns dueAt as an exact epoch-ms value, so
+// this is just a pass-through — no calendar-midnight conversion needed
+// any more (that's what made every same-day card's timer tick in sync).
+function timerSpan(kind, dueAtMs) {
+    return '<span class="box-timer box-timer-' + kind + '" data-timer-kind="' + kind + '" data-due-at="' + dueAtMs + '">…</span>';
 }
 
 function boxHtml(topicId, box) {
@@ -285,9 +289,9 @@ function boxHtml(topicId, box) {
     if (isOpen) {
         html += '<div class="box-expand">';
         html += groupHtml(topicId, box.box, "new", "New", box.ready.new.map(id => ({ id, statusHtml: "new" })));
-        html += groupHtml(topicId, box.box, "overdue", "Overdue", box.ready.overdue.map(c => ({ id: c.id, statusHtml: timerSpan("elapsed", c.dueDate) })));
-        html += groupHtml(topicId, box.box, "dueToday", "Due today", box.ready.dueToday.map(c => ({ id: c.id, statusHtml: timerSpan("elapsed", c.dueDate) })));
-        html += groupHtml(topicId, box.box, "waiting", "Waiting", box.waiting.map(w => ({ id: w.id, statusHtml: timerSpan("waiting", w.dueDate) })));
+        html += groupHtml(topicId, box.box, "overdue", "Overdue", box.ready.overdue.map(c => ({ id: c.id, statusHtml: timerSpan("elapsed", c.dueAt) })));
+        html += groupHtml(topicId, box.box, "dueToday", "Due today", box.ready.dueToday.map(c => ({ id: c.id, statusHtml: timerSpan("elapsed", c.dueAt) })));
+        html += groupHtml(topicId, box.box, "waiting", "Waiting", box.waiting.map(w => ({ id: w.id, statusHtml: timerSpan("waiting", w.dueAt) })));
         html += "</div>";
     }
     html += "</div>";
@@ -382,7 +386,7 @@ function dueViewHtml(summary) {
         const t = summary.topics[topicId];
         let text = "";
         if (!t) text = label + ": no flashcard progress yet. Open the topic and review its cards first.";
-        else if (dueNowOf(t) === 0) text = label + ": nothing due" + (t.nextFuture ? ". Next review: " + prettyDate(t.nextFuture) + "." : ".");
+        else if (dueNowOf(t) === 0) text = label + ": nothing due" + (t.nextFuture ? ". Next review: " + prettyDateTime(t.nextFuture) + "." : ".");
         if (text) html += '<div class="practice-note">' + escapeHtml(text) + "</div>";
     }
 
@@ -403,7 +407,7 @@ function dueViewHtml(summary) {
             const count = bucket.pick(t);
             const chip = {};
             chip[bucket.field] = count;
-            const extra = bucket.field === "later" && t.nextFuture ? "Next: " + escapeHtml(prettyDate(t.nextFuture)) : "";
+            const extra = bucket.field === "later" && t.nextFuture ? "Next: " + escapeHtml(prettyDateTime(t.nextFuture)) : "";
             // ONE Review button per topic, carrying the topic's whole due-now count
             // (a session always opens every due card of the topic): on its Overdue
             // row, or on its Due-today row when nothing is overdue.
@@ -559,7 +563,7 @@ function flashcardsViewHtml(summary) {
         html += '<div class="practice-group-title">Reviewed, not due yet</div>';
         html += sortTopicIds(restIds, summary).map(id => {
             const t = summary.topics[id];
-            return topicRowHtml(id, t, 0, { showReviewed: true, extra: t.nextFuture ? "Next review: " + escapeHtml(prettyDate(t.nextFuture)) : "" });
+            return topicRowHtml(id, t, 0, { showReviewed: true, extra: t.nextFuture ? "Next review: " + escapeHtml(prettyDateTime(t.nextFuture)) : "" });
         }).join("");
     }
     html += '<p class="practice-footnote">Cards you have not reviewed yet stay inside their topic: open it and press Flashcard to start them.</p>';

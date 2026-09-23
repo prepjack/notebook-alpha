@@ -275,29 +275,68 @@
         }
     }
 
-    function isDue(card, store, today) {
-        const entry = store[card.id];
-        if (!entry) return true; // never reviewed = always due
-        return String(entry.dueDate || "") <= today;
+    function prettyDateTime(ms) {
+        try {
+            return new Date(ms).toLocaleString("en-GB", {
+                day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit"
+            });
+        } catch (err) {
+            return new Date(ms).toString();
+        }
     }
 
-    function onKnewIt(card, today) {
+    // Schema v2: entries store an exact due MOMENT (`dueAt`, epoch ms),
+    // not just a calendar date — so two cards reviewed hours apart on the
+    // same day get their own individually-ticking timers, instead of both
+    // becoming ready together at local midnight.
+    //
+    // Entries written before this change only have a `dueDate` (YYYY-MM-DD)
+    // string. Rather than a one-shot migration script (risky: could race
+    // with a sync/merge, or run on a device that still writes the old
+    // shape), every READ goes through this function, which transparently
+    // upgrades a legacy entry by treating its date as local midnight. Once
+    // that card is reviewed again, it gets a real `dueAt` and never looks
+    // back. mergeRemoteStore() does the same normalization for incoming
+    // remote entries, so the whole store converges on the new shape lazily
+    // and safely, from any mix of old/new data.
+    function dueAtOf(entry) {
+        if (!entry) return 0;
+        const at = Number(entry.dueAt);
+        if (Number.isFinite(at) && at > 0) return at;
+        if (entry.dueDate) return dueDateStartMs(entry.dueDate);
+        return 0;
+    }
+
+    // Local midnight (ms) of a YYYY-MM-DD string — legacy-entry fallback only.
+    function dueDateStartMs(iso) {
+        const [y, m, d] = String(iso).split("-").map(Number);
+        return new Date(y, m - 1, d).getTime();
+    }
+
+    function isDue(card, store, nowMs) {
+        return dueAtOf(store[card.id]) <= nowMs; // no entry => dueAtOf returns 0 => always due
+    }
+
+    function onKnewIt(card, nowMs) {
+        const now = Number(nowMs) || Date.now();
         const store = readStore();
         // A card with no entry is a NEW card and sits implicitly in box 1
         // (spec §3), so its first "knew it" moves it to box 2 (3 days).
         const entry = store[card.id] || { box: 1 };
         entry.box = Math.min((Number(entry.box) || 1) + 1, 5);
-        entry.dueDate = addDaysIso(today, INTERVALS_DAYS[entry.box - 1]);
-        entry.lastReviewed = today;
-        entry.ts = Date.now(); // exact moment, so sync can tell which device reviewed last
+        entry.dueAt = now + INTERVALS_DAYS[entry.box - 1] * 86400000;
+        delete entry.dueDate; // fully upgraded: this entry no longer needs the legacy field
+        entry.lastReviewed = isoDate(new Date(now));
+        entry.ts = now; // exact moment, so sync can tell which device reviewed last
         store[card.id] = entry;
         writeStore(store);
         notifyChanged();
     }
 
-    function onForgot(card, today) {
+    function onForgot(card, nowMs) {
+        const now = Number(nowMs) || Date.now();
         const store = readStore();
-        store[card.id] = { box: 1, dueDate: addDaysIso(today, 1), lastReviewed: today, ts: Date.now() };
+        store[card.id] = { box: 1, dueAt: now + 1 * 86400000, lastReviewed: isoDate(new Date(now)), ts: now };
         writeStore(store);
         notifyChanged();
     }
@@ -324,15 +363,23 @@
     }
 
     // Never trust incoming data (import file / server): must look exactly
-    // like something this module itself would have written.
+    // like something this module itself would have written. Accepts both
+    // the current shape (dueAt, a positive number) and the pre-upgrade
+    // shape (dueDate, a YYYY-MM-DD string) — see dueAtOf() above.
     function isValidEntry(e) {
-        return !!e && typeof e === "object" &&
-            Number.isInteger(Number(e.box)) && Number(e.box) >= 1 && Number(e.box) <= 5 &&
-            /^\d{4}-\d{2}-\d{2}$/.test(String(e.dueDate || ""));
+        if (!e || typeof e !== "object") return false;
+        if (!Number.isInteger(Number(e.box)) || Number(e.box) < 1 || Number(e.box) > 5) return false;
+        const hasDueAt = Number.isFinite(Number(e.dueAt)) && Number(e.dueAt) > 0;
+        const hasLegacyDate = /^\d{4}-\d{2}-\d{2}$/.test(String(e.dueDate || ""));
+        return hasDueAt || hasLegacyDate;
     }
 
     // MERGE, never overwrite: per card, whichever side reviewed most
     // recently wins. Returns how many local entries were added/updated.
+    // Whatever shape the remote entry arrives in (new or legacy), what
+    // gets WRITTEN locally is always the current dueAt shape — this is
+    // the other half (with dueAtOf's read-time fallback) of how the store
+    // converges on the new schema without a separate migration step.
     function mergeRemoteStore(remote) {
         if (!remote || typeof remote !== "object") return 0;
         const local = readStore();
@@ -346,7 +393,7 @@
 
             const clean = {
                 box: Number(r.box),
-                dueDate: String(r.dueDate),
+                dueAt: dueAtOf(r),
                 lastReviewed: String(r.lastReviewed || "")
             };
             if (Number(r.ts) > 0) clean.ts = Number(r.ts);
@@ -397,14 +444,17 @@
     // Due summary (header badge + Practice page)
     // =========================================================
 
-    // Reviewed cards only (a card never reviewed has no entry yet). "Due"
-    // = dueDate <= today; overdue = before today; upcoming = the next 7
-    // days. Grouped by topic (the topic id is the part of the card id
-    // before the last "::"). Ghost entries of decks that were rewritten
-    // are skipped for topics whose current deck is known.
-    function getDueSummary(todayStr) {
-        const today = todayStr || todayIso();
-        const soon = addDaysIso(today, 7);
+    // Reviewed cards only (a card never reviewed has no entry yet).
+    // Readiness is exact-moment: dueAt <= now. Overdue vs Due-today is a
+    // calendar-day split of that same dueAt, kept purely for the display
+    // grouping (matches the Tree view's box-strip groups). Grouped by
+    // topic (the topic id is the part of the card id before the last
+    // "::"). Ghost entries of decks that were rewritten are skipped for
+    // topics whose current deck is known.
+    function getDueSummary(nowMs) {
+        const now = Number(nowMs) || Date.now();
+        const today = isoDate(new Date(now));
+        const soon = now + 7 * 86400000;
         const store = readStore();
         const known = readKnownDecks();
         const knownSets = {};
@@ -422,17 +472,18 @@
                 if (!knownSets[topicId].has(id)) return; // ghost of an edited/removed card
             }
 
-            const due = String(e.dueDate);
+            const dueAt = dueAtOf(e);
             const t = summary.topics[topicId] || (summary.topics[topicId] = {
-                topicId: topicId, overdue: 0, dueToday: 0, upcoming: 0, later: 0, reviewed: 0, nextFuture: ""
+                topicId: topicId, overdue: 0, dueToday: 0, upcoming: 0, later: 0, reviewed: 0, nextFuture: 0
             });
             t.reviewed++; summary.reviewed++;
-            if (due < today) { t.overdue++; summary.overdue++; summary.total++; }
-            else if (due === today) { t.dueToday++; summary.dueToday++; summary.total++; }
-            else {
-                if (due <= soon) { t.upcoming++; summary.upcoming++; }
-                else { t.later++; summary.later++; }
-                if (!t.nextFuture || due < t.nextFuture) t.nextFuture = due;
+            if (dueAt <= now) {
+                const dueDay = isoDate(new Date(dueAt));
+                if (dueDay < today) { t.overdue++; summary.overdue++; summary.total++; }
+                else { t.dueToday++; summary.dueToday++; summary.total++; }
+            } else {
+                if (dueAt <= soon) { t.upcoming++; summary.upcoming++; } else { t.later++; summary.later++; }
+                if (!t.nextFuture || dueAt < t.nextFuture) t.nextFuture = dueAt;
             }
         });
         return summary;
@@ -457,16 +508,17 @@
     // Shape:
     //   { topicId, total, readyTotal,
     //     boxes: [ { box, intervalDays, total, readyCount, waitingCount,
-    //                ready: { new: [ids],                        // no dueDate: never reviewed
-    //                         overdue: [ { id, dueDate } ],       // dueDate already passed
-    //                         dueToday: [ { id, dueDate } ] },    // dueDate = today
-    //                waiting: [ { id, dueDate } ]  // dueDate in the future, soonest first
+    //                ready: { new: [ids],                     // no dueAt: never reviewed
+    //                         overdue: [ { id, dueAt } ],      // dueAt already passed, before today
+    //                         dueToday: [ { id, dueAt } ] },   // dueAt already passed, today
+    //                waiting: [ { id, dueAt } ]  // dueAt in the future, soonest first
     //              }, ... 5 entries ] }
-    function getBoxSummary(topicId, todayStr) {
+    function getBoxSummary(topicId, nowMs) {
         const ids = readKnownDecks()[topicId];
         if (!Array.isArray(ids) || !ids.length) return null;
 
-        const today = todayStr || todayIso();
+        const now = Number(nowMs) || Date.now();
+        const today = isoDate(new Date(now));
         const store = readStore();
         const boxes = INTERVALS_DAYS.map((days, i) => ({
             box: i + 1,
@@ -490,20 +542,19 @@
                 b.readyCount++; readyTotal++;
                 return;
             }
-            const due = String(entry.dueDate || "");
-            if (due < today) {
-                b.ready.overdue.push({ id: id, dueDate: due });
-                b.readyCount++; readyTotal++;
-            } else if (due === today) {
-                b.ready.dueToday.push({ id: id, dueDate: due });
+            const dueAt = dueAtOf(entry);
+            if (dueAt <= now) {
+                const dueDay = isoDate(new Date(dueAt));
+                if (dueDay < today) b.ready.overdue.push({ id: id, dueAt: dueAt });
+                else b.ready.dueToday.push({ id: id, dueAt: dueAt });
                 b.readyCount++; readyTotal++;
             } else {
-                b.waiting.push({ id: id, dueDate: due });
+                b.waiting.push({ id: id, dueAt: dueAt });
                 b.waitingCount++;
             }
         });
 
-        boxes.forEach(b => b.waiting.sort((x, y) => x.dueDate < y.dueDate ? -1 : x.dueDate > y.dueDate ? 1 : 0));
+        boxes.forEach(b => b.waiting.sort((x, y) => x.dueAt - y.dueAt));
 
         return { topicId: topicId, total: ids.length, readyTotal: readyTotal, boxes: boxes };
     }
@@ -581,9 +632,9 @@
         if (!ctx.cards.length) return;
         closeModal();
 
-        const today = todayIso();
+        const now = Date.now();
         const store = readStore();
-        const deck = ctx.cards.filter(c => isDue(c, store, today));
+        const deck = ctx.cards.filter(c => isDue(c, store, now));
 
         modalEl = document.createElement("div");
         modalEl.id = "flashcard-modal";
@@ -670,9 +721,10 @@
         function answer(knew) {
             if (!revealed) return; // never grade a card whose answer was not looked at
             const card = deck[index];
+            const moment = Date.now();
             // Persisted immediately — closing early loses nothing.
-            if (knew) onKnewIt(card, todayIso());
-            else onForgot(card, todayIso());
+            if (knew) onKnewIt(card, moment);
+            else onForgot(card, moment);
             index += 1;
             showCard();
         }
@@ -693,10 +745,10 @@
 
         if (!deck.length) {
             const dates = ctx.cards
-                .map(c => (store[c.id] && store[c.id].dueDate) || "")
-                .filter(Boolean)
-                .sort();
-            const next = dates.length ? prettyDate(dates[0]) : "";
+                .map(c => dueAtOf(store[c.id]))
+                .filter(ms => ms > 0)
+                .sort((a, b) => a - b);
+            const next = dates.length ? prettyDateTime(dates[0]) : "";
             showMessage(next ? `All caught up! Next review due ${escapeHtml(next)}.` : "All caught up!");
             return;
         }
@@ -719,5 +771,5 @@
     }
 
     // Exposed for tests only; harmless in production.
-    window.Flashcards.__test = { parseFlashcards, splitBilingual, makeCardId, mergeRemoteStore, entryTs, addDaysIso, onKnewIt, onForgot, isDue, readStore, pruneOrphansForTopic, getBoxSummary, getKnownTopicIds };
+    window.Flashcards.__test = { parseFlashcards, splitBilingual, makeCardId, mergeRemoteStore, entryTs, addDaysIso, onKnewIt, onForgot, isDue, readStore, pruneOrphansForTopic, getBoxSummary, getKnownTopicIds, dueAtOf, prettyDateTime };
 })();
