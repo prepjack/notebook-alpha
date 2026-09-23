@@ -35,7 +35,7 @@ const PRACTICE_COLLAPSED_KEY = "practice:leftCollapsed";
 const MOBILE_MAX = 900;
 
 const VIEW_HEADINGS = {
-    due: "PROGRESS · DUE VIEW",
+    due: "PROGRESS · QUEUE VIEW",
     tree: "PROGRESS · TREE VIEW",
     flashcards: "FLASHCARDS",
     mcq: "MCQS"
@@ -218,6 +218,113 @@ function actionsHtml(topicId, dueNow, known) {
     return html ? '<div class="practice-row-actions">' + html + "</div>" : "";
 }
 
+/* -----------------------------------------------------
+   Box-strip: the 5-box Leitner view under each topic
+   (Tree view). Data comes straight from
+   window.Flashcards.getBoxSummary() — no network calls.
+   ----------------------------------------------------- */
+
+// Its own expand/collapse state, separate from the tree's `expanded` Set
+// so a box or group toggle never collides with a tree-node toggle.
+// Keys: "topicId::box" (box open) and "topicId::box::group" (group open).
+const boxToggles = new Set();
+
+function shortId(fullId) {
+    const cut = String(fullId).lastIndexOf("::");
+    return cut >= 0 ? fullId.slice(cut + 2) : String(fullId);
+}
+
+function fmtHMS(ms) {
+    const s = Math.floor(ms / 1000);
+    const h = String(Math.floor(s / 3600)).padStart(2, "0");
+    const m = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
+    const sec = String(s % 60).padStart(2, "0");
+    return h + ":" + m + ":" + sec;
+}
+
+// A waiting card's dueDate is a calendar date only (no time-of-day); it
+// counts as Ready from local midnight on that date.
+function dueDateStartMs(iso) {
+    const [y, m, d] = String(iso).split("-").map(Number);
+    return new Date(y, m - 1, d).getTime();
+}
+
+function cardRowHtml(id, statusHtml) {
+    return '<div class="box-card-row"><span class="box-card-id">' + escapeHtml(shortId(id)) +
+        '</span><span class="box-card-status">' + statusHtml + "</span></div>";
+}
+
+function groupHtml(topicId, boxNum, key, label, rows) {
+    if (!rows.length) return "";
+    const toggleKey = topicId + "::" + boxNum + "::" + key;
+    const isOpen = boxToggles.has(toggleKey);
+    let html = '<div class="box-group' + (isOpen ? " box-group-open" : "") + '" data-box-toggle="' + escapeHtml(toggleKey) + '">' +
+        '<span class="box-group-label">' + label + " · " + rows.length + "</span>" +
+        '<span class="box-group-chev">' + (isOpen ? "▾" : "▸") + "</span></div>";
+    if (isOpen) {
+        html += '<div class="box-card-list">' + rows.map(r => cardRowHtml(r.id, r.statusHtml)).join("") + "</div>";
+    }
+    return html;
+}
+
+function timerSpan(kind, dueDate) {
+    return '<span class="box-timer box-timer-' + kind + '" data-timer-kind="' + kind + '" data-due-at="' + dueDateStartMs(dueDate) + '">…</span>';
+}
+
+function boxHtml(topicId, box) {
+    const boxKey = topicId + "::" + box.box;
+    const isOpen = boxToggles.has(boxKey);
+    const ready = box.readyCount;
+    let html = '<div class="box-card ' + (ready > 0 ? "box-ready" : "box-idle") + '">' +
+        '<div class="box-card-head" data-box-toggle="' + escapeHtml(boxKey) + '">' +
+        '<span class="box-num">Box ' + box.box + " · " + box.intervalDays + "d</span>" +
+        '<span class="box-chev">' + (isOpen ? "▾" : "▸") + "</span></div>" +
+        '<div class="box-counts">' +
+        '<span class="' + (ready > 0 ? "box-count-ready" : "box-count-idle") + '">' + ready + " ready</span>" +
+        '<span class="box-count-waiting">' + box.waitingCount + " waiting</span></div>";
+    if (isOpen) {
+        html += '<div class="box-expand">';
+        html += groupHtml(topicId, box.box, "new", "New", box.ready.new.map(id => ({ id, statusHtml: "new" })));
+        html += groupHtml(topicId, box.box, "overdue", "Overdue", box.ready.overdue.map(c => ({ id: c.id, statusHtml: timerSpan("elapsed", c.dueDate) })));
+        html += groupHtml(topicId, box.box, "dueToday", "Due today", box.ready.dueToday.map(c => ({ id: c.id, statusHtml: timerSpan("elapsed", c.dueDate) })));
+        html += groupHtml(topicId, box.box, "waiting", "Waiting", box.waiting.map(w => ({ id: w.id, statusHtml: timerSpan("waiting", w.dueDate) })));
+        html += "</div>";
+    }
+    html += "</div>";
+    return html;
+}
+
+function boxStripHtml(topicId) {
+    const summary = window.Flashcards.getBoxSummary(topicId);
+    if (!summary) return "";
+    const breakdown = summary.boxes.map(b => "Box " + b.box + ": " + b.readyCount).join(" · ");
+    let html = '<div class="box-strip">' +
+        '<div class="box-strip-header"><span class="box-strip-total">' + plural(summary.total, "flashcard") + "</span>" +
+        (summary.readyTotal > 0
+            ? '<button type="button" class="bottom-strip-btn practice-review" data-review="' + escapeHtml(topicId) + '" title="' + escapeHtml(breakdown) + '">Start review (' + summary.readyTotal + ") ⓘ</button>"
+            : '<span class="box-strip-idle" title="' + escapeHtml(breakdown) + '">Nothing ready right now ⓘ</span>') +
+        "</div>";
+    html += '<div class="box-strip-boxes">' + summary.boxes.map(b => boxHtml(topicId, b)).join("") + "</div></div>";
+    return html;
+}
+
+// Live HH:MM:SS ticker for expanded Waiting cards. Re-queries the DOM
+// every second rather than tracking timers per render, so it survives
+// render() rebuilding the tree without any extra bookkeeping. Cheap: only
+// cards inside an OPEN Waiting group exist in the DOM at all.
+function tickBoxTimers() {
+    const now = Date.now();
+    document.querySelectorAll(".box-timer[data-due-at]").forEach(elx => {
+        const target = Number(elx.dataset.dueAt);
+        const diff = target - now; // positive = target is still in the future
+        if (elx.dataset.timerKind === "elapsed") {
+            elx.textContent = "+" + fmtHMS(Math.abs(diff)); // overdue/due-today: always in the past
+        } else {
+            elx.textContent = diff > 0 ? "−" + fmtHMS(diff) : "ready now";
+        }
+    });
+}
+
 function topicRowHtml(topicId, chipSource, dueNow, opts) {
     opts = opts || {};
     const info = topicInfo(topicId);
@@ -257,7 +364,7 @@ function dueViewHtml(summary) {
 
     if (summary.total > 0) {
         const dueTopics = ids.filter(id => dueNowOf(summary.topics[id]) > 0).length;
-        html += '<div class="practice-summary"><span class="practice-summary-big">' + plural(summary.total, "card") + "</span> due now, across " +
+        html += '<div class="practice-summary"><span class="practice-summary-big">' + plural(summary.total, "card") + "</span> for review, from " +
             plural(dueTopics, "topic") + ". " +
             (summary.overdue ? '<span class="practice-chip practice-chip-overdue">' + summary.overdue + " overdue</span> " : "") +
             (summary.dueToday ? '<span class="practice-chip practice-chip-today">' + summary.dueToday + " due today</span>" : "") + "</div>";
@@ -345,53 +452,84 @@ function ancestorsOf(id) {
     return out;
 }
 
-function expandForDue(summary) {
-    Object.keys(summary.topics).forEach(id => {
-        if (dueNowOf(summary.topics[id]) > 0) ancestorsOf(id).forEach(a => expanded.add(a));
+function expandForDue(knownDeckIds) {
+    knownDeckIds.forEach(id => {
+        const bs = window.Flashcards.getBoxSummary(id);
+        if (bs && bs.readyTotal > 0) ancestorsOf(id).forEach(a => expanded.add(a));
     });
     const topic = topicParam();
     if (topic && nodesById[topic]) ancestorsOf(topic).forEach(a => expanded.add(a));
 }
 
 function treeViewHtml(summary) {
-    if (!Object.keys(summary.topics).length) {
-        return '<div class="practice-summary">No practice data yet. Review some flashcards inside a topic; each card comes back here when it is due.</div>';
+    const knownDeckIds = new Set(window.Flashcards ? window.Flashcards.getKnownTopicIds() : []);
+    if (!knownDeckIds.size) {
+        return '<div class="practice-summary">No flashcards opened yet. Open a topic and press Flashcard once; its deck (and this tree) picks it up from then on.</div>';
     }
     if (!treeLoaded) return loadingHtml();
 
+    // "Does this node, or anything under it, have a known deck?" —
+    // memoized rollup, separate from the review-based `stats()` rollup
+    // below (which still drives the chip counts on intermediate rows).
+    const hasDeckMemo = {};
+    const visiting = new Set();
+    function hasDeck(id) {
+        if (id in hasDeckMemo) return hasDeckMemo[id];
+        if (visiting.has(id)) return false;
+        visiting.add(id);
+        let result = knownDeckIds.has(id);
+        (childrenOf[id] || []).forEach(c => { if (hasDeck(c)) result = true; });
+        visiting.delete(id);
+        return (hasDeckMemo[id] = result);
+    }
+
     if (!treeAutoExpanded) {
         treeAutoExpanded = true;
-        expandForDue(summary);
+        expandForDue(knownDeckIds);
     }
 
     const stats = makeStats(summary);
     const highlight = topicParam();
 
     function node(id, depth) {
-        const st = stats(id);
-        if (!st.reviewed) return ""; // nothing reviewed in this branch: not shown
+        if (!hasDeck(id)) return ""; // nothing under this branch has a deck yet: not shown
         const kids = (childrenOf[id] || []).map(k => node(k, depth + 1)).join("");
         const n = nodesById[id];
-        const own = summary.topics[id];
         const isOpen = expanded.has(id);
+        const isLeafTopic = knownDeckIds.has(id);
         const toggle = kids
             ? '<button type="button" class="practice-tree-toggle" data-toggle="' + escapeHtml(id) + '" aria-expanded="' + isOpen + '" aria-label="' + (isOpen ? "Collapse" : "Expand") + '">' + (isOpen ? "▾" : "▸") + "</button>"
             : '<span class="practice-tree-toggle practice-tree-leaf" aria-hidden="true"></span>';
+
+        let body;
+        if (isLeafTopic) {
+            body = '<div class="practice-row-actions"><a class="bottom-strip-btn practice-open" href="index.html?openNode=' + encodeURIComponent(id) + '">Open topic</a></div>' +
+                boxStripHtml(id);
+        } else {
+            const st = stats(id);
+            body = (st.overdue || st.dueToday || st.upcoming || st.later || st.reviewed)
+                ? '<div class="practice-chips">' + chipsHtml(st, true) + "</div>"
+                : "";
+        }
+
         const row = '<div class="practice-tree-row' + (highlight === id ? " practice-row-highlight" : "") + '" style="--depth:' + depth + '" data-node-id="' + escapeHtml(id) + '">' +
             toggle +
-            '<div class="practice-row-main"><div class="practice-row-title">' + escapeHtml(n.title || "Untitled") + '</div><div class="practice-chips">' + chipsHtml(st, true) + "</div></div>" +
-            (own ? actionsHtml(id, dueNowOf(own), true) : "") + "</div>";
+            '<div class="practice-row-main"><div class="practice-row-title">' + escapeHtml(n.title || "Untitled") + "</div>" + body + "</div>" +
+            "</div>";
         return row + (kids && isOpen ? '<div class="practice-tree-children">' + kids + "</div>" : "");
     }
 
     let html = '<div class="practice-tree-tools"><button type="button" class="bottom-strip-btn" data-expand-all="1">Expand all</button> <button type="button" class="bottom-strip-btn" data-collapse-all="1">Collapse all</button></div>';
     html += (childrenOf[""] || []).map(id => node(id, 0)).join("");
 
-    // Progress that belongs to topics no longer in the tree.
-    const orphans = Object.keys(summary.topics).filter(id => !nodesById[id]);
+    // Decks that exist locally but whose topic id is no longer in the tree.
+    const orphans = Array.from(knownDeckIds).filter(id => !nodesById[id]);
     if (orphans.length) {
         html += '<div class="practice-group-title">Not in the tree any more</div>' +
-            orphans.map(id => topicRowHtml(id, summary.topics[id], 0, { showReviewed: true, noActions: true })).join("");
+            orphans.map(id => '<div class="practice-tree-row" data-node-id="' + escapeHtml(id) + '">' +
+                '<span class="practice-tree-toggle practice-tree-leaf" aria-hidden="true"></span>' +
+                '<div class="practice-row-main"><div class="practice-row-title practice-row-unknown">Topic not found <span class="practice-row-id">(' + escapeHtml(id) + ")</span></div>" +
+                boxStripHtml(id) + "</div></div>").join("");
     }
     return html;
 }
@@ -594,6 +732,13 @@ function bindEvents() {
     el("practice-back").addEventListener("click", () => showDetail(false));
 
     el("practice-right").addEventListener("click", event => {
+        const boxToggle = event.target.closest("[data-box-toggle]");
+        if (boxToggle) {
+            const key = boxToggle.dataset.boxToggle;
+            if (boxToggles.has(key)) boxToggles.delete(key); else boxToggles.add(key);
+            render();
+            return;
+        }
         const toggle = event.target.closest("[data-toggle]");
         if (toggle) {
             const id = toggle.dataset.toggle;
@@ -700,6 +845,7 @@ function enablePanel() {
 async function initPracticePage() {
     enablePanel();
     bindEvents();
+    setInterval(tickBoxTimers, 1000);
 
     const wanted = params().get("view");
     const startView = VIEW_HEADINGS[wanted] ? wanted : "due";

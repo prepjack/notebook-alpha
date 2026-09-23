@@ -438,6 +438,76 @@
         return summary;
     }
 
+    // All topic ids that have a known deck locally (Tree view's scope:
+    // only topics whose flashcards have actually been seen at least once,
+    // never the whole site tree).
+    function getKnownTopicIds() {
+        return Object.keys(readKnownDecks());
+    }
+
+    // Per-box breakdown for one topic's Tree-view box-strip. Built from
+    // DECKS_KEY (the authoritative full id list, including never-reviewed
+    // cards) + the progress store — NOT from ctx.cards, so this works for
+    // any known topic whether or not it's the one currently open, with
+    // zero Drive/network calls. Ghosts are structurally impossible here:
+    // we only ever walk the known deck's ids, never the store's ids.
+    //
+    // Returns null if the topic has no known deck yet (nothing to show).
+    //
+    // Shape:
+    //   { topicId, total, readyTotal,
+    //     boxes: [ { box, intervalDays, total, readyCount, waitingCount,
+    //                ready: { new: [ids],                        // no dueDate: never reviewed
+    //                         overdue: [ { id, dueDate } ],       // dueDate already passed
+    //                         dueToday: [ { id, dueDate } ] },    // dueDate = today
+    //                waiting: [ { id, dueDate } ]  // dueDate in the future, soonest first
+    //              }, ... 5 entries ] }
+    function getBoxSummary(topicId, todayStr) {
+        const ids = readKnownDecks()[topicId];
+        if (!Array.isArray(ids) || !ids.length) return null;
+
+        const today = todayStr || todayIso();
+        const store = readStore();
+        const boxes = INTERVALS_DAYS.map((days, i) => ({
+            box: i + 1,
+            intervalDays: days,
+            total: 0,
+            readyCount: 0,
+            waitingCount: 0,
+            ready: { new: [], overdue: [], dueToday: [] },
+            waiting: []
+        }));
+        let readyTotal = 0;
+
+        ids.forEach(id => {
+            const entry = store[id];
+            const boxNum = entry ? Math.min(Math.max(Number(entry.box) || 1, 1), 5) : 1;
+            const b = boxes[boxNum - 1];
+            b.total++;
+
+            if (!entry) {
+                b.ready.new.push(id);
+                b.readyCount++; readyTotal++;
+                return;
+            }
+            const due = String(entry.dueDate || "");
+            if (due < today) {
+                b.ready.overdue.push({ id: id, dueDate: due });
+                b.readyCount++; readyTotal++;
+            } else if (due === today) {
+                b.ready.dueToday.push({ id: id, dueDate: due });
+                b.readyCount++; readyTotal++;
+            } else {
+                b.waiting.push({ id: id, dueDate: due });
+                b.waitingCount++;
+            }
+        });
+
+        boxes.forEach(b => b.waiting.sort((x, y) => x.dueDate < y.dueDate ? -1 : x.dueDate > y.dueDate ? 1 : 0));
+
+        return { topicId: topicId, total: ids.length, readyTotal: readyTotal, boxes: boxes };
+    }
+
     // "Practice · 12" link in the header (only present on pages that have it).
     function updatePracticeBadge() {
         const badge = document.getElementById("practice-badge");
@@ -634,7 +704,7 @@
         showCard();
     }
 
-    window.Flashcards = { splitArticleAndCards, setContext, onNewArticle, updateButtonState, open, getDueSummary, updatePracticeBadge };
+    window.Flashcards = { splitArticleAndCards, setContext, onNewArticle, updateButtonState, open, getDueSummary, getBoxSummary, getKnownTopicIds, updatePracticeBadge };
 
     // Flashcard button starts disabled until a topic with cards is open.
     updateButtonState();
@@ -649,5 +719,5 @@
     }
 
     // Exposed for tests only; harmless in production.
-    window.Flashcards.__test = { parseFlashcards, splitBilingual, makeCardId, mergeRemoteStore, entryTs, addDaysIso, onKnewIt, onForgot, isDue, readStore, pruneOrphansForTopic };
+    window.Flashcards.__test = { parseFlashcards, splitBilingual, makeCardId, mergeRemoteStore, entryTs, addDaysIso, onKnewIt, onForgot, isDue, readStore, pruneOrphansForTopic, getBoxSummary, getKnownTopicIds };
 })();

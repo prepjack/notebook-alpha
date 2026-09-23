@@ -4768,6 +4768,131 @@ a.bottom-strip-btn.practice-open{
     text-decoration:none;
     display:inline-block;
 }
+
+/* ---- Box-strip: 5-box Leitner view under each topic (Tree view) ---- */
+.box-strip{
+    margin-top:10px;
+}
+.box-strip-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:8px;
+    margin-bottom:8px;
+}
+.box-strip-total{
+    font:700 12px Arial,sans-serif;
+    color:var(--text);
+}
+.box-strip-idle{
+    font:11px Arial,sans-serif;
+    color:var(--muted);
+    cursor:help;
+}
+.box-strip-boxes{
+    display:grid;
+    grid-template-columns:repeat(5,1fr);
+    gap:8px;
+}
+@media (max-width:700px){
+    .box-strip-boxes{
+        grid-template-columns:repeat(2,1fr);
+    }
+}
+.box-card{
+    border:1px solid var(--line);
+    border-radius:9px;
+    background:#fff;
+    padding:8px 10px;
+    min-width:0;
+}
+.box-card.box-ready{
+    border-color:#9db9a6;
+}
+.box-card-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    cursor:pointer;
+    gap:6px;
+}
+.box-num{
+    font:700 11px Arial,sans-serif;
+    color:var(--text);
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+}
+.box-chev,
+.box-group-chev{
+    flex:none;
+    color:var(--muted);
+    font:11px/1 Arial,sans-serif;
+}
+.box-counts{
+    display:flex;
+    flex-direction:column;
+    gap:2px;
+    margin-top:6px;
+    font:11px Arial,sans-serif;
+}
+.box-count-ready{
+    color:var(--green);
+    font-weight:700;
+}
+.box-count-idle{
+    color:var(--muted);
+}
+.box-count-waiting{
+    color:var(--muted);
+}
+.box-expand{
+    margin-top:8px;
+    border-top:1px solid var(--line);
+    padding-top:6px;
+}
+.box-group{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:5px 2px;
+    cursor:pointer;
+    font:11px Arial,sans-serif;
+    color:var(--text);
+}
+.box-group + .box-group{
+    border-top:1px dashed var(--line);
+}
+.box-group-open{
+    color:var(--green);
+}
+.box-card-list{
+    margin:0 0 4px;
+    padding-left:2px;
+}
+.box-card-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:4px 0;
+    border-top:1px solid var(--line);
+    font:11px Arial,sans-serif;
+}
+.box-card-row:first-child{
+    border-top:none;
+}
+.box-card-id{
+    font-family:"Courier New",monospace;
+    color:var(--text);
+}
+.box-card-status{
+    color:var(--muted);
+    white-space:nowrap;
+}
+.box-timer{
+    font-family:"Courier New",monospace;
+}
 .practice-footnote{
     margin:20px 0 0;
     font:11px/1.5 Arial,sans-serif;
