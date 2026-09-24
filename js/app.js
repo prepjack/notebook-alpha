@@ -1088,7 +1088,7 @@ function applyMdTextToContentPanel(rawText, container, assets, assetData, compan
     currentLanguageSplit = splitContentByLanguage(rawText);
 
     const preferred = (selectedTopicNode && lastLanguagePerTopic.get(selectedTopicNode.id)) || "EN";
-    currentContentLanguage = languageBlockFor(preferred, currentLanguageSplit) ? preferred : "EN";
+    currentContentLanguage = firstAvailableLanguage(currentLanguageSplit, preferred);
 
     renderCurrentLanguageBlock(container);
     updateLanguageToggleUI();
@@ -1101,9 +1101,19 @@ function languageBlockFor(lang, split) {
     return split.en;
 }
 
+// The language to show: the wanted one if the file has it, otherwise the first
+// version that does (EN, then HI, then AI) — a file may hold only some versions.
+function firstAvailableLanguage(split, wanted) {
+    if (!split) return "EN";
+    const order = [wanted, "EN", "HI", "AI"];
+    return order.find(l => l && String(languageBlockFor(l, split) || "").trim()) || "EN";
+}
+
 function renderCurrentLanguageBlock(container) {
     if (!container || !currentLanguageSplit) return;
-    const text = languageBlockFor(currentContentLanguage, currentLanguageSplit) || currentLanguageSplit.en || "";
+    const lang = firstAvailableLanguage(currentLanguageSplit, currentContentLanguage);
+    currentContentLanguage = lang;
+    const text = languageBlockFor(lang, currentLanguageSplit) || "";
     renderRichContent(text, container, currentContentAssets, currentContentAssetData);
     renderAlphaContentDiagnostic(container);
     // Phase 8: hand the topic's (language-independent) flashcard deck over.
@@ -1777,6 +1787,278 @@ STUDY CONTENT (the only source for every question)
 
 <PASTE CONTENT HERE>`;
 
+/* =========================================================
+   CONTENT GENERATION PROMPT — VERSION PICKER (EN / HI / AI)
+   The Add Content popup has EN / HI / AI ticks next to the
+   "Copy Content Generation Prompt" button. All three ticked =
+   CONTENT_LINK_AI_PROMPT exactly as written above (unchanged).
+   Anything less = buildContentPrompt() rewrites ONLY the
+   language-dependent parts of that text:
+     - LANGUAGE ARCHITECTURE and LANGUAGE INSTRUCTIONS sections
+     - the AI LEARNING VERSION section (dropped if AI is not ticked)
+     - a few one-line mentions (index-term rule, source-fidelity
+       heading, final checklist)
+   If you edit those parts of CONTENT_LINK_AI_PROMPT, run
+   __contentPromptSelfCheck() in the browser console: it rebuilds the
+   full prompt from these rules and reports whether the two still match.
+   The site needs nothing else: a version missing from the file is
+   simply greyed out in the EN / HI / AI toggle.
+   ========================================================= */
+
+const CONTENT_PROMPT_LANGS = ["EN", "HI", "AI"];
+const CONTENT_PROMPT_LANGS_KEY = "alphaContentPromptLangs";
+
+function normalizeContentPromptLangs(langs) {
+    const wanted = new Set((Array.isArray(langs) ? langs : []).map(l => String(l).toUpperCase()));
+    const ordered = CONTENT_PROMPT_LANGS.filter(l => wanted.has(l));
+    return ordered.length ? ordered : CONTENT_PROMPT_LANGS.slice();
+}
+
+function loadContentPromptLangs() {
+    try {
+        return normalizeContentPromptLangs(JSON.parse(localStorage.getItem(CONTENT_PROMPT_LANGS_KEY) || "null"));
+    } catch (_) {
+        return CONTENT_PROMPT_LANGS.slice();
+    }
+}
+
+function saveContentPromptLangs(langs) {
+    try { localStorage.setItem(CONTENT_PROMPT_LANGS_KEY, JSON.stringify(langs)); } catch (_) { /* private mode etc. */ }
+}
+
+function contentPromptLangBoxes() {
+    return [...document.querySelectorAll("#add-content-link-modal [data-content-lang]")];
+}
+
+function getSelectedContentPromptLangs() {
+    const boxes = contentPromptLangBoxes();
+    if (!boxes.length) return loadContentPromptLangs();
+    return normalizeContentPromptLangs(boxes.filter(b => b.checked).map(b => b.dataset.contentLang));
+}
+
+// onchange of the three ticks: at least one version must always stay ticked.
+function onContentPromptLangChange(box) {
+    const boxes = contentPromptLangBoxes();
+    if (!boxes.some(b => b.checked)) box.checked = true;
+    saveContentPromptLangs(boxes.filter(b => b.checked).map(b => b.dataset.contentLang));
+}
+
+// ["EN","HI"] -> "EN and HI"; ["EN","HI","AI"] -> "EN, HI, and AI"
+function joinPromptList(arr, word) {
+    if (arr.length <= 1) return arr.join("");
+    if (arr.length === 2) return arr[0] + " " + word + " " + arr[1];
+    return arr.slice(0, -1).join(", ") + ", " + word + " " + arr[arr.length - 1];
+}
+
+const PROMPT_BAR = "=".repeat(52);
+const PROMPT_BANNER_RE = /^={20,}\n([^\n]+)\n={20,}\n/gm;
+
+function promptBanner(title) {
+    return PROMPT_BAR + "\n" + title + "\n" + PROMPT_BAR + "\n";
+}
+
+// Replaces one whole banner section (banner + text up to the next banner).
+function replacePromptSection(text, titleStart, newSection) {
+    const found = [...text.matchAll(PROMPT_BANNER_RE)];
+    const i = found.findIndex(m => m[1].startsWith(titleStart));
+    if (i < 0) {
+        console.warn("Content prompt: section not found (was the prompt edited?):", titleStart);
+        return text;
+    }
+    const start = found[i].index;
+    const end = i + 1 < found.length ? found[i + 1].index : text.length;
+    return text.slice(0, start) + newSection + text.slice(end);
+}
+
+// Returns the body text of one banner section (used to reuse its paragraphs).
+function getPromptSectionBody(text, titleStart) {
+    const found = [...text.matchAll(PROMPT_BANNER_RE)];
+    const i = found.findIndex(m => m[1].startsWith(titleStart));
+    if (i < 0) return "";
+    const from = found[i].index + found[i][0].length;
+    const to = i + 1 < found.length ? found[i + 1].index : text.length;
+    return text.slice(from, to);
+}
+
+// One replacement with a console warning when the anchor text is missing.
+function promptSub(text, from, to) {
+    const hit = typeof from === "string" ? text.includes(from) : from.test(text);
+    if (!hit) console.warn("Content prompt: text to adapt not found (was the prompt edited?):", String(from).slice(0, 80));
+    return text.replace(from, typeof to === "function" ? to : () => to);
+}
+
+// Same rules as buildContentPrompt(), without the "all three = untouched" shortcut.
+function buildContentPromptFromRules(langs) {
+    const L = normalizeContentPromptLangs(langs);
+    const n = L.length;
+    const has = l => L.includes(l);
+    const src = L.filter(l => l !== "AI");          // source-faithful versions in this package
+    const srcSlash = src.join("/");                  // "EN/HI"
+    const partial = n < 3;
+    let p = CONTENT_LINK_AI_PROMPT;
+
+    /* ---------- LANGUAGE ARCHITECTURE ---------- */
+    const marker = {
+        EN: "...English (source-faithful)...",
+        HI: "...Hindi (source-faithful)...",
+        AI: "...AI Learning Version — see AI LEARNING VERSION below..."
+    };
+
+    let intro = "The website has ONE control: Version: EN / HI / AI" +
+        (has("AI") ? " (AI = the AI Learning Version — see AI LEARNING VERSION below)" : "") + ".";
+    if (partial) {
+        intro += "\n\nFor THIS topic, generate ONLY the " + joinPromptList(L, "and") + " version" + (n > 1 ? "s" : "") +
+            ". The site's version toggle automatically disables any version that is not in the file, so do NOT create empty or placeholder blocks for the others.";
+    }
+
+    const genLine = "Generate exactly ONE block per " + (partial ? "selected version" : "version slot") +
+        " in ONE .md file — " + n + " block" + (n > 1 ? "s" : "") + " total, always — using this exact marker order:";
+
+    const markers = L.map(l => "<!-- ===LANG:" + l + "=== -->\n" + marker[l]).join("\n\n");
+
+    const omitLine = n === 3 ? "- Do not omit any of the three language blocks."
+        : n === 2 ? "- Do not omit either of the two language blocks (" + L.join(" and ") + ")."
+        : "- Do not omit the " + L[0] + " language block.";
+    const markerRules = [
+        "MARKER RULES:",
+        "- Copy every marker exactly.",
+        "- Every marker must be alone on its own line.",
+        "- Do not add spaces, punctuation, headings, or fences on marker lines.",
+        omitLine,
+        ...(partial ? ["- Do not add a marker or block for any version that is not listed above."] : []),
+        ...(n > 1 ? ["- Keep version order " + L.join(" → ") + "."] : []),
+        "- Do not create separate files for versions."
+    ].join("\n");
+
+    const numbering = [
+        n > 1 ? "SECTION NUMBERING FOR TOGGLE SYNC — CRITICAL:" : "SECTION NUMBERING — CRITICAL:",
+        "- Every ## heading " + (n > 1 ? "in " + L[0] + " " : "") + "must start with a strictly increasing major number: \"1. Title\", \"2. Title\", \"3. Title\".",
+        ...(n > 1 ? ["- " + joinPromptList(L.slice(1), "and") + " must reuse the exact same numbers, in the exact same order, as the corresponding " + L[0] +
+            " concepts — this is what lets the site's toggle jump between " + L.join("/") + " without losing the reader's place."] : []),
+        "- If concepts are merged, keep the smaller original number.",
+        "- Never reuse one number for two different concepts.",
+        "- ### headings may optionally use decimals such as 2.1, 2.2."
+    ].join("\n");
+
+    const contentRuleLines = [
+        "- Most complete and authoritative version.",
+        "- Preserve important source structure, sequence, terminology, definitions, examples, classifications, relationships, and exam-relevant detail.",
+        "- Explain concepts clearly rather than listing keywords.",
+        "- Add useful clarification, analogies, cross-links, or \"why it matters\" notes only when genuinely helpful and not factually invented."
+    ];
+    let contentRules;
+    if (src.length) {
+        contentRules = [
+            "CONTENT RULES (apply to " + joinPromptList(src, "and") + " — source-faithful version" + (src.length > 1 ? "s" : "") + "):",
+            ...contentRuleLines,
+            src.length > 1
+                ? "- EN and HI must remain factually consistent with each other and with the source material."
+                : "- " + src[0] + " must remain factually consistent with the source material."
+        ].join("\n");
+    } else {
+        contentRules = [
+            "CONTENT RULES (apply to the AI Learning Version — it is the ONLY version in this package, so it must carry the full source content):",
+            ...contentRuleLines,
+            "- Do not shorten or drop source content for the sake of brevity: every important definition, classification, example, and exam-relevant detail from the source must appear here, taught in the AI Learning Version style."
+        ].join("\n");
+    }
+
+    const refWords = src.length ? "every heading from " + src[0] : "every heading and every important point of the source content";
+    const refCopy = src.length ? src[0] : "the source";
+    const aiRules = [
+        "RULES FOR THE AI LEARNING VERSION (LANG:AI):",
+        "- The richest teaching pass — full analogies, multiple real-life examples, mnemonics where useful, connections between concepts, and active-recall prompts, covering " + refWords + " with full teaching depth.",
+        "- Must stay teaching-focused (see AI LEARNING VERSION below), never degrade into a plain compressed copy of " + refCopy + "."
+    ].join("\n");
+
+    const archBody = [intro, genLine, markers, markerRules, numbering, contentRules, ...(has("AI") ? [aiRules] : [])].join("\n\n") + "\n\n";
+    p = replacePromptSection(p, "LANGUAGE ARCHITECTURE", promptBanner("LANGUAGE ARCHITECTURE — CRITICAL") + archBody);
+
+    /* ---------- LANGUAGE INSTRUCTIONS (reuses the original paragraphs) ---------- */
+    const origParas = getPromptSectionBody(CONTENT_LINK_AI_PROMPT, "LANGUAGE INSTRUCTIONS").split(/\n\n+/).map(s => s.trim()).filter(Boolean);
+    const paraFor = key => {
+        const hit = origParas.find(s => s.startsWith(key));
+        if (!hit) console.warn("Content prompt: language instruction paragraph not found:", key);
+        return hit || "";
+    };
+    const instrParas = L.map(l => paraFor(l === "EN" ? "EN (source-faithful):" : l === "HI" ? "HI (source-faithful):" : "AI (AI Learning Version"));
+    if (has("AI")) {
+        const i = L.indexOf("AI");
+        instrParas[i] = promptSub(instrParas[i], "not to duplicate the EN/HI source content in another language.",
+            src.length ? "not to duplicate the " + srcSlash + " source content in another language." : "not to restate the source content in another language.");
+    }
+    if (n > 1) {
+        instrParas.push("Maintain the SAME underlying concept identity, heading order, and numbering across " + joinPromptList(L, "and") +
+            ". Only language/style" + (has("AI") ? " — and, for AI, teaching approach —" : "") + " should change.");
+    }
+    p = replacePromptSection(p, "LANGUAGE INSTRUCTIONS", promptBanner("LANGUAGE INSTRUCTIONS") + instrParas.join("\n\n") + "\n\n");
+
+    /* ---------- AI LEARNING VERSION section ---------- */
+    if (!has("AI")) {
+        p = replacePromptSection(p, "AI LEARNING VERSION", "");
+    } else if (src.length < 2) {
+        // The two fixed EN/HI mentions inside the AI section.
+        if (src.length === 1) {
+            p = promptSub(p, "must match the EN/HI source-faithful versions exactly", "must match the " + src[0] + " source-faithful version exactly");
+            p = promptSub(p, "which AI section corresponds to which EN/HI section.", "which AI section corresponds to which " + src[0] + " section.");
+            p = promptSub(p, "never to alter the EN/HI source-faithful content,", "never to alter the " + src[0] + " source-faithful content,");
+        } else {
+            p = promptSub(p, "must match the EN/HI source-faithful versions exactly (see SECTION NUMBERING above)",
+                "must follow the source's own structure, numbered 1., 2., 3. in the source's order (see SECTION NUMBERING above)");
+            p = promptSub(p, "which AI section corresponds to which EN/HI section.", "which AI section corresponds to which part of the source.");
+            p = promptSub(p, "never to alter the EN/HI source-faithful content,", "never to alter what the source content says,");
+        }
+    }
+
+    /* ---------- SOURCE FIDELITY ---------- */
+    p = promptSub(p, "SOURCE FIDELITY (applies to EN and HI blocks)",
+        src.length ? "SOURCE FIDELITY (applies to " + joinPromptList(src, "and") + " block" + (src.length > 1 ? "s" : "") + ")"
+                   : "SOURCE FIDELITY (applies to the AI block — it is the only version)");
+    p = promptSub(p, "- Any explanatory analogy in EN/HI must be clearly educational",
+        "- Any explanatory analogy in " + (src.length ? srcSlash : "the content") + " must be clearly educational");
+
+    /* ---------- Index-term rule ---------- */
+    p = promptSub(p, /each language block \(EN\/HI\/AI\) is/, "each language block (" + L.join("/") + ") is");
+    p = promptSub(p, /(Keep the exact same set of terms wrapped\s+across the )EN, HI, and AI( versions, so the suggestions stay consistent\s+regardless of which version the student is reading\.\s+)/,
+        n > 1 ? (m, a, b) => a + joinPromptList(L, "and") + b : "");
+
+    /* ---------- Final checklist ---------- */
+    p = promptSub(p, "- all 3 LANG blocks exist (EN, HI, AI)",
+        "- " + (n === 1 ? "the LANG block exists" : "all " + n + " LANG blocks exist") + " (" + L.join(", ") + ")");
+    p = promptSub(p, "- marker order is exact: EN → HI → AI\n", n > 1 ? "- marker order is exact: " + L.join(" → ") + "\n" : "");
+    p = promptSub(p, "- section numbering is synchronized concept-for-concept across EN, HI, and AI\n",
+        n > 1 ? "- section numbering is synchronized concept-for-concept across " + joinPromptList(L, "and") + "\n" : "");
+    p = promptSub(p, "once per language block, consistently across EN/HI/AI",
+        n > 1 ? "once per language block, consistently across " + L.join("/") : "once per language block");
+    p = promptSub(p, "- EN/HI content contains no unnecessary",
+        "- " + (src.length ? srcSlash + " content" : "the content") + " contains no unnecessary");
+    p = promptSub(p, /- the AI Learning Version teaches rather than merely paraphrasing, uses real-life examples purposefully, and keeps its headings\/numbering mapped to EN\/HI\n/,
+        !has("AI") ? ""
+            : "- the AI Learning Version teaches rather than merely paraphrasing, uses real-life examples purposefully, and " +
+              (src.length ? "keeps its headings/numbering mapped to " + srcSlash : "keeps its headings numbered in the source's order without dropping any source content") + "\n");
+
+    return p;
+}
+
+// The prompt for the chosen versions. All three ticked = the original text, untouched.
+function buildContentPrompt(langs) {
+    const L = normalizeContentPromptLangs(langs);
+    if (L.length === CONTENT_PROMPT_LANGS.length) return CONTENT_LINK_AI_PROMPT;
+    return buildContentPromptFromRules(L);
+}
+
+// Console helper: rebuilds the FULL prompt from the rules above and compares it
+// with CONTENT_LINK_AI_PROMPT. Run after editing the language parts of the prompt.
+function __contentPromptSelfCheck() {
+    const same = buildContentPromptFromRules(CONTENT_PROMPT_LANGS) === CONTENT_LINK_AI_PROMPT;
+    console.log(same
+        ? "Content prompt self-check: OK — the version rules still reproduce the full prompt."
+        : "Content prompt self-check: MISMATCH — CONTENT_LINK_AI_PROMPT was edited in a language-dependent part; update buildContentPromptFromRules() to match.");
+    return same;
+}
+window.__contentPromptSelfCheck = __contentPromptSelfCheck;
+
+
 function openAddContentLink() {
     if (!selectedTopicNode) return;
     document.getElementById("add-content-link-modal")?.remove();
@@ -1792,20 +2074,45 @@ function openAddContentLink() {
                 <h2>🔗 Add Content Folder</h2>
                 <p class="add-resource-scope">Adding to: <strong>${escapeHtml(selectedTopicNode.title)}</strong></p>
 
-                <div class="content-folder-steps">
-                    <div class="content-folder-step"><span>1</span><div><strong>Copy the Content Generation Prompt</strong><small>Generates a ZIP with the Markdown and any images needed for this topic.</small></div></div>
-                    <div class="content-folder-step"><span>2</span><div><strong>Open this topic's Google Drive folder</strong><small>Unzip the downloaded package, then drag the <code>.md</code> file and all assets into that same folder.</small></div></div>
-                    <div class="content-folder-step"><span>3</span><div><strong>Share the folder and paste its link below</strong><small>Set the folder to <strong>Anyone with the link can view</strong>.</small></div></div>
-                </div>
-
                 <div class="content-action-row content-folder-tools">
                     <button type="button" class="content-action" onclick="openTopicDriveFolder()">📁 Open Topic Folder</button>
                 </div>
 
                 <div class="prompt-block">
-                    <button type="button" class="content-action primary" onclick="copyContentLinkAiPrompt()">📋 Copy Content Generation Prompt</button>
-                    <p class="prompt-block-desc"><strong>What it does:</strong> copies a ready-made prompt for this topic (its name and place in the hierarchy are already filled in). The AI turns your source material into a study package: <code>content.md</code> with English, Hindi and AI-explainer versions, plus any images or animations.</p>
+                    <div class="prompt-block-row">
+                        <button type="button" class="content-action primary" onclick="copyContentLinkAiPrompt()">📋 Copy Content Generation Prompt</button>
+                        <span class="prompt-lang-picker" role="group" aria-label="Versions to generate">
+                            <span class="prompt-lang-label">Versions:</span>
+                            ${(() => {
+                                const savedLangs = loadContentPromptLangs();
+                                return CONTENT_PROMPT_LANGS.map(l =>
+                                    `<label class="flashcard-enonly"><input type="checkbox" data-content-lang="${l}" ${savedLangs.includes(l) ? "checked" : ""} onchange="onContentPromptLangChange(this)"> ${l}</label>`
+                                ).join("");
+                            })()}
+                        </span>
+                        <div class="info-tip">
+                            <button type="button" class="info-tip-btn" aria-label="How to add content" onclick="toggleInfoTip(this)">i</button>
+                            <div class="info-tip-body" role="tooltip">
+                                <strong>How to add content</strong>
+                                <ol>
+                                    <li><b>Copy the prompt</b> — tick the versions you need. The AI returns a ZIP with the Markdown and any images for this topic.</li>
+                                    <li><b>Open this topic's Google Drive folder</b> — unzip the package and drag the <code>.md</code> file and all assets into it.</li>
+                                    <li><b>Share and save</b> — set the folder to <em>Anyone with the link can view</em>, paste its link below and press Save Folder Link.</li>
+                                </ol>
+                            </div>
+                        </div>
+                    </div>
+                    <p class="prompt-block-desc"><strong>What it does:</strong> copies a ready-made prompt for this topic (its name and place in the hierarchy are already filled in). The AI turns your source material into a study package: <code>content.md</code> with the versions ticked above (English, Hindi, AI-explainer), plus any images. Untick a version to leave it out — the prompt gets shorter too.</p>
                     <p class="prompt-block-desc"><strong>What to do:</strong> paste it into an AI that can create files (Claude, or ChatGPT with code execution), attach your notes or PDF, download the ZIP it returns, unzip it, and drag the files into this topic's Drive folder. Then paste the folder link below.</p>
+
+                    <div class="prompt-block-link">
+                        <label for="content-link-url">Google Drive folder link</label>
+                        <input id="content-link-url" type="url" value="${escapeHtml(existingLink)}"
+                               placeholder="https://drive.google.com/drive/folders/...">
+                        <p class="drive-note"><strong>Paste the topic folder link here — not the individual .md file link.</strong><br>
+                            The folder should contain one <code>.md</code> file plus any images or other assets referenced by that Markdown.</p>
+                        <button class="resource-submit-btn" type="button" onclick="submitContentLink()">Save Folder Link</button>
+                    </div>
                 </div>
 
                 <div class="prompt-block">
@@ -1825,12 +2132,6 @@ function openAddContentLink() {
                     <p class="prompt-block-desc"><strong>What it does:</strong> copies a prompt that already contains this topic's text. Pasted into Gemini, it builds a quick 10-question bilingual practice quiz with instant feedback and a score at the end.</p>
                     <p class="prompt-block-desc"><strong>What to do:</strong> paste it into Gemini (or another AI that can show a live preview) and take the quiz right there, on your phone or laptop. Nothing is saved on this site, and every run makes fresh questions. Tick "EN only" for a shorter paste.</p>
                 </div>
-
-                <label for="content-link-url">Google Drive folder link</label>
-                <input id="content-link-url" type="url" value="${escapeHtml(existingLink)}"
-                       placeholder="https://drive.google.com/drive/folders/...">
-                <p class="drive-note"><strong>Paste the topic folder link here — not the individual .md file link.</strong><br>
-                    The folder should contain one <code>.md</code> file plus any images or other assets referenced by that Markdown.</p>
 
                 <details class="content-link-guide">
                     <summary>Supported content formats</summary>
@@ -1859,11 +2160,24 @@ A[Concept] --> B[Explanation]
 All local filenames above must exist in the same linked folder.</pre>
                 </details>
 
-                <button class="resource-submit-btn" type="button" onclick="submitContentLink()">Save Folder Link</button>
             </div>
         </div>`;
     document.body.appendChild(modal);
 }
+
+// "i" button tooltips: hover opens them on desktop (CSS); a click/tap toggles
+// them too, so they also work on touch screens and with the keyboard.
+function toggleInfoTip(btn) {
+    const tip = btn.closest(".info-tip");
+    if (!tip) return;
+    const willOpen = !tip.classList.contains("open");
+    document.querySelectorAll(".info-tip.open").forEach(t => t.classList.remove("open"));
+    tip.classList.toggle("open", willOpen);
+}
+document.addEventListener("click", e => {
+    if (e.target.closest(".info-tip")) return;
+    document.querySelectorAll(".info-tip.open").forEach(t => t.classList.remove("open"));
+});
 
 function closeAddContentLink() {
     document.getElementById("add-content-link-modal")?.remove();
@@ -1910,7 +2224,8 @@ function copyContentLinkAiPrompt() {
     const topicTitle = selectedTopicNode.title || "<PUT TOPIC NAME HERE>";
     const breadcrumb = buildTopicBreadcrumb(selectedTopicNode);
     // Function replacers, so "$"-sequences inside a title can't be misread.
-    const prompt = CONTENT_LINK_AI_PROMPT
+    const langs = getSelectedContentPromptLangs();
+    const prompt = buildContentPrompt(langs)
         .replace("<PUT HIERARCHY PATH HERE>", () => breadcrumb)
         .replace("<PUT TOPIC NAME HERE>", () => topicTitle);
 
@@ -1931,7 +2246,7 @@ function copyContentLinkAiPrompt() {
             }, 1800);
         }
 
-        alert("Content Generation Prompt copied! Paste it into an AI tool that can create and download files — like Claude or ChatGPT with code execution enabled — then attach or paste the source PDF (or other material) in the same message. It will generate a ZIP; unzip it and drag the files into your Drive folder.");
+        alert("Content Generation Prompt copied (versions: " + langs.join(" + ") + ")! Paste it into an AI tool that can create and download files — like Claude or ChatGPT with code execution enabled — then attach or paste the source PDF (or other material) in the same message. It will generate a ZIP; unzip it and drag the files into your Drive folder.");
     };
 
     const manual = () => {
@@ -2009,17 +2324,36 @@ function copyTopicContentPrompt(kind) {
         alert("Please select a topic first.");
         return;
     }
-    if (!currentLanguageSplit || !String(currentLanguageSplit.en || "").trim()) {
+    // Which versions this topic's file actually has (a file may hold only some of EN / HI / AI).
+    const split = currentLanguageSplit;
+    const hasEn = !!(split && String(split.en || "").trim());
+    const hasHi = !!(split && String(split.hi || "").trim());
+    const hasAi = !!(split && String(split.ai || "").trim());
+    if (!hasEn && !hasHi && !hasAi) {
         alert("This topic has no content loaded yet. Add and open its content first — the " + cfg.name.toLowerCase() + " is built from that text.");
         return;
     }
 
     const enOnly = !!document.getElementById(cfg.enOnlyId)?.checked;
-    const en = cleanContentForPrompt(currentLanguageSplit.en);
-    const hi = enOnly ? "" : cleanContentForPrompt(currentLanguageSplit.hi);
-
-    let contentBlock = "=== CONTENT (ENGLISH) ===\n" + en;
-    if (hi) contentBlock += "\n\n=== CONTENT (हिंदी) ===\n" + hi;
+    let contentBlock;
+    let included;   // what the copy confirmation says was pasted in
+    if (hasEn) {
+        // Normal case: English, plus Hindi unless "EN only" is ticked.
+        const hiText = (enOnly || !hasHi) ? "" : cleanContentForPrompt(split.hi);
+        contentBlock = "=== CONTENT (ENGLISH) ===\n" + cleanContentForPrompt(split.en);
+        if (hiText) contentBlock += "\n\n=== CONTENT (हिंदी) ===\n" + hiText;
+        included = hiText ? "English + Hindi content included" : "English content only — the AI will write the Hindi side";
+    } else if (hasHi) {
+        // No English version in the file.
+        contentBlock = "NOTE: This topic has no English version. Wherever the instructions above say to copy the English side from the English content, write that side yourself in standard UGC NET English terminology instead. The Hindi side must still be copied from the Hindi content below.\n\n" +
+            "=== CONTENT (हिंदी) ===\n" + cleanContentForPrompt(split.hi);
+        included = "Hindi content only — the AI will write the English side";
+    } else {
+        // Only the AI-explainer (Hinglish) version exists.
+        contentBlock = "NOTE: This topic only has the AI-explainer version, written in conversational Hinglish (Devanagari for Hindi words, Roman script for technical English terms). There is no separate English or Hindi version, so write both the English side and the Hindi side yourself in standard UGC NET terminology, taking every idea and fact only from this text and keeping its technical terms exactly as written.\n\n" +
+            "=== CONTENT (AI EXPLAINER — HINGLISH) ===\n" + cleanContentForPrompt(split.ai);
+        included = "AI-explainer version only — the AI will write both the English and Hindi sides";
+    }
 
     const topicTitle = selectedTopicNode.title || "";
     const breadcrumb = buildTopicBreadcrumb(selectedTopicNode);
@@ -2046,7 +2380,7 @@ function copyTopicContentPrompt(kind) {
         const sizeNote = prompt.length > 30000
             ? "\n\nThis is a long paste (" + Math.round(prompt.length / 1000) + "k characters). If your AI app truncates it, tick \"EN only\" and copy again."
             : "";
-        alert(cfg.name + " copied" + (hi ? " (English + Hindi content included)." : " (English content only — the AI will write the Hindi side).") +
+        alert(cfg.name + " copied (" + included + ")." +
               "\n\n" + cfg.next + sizeNote);
     };
 
