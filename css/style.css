@@ -4768,6 +4768,116 @@ a.bottom-strip-btn.practice-open{
     text-decoration:none;
     display:inline-block;
 }
+.practice-row-selectable{
+    cursor:pointer;
+}
+.practice-row-selectable:hover{
+    color:var(--green);
+}
+.practice-row-glance{
+    margin-top:2px;
+    font:11px Arial,sans-serif;
+    color:var(--muted);
+}
+.practice-node-placeholder{
+    margin-top:10px;
+    padding:9px 12px;
+    border:1px dashed var(--line);
+    border-radius:9px;
+    font:12px/1.5 Arial,sans-serif;
+    color:var(--muted);
+}
+
+/* ---- Phase 2: 4-square panel (Tree view, topic selected) ---- */
+.practice-square-grid{
+    display:grid;
+    grid-template-columns:repeat(4,1fr);
+    gap:8px;
+    margin-top:10px;
+}
+.practice-square{
+    position:relative;
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    padding:9px 10px;
+    border:1px solid var(--line);
+    border-radius:9px;
+    background:#fff;
+    cursor:pointer;
+}
+.practice-square:hover{
+    border-color:#9db9a6;
+}
+.practice-square-expanded{
+    border-color:var(--green);
+    background:var(--green-soft);
+}
+.practice-square-future{
+    cursor:default;
+    opacity:.65;
+}
+.practice-square-title{
+    font:700 11px Arial,sans-serif;
+    letter-spacing:.03em;
+    text-transform:uppercase;
+    color:var(--text);
+}
+.practice-square-stat{
+    font:12px/1.4 Arial,sans-serif;
+    color:var(--muted);
+    min-height:17px;
+}
+.practice-square-btn{
+    align-self:flex-start;
+    margin-top:auto;
+}
+.practice-square-detail{
+    margin-top:10px;
+    padding-top:10px;
+    border-top:1px solid var(--line);
+}
+
+/* Phase 1 tool-panel markup (renderReadPanel / renderMcqPanel / renderFuturePanel),
+   shown inside .practice-square-detail once a square is expanded. */
+.tool-panel-title{
+    font:700 12px Arial,sans-serif;
+    color:var(--text);
+    margin-bottom:4px;
+}
+.tool-panel-state{
+    margin-left:6px;
+    padding:1px 8px;
+    border-radius:9px;
+    background:var(--green-soft);
+    color:var(--green);
+    font:700 10px Arial,sans-serif;
+    text-transform:uppercase;
+    letter-spacing:.03em;
+}
+.tool-panel-sub{
+    margin-bottom:8px;
+    font:12px/1.5 Arial,sans-serif;
+    color:var(--muted);
+}
+.tool-panel-future{
+    color:var(--muted);
+}
+
+/* ---- Plan Today / Queue view placeholders ---- */
+.practice-plan-placeholder,
+.practice-queue-placeholder{
+    padding:14px 16px;
+    border:1px dashed var(--line);
+    border-radius:10px;
+    background:var(--paper);
+}
+
+@media (max-width:700px){
+    .practice-square-grid{
+        grid-template-columns:repeat(2,1fr);
+    }
+}
 
 /* ---- Box-strip: 5-box Leitner view under each topic (Tree view) ---- */
 .box-strip{

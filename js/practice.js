@@ -1,16 +1,21 @@
 /* =========================================================
    PRACTICE PAGE (practice.html)
 
-   One place for everything you DO to remember what you learned. Two
-   panels, like the Index page: the LEFT panel is a small menu, the RIGHT
-   panel shows whatever is picked there.
+   Phase 2 shell (see phase-2-new-shell.md). Two panels, like the Index
+   page: the LEFT panel is a small menu, the RIGHT panel shows whatever
+   is picked there. Three top-level entries:
 
-     Progress -> Tree view   every topic that has review progress, grouped
-                             Subject -> Course -> Unit -> Chapter -> Topic
-                             with due counts rolled up at every level
-              -> Due view    Overdue / Due today / Next 7 days / Later
-     Flashcards              topics with cards due, each with "Review"
-     MCQs                    the existing mcq.html, embedded
+     Plan Today   placeholder only — Phase 5 builds the SMART day plan.
+     Queue view   sub-nav (still in the left panel): Read, Flashcards,
+                  MCQ, Future, in that fixed order. Each is a placeholder
+                  for now — Phase 4 builds the real cross-topic queues.
+     Tree view    the same ToC that powers the home page, unchanged in
+                  structure. Clicking a LEAF topic opens the 4-square
+                  panel (Read | Flashcards | MCQ | Future) from Phase 1,
+                  scoped to that topic, right there in the tree. Clicking
+                  a non-leaf node (Subject/Course/Unit/Chapter) shows a
+                  "select a topic" placeholder — real aggregation is
+                  Phase 3, not built here.
 
    Progress comes from localStorage (kept in step across devices by
    js/progress-sync.js); a card id starts with its topic id. Topic names,
@@ -23,7 +28,11 @@
    content.md) and opens the normal flashcard modal, which shows only the
    cards that are due.
 
-   Deep links: practice.html?view=due|tree|flashcards|mcq&topic=<id>
+   Deep links: practice.html?view=plan|tree|queue-read|queue-flashcards|
+               queue-mcq|queue-future&topic=<id>
+   Old links (practice.html?view=due|flashcards|mcq) from before this
+   phase still work — see LEGACY_VIEW_MAP below — so nothing linking here
+   from index.html / revision.html / reading-tools.js silently breaks.
    ========================================================= */
 
 // progress-sync.js reads this global when it syncs.
@@ -35,10 +44,22 @@ const PRACTICE_COLLAPSED_KEY = "practice:leftCollapsed";
 const MOBILE_MAX = 900;
 
 const VIEW_HEADINGS = {
-    due: "PROGRESS · QUEUE VIEW",
-    tree: "PROGRESS · TREE VIEW",
-    flashcards: "FLASHCARDS",
-    mcq: "MCQS"
+    plan: "PLAN TODAY",
+    tree: "TREE VIEW",
+    "queue-read": "QUEUE VIEW · READ",
+    "queue-flashcards": "QUEUE VIEW · FLASHCARDS",
+    "queue-mcq": "QUEUE VIEW · MCQ",
+    "queue-future": "QUEUE VIEW · FUTURE"
+};
+
+// Old flat-tab view ids (before this phase) -> closest new view. Keeps
+// existing links (index.html's Practice button, revision.html's
+// redirect, reading-tools.js's "jump to due") working without editing
+// every caller in the same pass as this high-risk phase.
+const LEGACY_VIEW_MAP = {
+    due: "queue-flashcards",
+    flashcards: "queue-flashcards",
+    mcq: "queue-mcq"
 };
 
 function escapeHtml(value) {
@@ -177,12 +198,20 @@ function topicInfo(topicId) {
    State
    ----------------------------------------------------- */
 
-let view = "due";
-let lastProgressView = "due";
-const expanded = new Set();     // tree nodes currently opened
-let treeAutoExpanded = false;   // open the nodes that have due cards, once
+let view = "tree";
+let lastQueueSub = "queue-read";           // which Queue sub-tab to return to from the group button
+const expanded = new Set();                // tree PARENT nodes currently opened (children visible)
+let treeAutoExpanded = false;               // open the nodes that have due cards, once
 let scrolledToTopic = false;
-let mcqBuilt = false;
+let mcqBuilt = false;                       // unused post-Phase-2 (see ensureMcqFrame note below), kept for Phase 4
+
+// Tree view: the node whose 4-square panel (or non-leaf placeholder) is
+// open, and which of the 4 squares is expanded to its full detail render.
+// Both reset together when a different node is selected, so only one
+// node's panel and only one square's detail are ever open at once.
+let selectedNode = null;
+let expandedSquare = null;      // "read" | "flashcards" | "mcq" | "future" | null
+let nodeAutoSelected = false;   // auto-open ?topic= once the tree has loaded, like treeAutoExpanded
 
 function params() {
     try {
@@ -321,14 +350,15 @@ function boxStripHtml(topicId) {
    Phase 3's job. Shape:
      { nodeId: string, label: string, isLeaf: true }
 
-   Only renderFlashcardsPanel is wired into the live Tree view this
-   phase (see the treeViewHtml() call sites below) — it is a pure
-   extraction of the pre-existing boxStripHtml(), so the Tree view's
-   visible output is unchanged. renderMcqPanel / renderReadPanel /
-   renderFuturePanel exist and are correct/testable per the spec, but
-   are deliberately NOT added to the live Tree view yet: Phase 2 is
-   where the actual 4-square grid appears, and wiring partial new UI in
-   here risked disrupting the current layout for no visible benefit.
+   Phase 2 wires all four into the live Tree view's 4-square grid (see
+   squareGridHtml() below). renderFlashcardsPanel, renderReadPanel and
+   renderFuturePanel are used as-is for a square's expanded detail — they
+   were already synchronous and self-contained. renderMcqPanel is async
+   (it fetches the topic's MCQ total), which doesn't fit a synchronous
+   render() pass, so the live grid uses its own sync twin
+   (mcqPanelHtmlSync, just below window.PracticeTools) backed by the same
+   mcqTotalCache; renderMcqPanel itself is untouched and still exported
+   for tests.
    ----------------------------------------------------- */
 
 function scopeForTopic(nodeId, node) {
@@ -464,6 +494,108 @@ window.PracticeTools = {
     __test: { mcqEventStats: mcqEventStats, readPanelState: readPanelState, fetchMcqTotalForTopic: fetchMcqTotalForTopic }
 };
 
+/* -----------------------------------------------------
+   Phase 2 — the 4-square grid (see phase-2-new-shell.md)
+
+   Each square has two independent click targets: its BODY (toggles the
+   full detail render below the grid) and its BUTTON (jumps straight
+   into the action). Event delegation in bindEvents() keeps these
+   independent by checking closest(".practice-square-btn") first and
+   skipping the body-toggle branch when it matches — the delegated-click
+   equivalent of the button handler calling stopPropagation().
+   ----------------------------------------------------- */
+
+// Same total as fetchMcqTotalForTopic, but read synchronously from the
+// cache so a render() pass never has to await anything. First call for a
+// topic returns "…" and kicks off the real fetch in the background;
+// ensureMcqTotalLoaded() re-renders once it lands.
+function ensureMcqTotalLoaded(nodeId) {
+    if (mcqTotalCache.has(nodeId)) return;
+    fetchMcqTotalForTopic(nodeId).then(() => {
+        if (selectedNode === nodeId) scheduleRender();
+    });
+}
+
+// Sync twin of renderMcqPanel (see the Phase 2 note above the Phase 1
+// section) — same markup, same data-mcq-solve button, but never awaits.
+function mcqPanelHtmlSync(scope) {
+    const nodeId = scope.nodeId;
+    ensureMcqTotalLoaded(nodeId);
+    const stats = mcqEventStats(nodeId);
+    const cached = mcqTotalCache.has(nodeId) ? mcqTotalCache.get(nodeId) : undefined;
+    const totalLabel = cached === undefined ? "…" : (cached == null ? "—" : String(cached));
+    const accLabel = stats.accuracy == null ? "—" : Math.round(stats.accuracy * 100) + "%";
+    return '<div class="tool-panel tool-panel-mcq" data-scope="' + escapeHtml(nodeId) + '">' +
+        '<div class="tool-panel-title">MCQ</div>' +
+        '<div class="tool-panel-sub">' + stats.attempted + " / " + totalLabel + " attempted · " + accLabel + " accuracy</div>" +
+        '<button type="button" class="bottom-strip-btn practice-mcq-solve" data-mcq-solve="' + escapeHtml(nodeId) + '">Solve</button>' +
+        "</div>";
+}
+
+const SQUARE_KINDS = ["read", "flashcards", "mcq", "future"];
+
+// Compact tile content for one square — title, one-line stat, and its
+// jump-straight-in button (or none, for Future). Deliberately thinner
+// than the full renderXPanel() output, which only shows up once the
+// square's body is clicked.
+function squareTileContent(kind, scope) {
+    const nodeId = scope.nodeId;
+    if (kind === "read") {
+        const info = readPanelState(nodeId);
+        const stat = info.state === "new" ? "Not opened yet"
+            : info.state === "continue" ? "Continue reading"
+            : "Ready to revisit";
+        return { title: "Read", stat: stat,
+            buttonHtml: '<a class="practice-square-btn bottom-strip-btn" href="index.html?openNode=' + encodeURIComponent(nodeId) + '">Open topic</a>' };
+    }
+    if (kind === "flashcards") {
+        const summary = window.Flashcards ? window.Flashcards.getBoxSummary(nodeId) : null;
+        const ready = summary ? summary.readyTotal : 0;
+        const stat = !summary ? "No deck yet" : ready > 0 ? plural(ready, "card") + " ready" : "Nothing ready";
+        return { title: "Flashcards", stat: stat,
+            buttonHtml: ready > 0
+                ? '<button type="button" class="practice-square-btn bottom-strip-btn" data-review="' + escapeHtml(nodeId) + '">Start review (' + ready + ')</button>'
+                : "" };
+    }
+    if (kind === "mcq") {
+        const stats = mcqEventStats(nodeId);
+        ensureMcqTotalLoaded(nodeId);
+        const cached = mcqTotalCache.has(nodeId) ? mcqTotalCache.get(nodeId) : undefined;
+        const totalLabel = cached === undefined ? "…" : (cached == null ? "—" : String(cached));
+        return { title: "MCQ", stat: stats.attempted + " / " + totalLabel + " attempted",
+            buttonHtml: '<button type="button" class="practice-square-btn bottom-strip-btn" data-mcq-solve="' + escapeHtml(nodeId) + '">Solve</button>' };
+    }
+    return { title: "Future", stat: "Coming soon", buttonHtml: "" };
+}
+
+function squareDetailHtml(kind, scope) {
+    if (kind === "read") return renderReadPanel(scope);
+    if (kind === "flashcards") return renderFlashcardsPanel(scope);
+    if (kind === "mcq") return mcqPanelHtmlSync(scope);
+    return renderFuturePanel(scope);
+}
+
+function squareGridHtml(scope) {
+    const tiles = SQUARE_KINDS.map(kind => {
+        const c = squareTileContent(kind, scope);
+        const isFuture = kind === "future";
+        const isExpanded = expandedSquare === kind;
+        return '<div class="practice-square' + (isExpanded ? " practice-square-expanded" : "") +
+            (isFuture ? " practice-square-future" : "") + '"' +
+            (isFuture ? "" : ' data-square-body="' + kind + '"') + '>' +
+            '<div class="practice-square-title">' + c.title + "</div>" +
+            '<div class="practice-square-stat">' + escapeHtml(c.stat) + "</div>" +
+            c.buttonHtml +
+            "</div>";
+    }).join("");
+
+    const detail = expandedSquare
+        ? '<div class="practice-square-detail">' + squareDetailHtml(expandedSquare, scope) + "</div>"
+        : "";
+
+    return '<div class="practice-square-grid">' + tiles + "</div>" + detail;
+}
+
 // Live HH:MM:SS ticker for expanded Waiting cards. Re-queries the DOM
 // every second rather than tracking timers per render, so it survives
 // render() rebuilding the tree without any extra bookkeeping. Cheap: only
@@ -511,6 +643,14 @@ function loadingHtml() {
 
 /* -----------------------------------------------------
    Views
+
+   Everything below this point up to "Render + navigation" (dueViewHtml,
+   flashcardsViewHtml, the MCQ iframe embed) was the old flat-tab
+   content. Phase 2's Queue view sub-tabs are placeholders instead (see
+   queuePlaceholderHtml near render()) — Phase 4 designs the real
+   cross-topic queues from scratch per phase-2-new-shell.md, so these are
+   left here unwired rather than deleted, in case any of the logic
+   (grouping, sorting, the topicRowHtml layout) is worth reusing then.
    ----------------------------------------------------- */
 
 // ---- Due view: by WHEN ----
@@ -643,9 +783,13 @@ function treeViewHtml(summary) {
         treeAutoExpanded = true;
         expandForDue(knownDeckIds);
     }
+    const highlight = topicParam();
+    if (!nodeAutoSelected) {
+        nodeAutoSelected = true;
+        if (highlight && nodesById[highlight]) selectedNode = highlight;
+    }
 
     const stats = makeStats(summary);
-    const highlight = topicParam();
 
     function node(id, depth) {
         if (!hasDeck(id)) return ""; // nothing under this branch has a deck yet: not shown
@@ -653,24 +797,35 @@ function treeViewHtml(summary) {
         const n = nodesById[id];
         const isOpen = expanded.has(id);
         const isLeafTopic = knownDeckIds.has(id);
+        const isSelected = selectedNode === id;
         const toggle = kids
             ? '<button type="button" class="practice-tree-toggle" data-toggle="' + escapeHtml(id) + '" aria-expanded="' + isOpen + '" aria-label="' + (isOpen ? "Collapse" : "Expand") + '">' + (isOpen ? "▾" : "▸") + "</button>"
             : '<span class="practice-tree-toggle practice-tree-leaf" aria-hidden="true"></span>';
 
+        const title = '<div class="practice-row-title practice-row-selectable" data-select-node="' + escapeHtml(id) + '" aria-expanded="' + isSelected + '">' +
+            escapeHtml(n.title || "Untitled") + "</div>";
+
         let body;
         if (isLeafTopic) {
-            body = '<div class="practice-row-actions"><a class="bottom-strip-btn practice-open" href="index.html?openNode=' + encodeURIComponent(id) + '">Open topic</a></div>' +
-                renderFlashcardsPanel(scopeForTopic(id, n));
+            // One-line glance stays visible either way, so the tree stays
+            // scannable without opening every topic's panel at once.
+            const bs = window.Flashcards ? window.Flashcards.getBoxSummary(id) : null;
+            const glance = !bs ? "No deck yet" : bs.readyTotal > 0 ? plural(bs.readyTotal, "card") + " ready" : "Nothing ready right now";
+            body = title +
+                '<div class="practice-row-glance">' + escapeHtml(glance) + "</div>" +
+                (isSelected ? squareGridHtml(scopeForTopic(id, n)) : "");
         } else {
             const st = stats(id);
-            body = (st.overdue || st.dueToday || st.upcoming || st.later || st.reviewed)
+            const chips = (st.overdue || st.dueToday || st.upcoming || st.later || st.reviewed)
                 ? '<div class="practice-chips">' + chipsHtml(st, true) + "</div>"
                 : "";
+            body = title + chips +
+                (isSelected ? '<div class="practice-node-placeholder">Select a topic (not a section) to see its Read / Flashcards / MCQ / Future details.</div>' : "");
         }
 
         const row = '<div class="practice-tree-row' + (highlight === id ? " practice-row-highlight" : "") + '" style="--depth:' + depth + '" data-node-id="' + escapeHtml(id) + '">' +
             toggle +
-            '<div class="practice-row-main"><div class="practice-row-title">' + escapeHtml(n.title || "Untitled") + "</div>" + body + "</div>" +
+            '<div class="practice-row-main">' + body + "</div>" +
             "</div>";
         return row + (kids && isOpen ? '<div class="practice-tree-children">' + kids + "</div>" : "");
     }
@@ -759,17 +914,36 @@ function setBadge(id, count) {
     badge.hidden = count === 0;
 }
 
-function updateMenu(summary) {
-    setBadge("practice-badge-progress", summary.total);
-    setBadge("practice-badge-flashcards", summary.total);
+// ---- Plan Today: placeholder only, Phase 5 builds the real thing ----
+function planViewHtml() {
+    return '<div class="practice-summary practice-plan-placeholder">SMART Day Plan is coming soon — a morning objective, an evening check-in, ' +
+        "and tomorrow's plan, measured automatically from what you do on the site.</div>";
+}
 
-    const inProgress = view === "due" || view === "tree";
-    document.querySelectorAll("#practice-menu [data-group='progress']").forEach(b => b.classList.toggle("active", inProgress));
+const QUEUE_PLACEHOLDER_COPY = {
+    "queue-read": "A cross-topic queue of what to (re)read next is coming here.",
+    "queue-flashcards": "A cross-topic queue of due flashcards is coming here — replacing the per-topic Start-review button in Tree view with one combined list.",
+    "queue-mcq": "A cross-topic MCQ due/retry queue is coming here.",
+    "queue-future": "Future practice aspects will queue up here too."
+};
+
+// ---- Queue view sub-tabs: placeholders only, Phase 4 builds these ----
+function queuePlaceholderHtml(subview) {
+    return '<div class="practice-summary practice-queue-placeholder">' + escapeHtml(QUEUE_PLACEHOLDER_COPY[subview] || "Coming soon.") + "</div>";
+}
+
+function updateMenu(summary) {
+    setBadge("practice-badge-queue", summary.total);
+
+    const inQueue = view.indexOf("queue-") === 0;
+    document.querySelectorAll("#practice-menu [data-group='queue']").forEach(b => b.classList.toggle("active", inQueue));
     document.querySelectorAll("#practice-menu .practice-menu-item[data-view]").forEach(b => b.classList.toggle("active", b.dataset.view === view));
     document.querySelectorAll("#practice-menu .practice-submenu-item").forEach(b => b.classList.toggle("active", b.dataset.view === view));
-    const sub = el("practice-submenu");
-    if (sub) sub.hidden = !inProgress;
+    const sub = el("practice-submenu-queue");
+    if (sub) sub.hidden = !inQueue;
 }
+
+const PRACTICE_VIEW_KEYS = ["plan", "tree", "queue-read", "queue-flashcards", "queue-mcq", "queue-future"];
 
 function render() {
     const summary = getSummary();
@@ -777,19 +951,22 @@ function render() {
     const heading = el("practice-right-heading");
     if (heading) heading.textContent = VIEW_HEADINGS[view] || "PRACTICE";
 
-    ["due", "tree", "flashcards", "mcq"].forEach(key => {
+    PRACTICE_VIEW_KEYS.forEach(key => {
         const host = el("pv-" + key);
         if (host) host.hidden = key !== view;
     });
 
-    if (view === "due") el("pv-due").innerHTML = dueViewHtml(summary);
+    if (view === "plan") el("pv-plan").innerHTML = planViewHtml();
     else if (view === "tree") el("pv-tree").innerHTML = treeViewHtml(summary);
-    else if (view === "flashcards") el("pv-flashcards").innerHTML = flashcardsViewHtml(summary);
-    else if (view === "mcq") { ensureMcqFrame(); updateMcqLabel(); }
+    else if (view.indexOf("queue-") === 0) {
+        const host = el("pv-" + view);
+        if (host) host.innerHTML = queuePlaceholderHtml(view);
+    }
 
-    // Bring the highlighted topic (from ?topic=) into view, once.
-    if (!scrolledToTopic && view !== "mcq") {
-        const target = document.querySelector("#pv-" + view + " .practice-row-highlight");
+    // Bring the highlighted topic (from ?topic=) into view, once. Only
+    // Tree view has anything to scroll to.
+    if (!scrolledToTopic && view === "tree") {
+        const target = document.querySelector("#pv-tree .practice-row-highlight");
         if (target && typeof target.scrollIntoView === "function") {
             scrolledToTopic = true;
             target.scrollIntoView({ block: "center" });
@@ -818,8 +995,9 @@ function showDetail(open) {
 
 function selectView(next, opts) {
     opts = opts || {};
-    view = VIEW_HEADINGS[next] ? next : "due";
-    if (view === "due" || view === "tree") lastProgressView = view;
+    const resolved = LEGACY_VIEW_MAP[next] || next;
+    view = VIEW_HEADINGS[resolved] ? resolved : "tree";
+    if (view.indexOf("queue-") === 0) lastQueueSub = view;
     setMessage("");
     render();
 
@@ -881,13 +1059,39 @@ function bindEvents() {
     menu.addEventListener("click", event => {
         const item = event.target.closest("button");
         if (!item) return;
-        if (item.dataset.group === "progress") selectView(lastProgressView);
+        if (item.dataset.group === "queue") selectView(lastQueueSub);
         else if (item.dataset.view) selectView(item.dataset.view);
     });
 
     el("practice-back").addEventListener("click", () => showDetail(false));
 
     el("practice-right").addEventListener("click", event => {
+        // A square's own button (Start review / Solve / Open topic) is
+        // inside a [data-square-body] tile, so check it first: when the
+        // click landed on the button, skip the body-toggle branch below
+        // (the delegated-click equivalent of the button calling
+        // stopPropagation()) and let its own branch further down handle it.
+        const onSquareBtn = !!event.target.closest(".practice-square-btn");
+
+        const squareBody = !onSquareBtn && event.target.closest("[data-square-body]");
+        if (squareBody) {
+            const kind = squareBody.dataset.squareBody;
+            expandedSquare = expandedSquare === kind ? null : kind;
+            render();
+            return;
+        }
+        const selectNode = !onSquareBtn && event.target.closest("[data-select-node]");
+        if (selectNode) {
+            const id = selectNode.dataset.selectNode;
+            if (selectedNode === id) {
+                selectedNode = null;
+            } else {
+                selectedNode = id;
+                expandedSquare = null; // fresh node: no square pre-expanded
+            }
+            render();
+            return;
+        }
         const boxToggle = event.target.closest("[data-box-toggle]");
         if (boxToggle) {
             const key = boxToggle.dataset.boxToggle;
@@ -913,7 +1117,9 @@ function bindEvents() {
             return;
         }
         const review = event.target.closest("[data-review]");
-        if (review) reviewTopic(review.dataset.review, review);
+        if (review) { reviewTopic(review.dataset.review, review); return; }
+        const mcqSolve = event.target.closest("[data-mcq-solve]");
+        if (mcqSolve) { window.open("mcq.html?topic=" + encodeURIComponent(mcqSolve.dataset.mcqSolve), "_blank", "noopener"); return; }
     });
 
     // A review answer or a sync merge changed progress: refresh.
@@ -1004,7 +1210,8 @@ async function initPracticePage() {
     setInterval(tickBoxTimers, 1000);
 
     const wanted = params().get("view");
-    const startView = VIEW_HEADINGS[wanted] ? wanted : "due";
+    const resolvedWanted = LEGACY_VIEW_MAP[wanted] || wanted;
+    const startView = VIEW_HEADINGS[resolvedWanted] ? resolvedWanted : "tree";
     // On a phone, no ?view= means "show me the menu first".
     selectView(startView, { showDetail: !!wanted });
 

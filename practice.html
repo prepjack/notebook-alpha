@@ -39,18 +39,20 @@
                      title="Drag this RIGHT edge left/right to resize"></div>
 
                 <nav id="practice-menu" class="practice-menu" aria-label="Practice sections">
-                    <button type="button" class="practice-menu-item" data-group="progress">
-                        <span>Progress</span><span class="practice-menu-badge" id="practice-badge-progress" hidden></span>
+                    <button type="button" class="practice-menu-item" data-view="plan">
+                        <span>Plan Today</span>
                     </button>
-                    <div class="practice-submenu" id="practice-submenu" hidden>
-                        <button type="button" class="practice-submenu-item" data-view="tree">Tree view</button>
-                        <button type="button" class="practice-submenu-item" data-view="due">Queue view</button>
+                    <button type="button" class="practice-menu-item" data-group="queue">
+                        <span>Queue view</span><span class="practice-menu-badge" id="practice-badge-queue" hidden></span>
+                    </button>
+                    <div class="practice-submenu" id="practice-submenu-queue" hidden>
+                        <button type="button" class="practice-submenu-item" data-view="queue-read">Read</button>
+                        <button type="button" class="practice-submenu-item" data-view="queue-flashcards">Flashcards</button>
+                        <button type="button" class="practice-submenu-item" data-view="queue-mcq">MCQ</button>
+                        <button type="button" class="practice-submenu-item" data-view="queue-future">Future</button>
                     </div>
-                    <button type="button" class="practice-menu-item" data-view="flashcards">
-                        <span>Flashcards</span><span class="practice-menu-badge" id="practice-badge-flashcards" hidden></span>
-                    </button>
-                    <button type="button" class="practice-menu-item" data-view="mcq">
-                        <span>MCQs</span>
+                    <button type="button" class="practice-menu-item" data-view="tree">
+                        <span>Tree view</span>
                     </button>
                 </nav>
             </aside>
@@ -63,10 +65,12 @@
                 </div>
                 <div id="practice-message" class="practice-message" role="status" aria-live="polite" hidden></div>
 
-                <div id="pv-due" class="practice-view" hidden></div>
+                <div id="pv-plan" class="practice-view" hidden></div>
                 <div id="pv-tree" class="practice-view" hidden></div>
-                <div id="pv-flashcards" class="practice-view" hidden></div>
-                <div id="pv-mcq" class="practice-view" hidden></div>
+                <div id="pv-queue-read" class="practice-view" hidden></div>
+                <div id="pv-queue-flashcards" class="practice-view" hidden></div>
+                <div id="pv-queue-mcq" class="practice-view" hidden></div>
+                <div id="pv-queue-future" class="practice-view" hidden></div>
             </section>
 
         </section>
