@@ -722,9 +722,20 @@
             if (!revealed) return; // never grade a card whose answer was not looked at
             const card = deck[index];
             const moment = Date.now();
+            // Read the box BEFORE the transition, so the event log gets an
+            // accurate boxFrom/boxTo pair (onKnewIt/onForgot mutate in place).
+            const boxFrom = Number((readStore()[card.id] || {}).box) || 1;
             // Persisted immediately — closing early loses nothing.
             if (knew) onKnewIt(card, moment);
             else onForgot(card, moment);
+            try {
+                if (window.EventLog && typeof window.EventLog.logEvent === "function") {
+                    const boxTo = Number((readStore()[card.id] || {}).box) || boxFrom;
+                    window.EventLog.logEvent("card", ctx.topicId, {
+                        cardId: card.id, correct: !!knew, boxFrom: boxFrom, boxTo: boxTo
+                    });
+                }
+            } catch (err) { /* logging must never block the review */ }
             index += 1;
             showCard();
         }

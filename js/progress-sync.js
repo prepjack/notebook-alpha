@@ -14,7 +14,13 @@
 //      it never overwrites, so an old backup can't erase newer reviews.
 //
 // Data shape (versioned, extensible — each feature adds one namespace):
-//   { v: 1, exportedAt: "...", flashcards: { "<cardId>": {box,dueDate,lastReviewed,ts} } }
+//   { v: 1, exportedAt: "...",
+//     flashcards: { "<cardId>": {box,dueDate,lastReviewed,ts} },
+//     eventLog: { "<eventId>": {id,t,ts,type,topicId,...} } }
+// (eventLog is append-only — see js/event-log.js — so its "merge" is a
+// plain union by id, not a per-entry newest-wins comparison like
+// flashcards uses; ts is only mirrored on there for this module's own
+// generic entryTs() staleness estimate.)
 //
 // Features plug in with ProgressSync.register(name, { export, merge }):
 //   export() -> plain object map { id: entry }

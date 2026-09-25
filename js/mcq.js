@@ -860,10 +860,28 @@ function answerCurrentQuestion(optionIndex) {
         return;
     }
 
+    const changed = selectedAnswers[currentMcqIndex] !== optionIndex;
     selectedAnswers[currentMcqIndex] = optionIndex;
     attemptedQuestions.add(currentMcqIndex);
+    if (changed) logMcqAttempt(currentMcqIndex, optionIndex);
 
     renderMcqView();
+}
+
+// Phase 0 event log: fires once per actual answer choice (picking an
+// option counts as "submitted and graded" in this UI's instant-feedback
+// design — there's no separate submit step). Re-clicking the SAME
+// already-selected option doesn't re-log (see the `changed` guards at
+// both call sites); picking a DIFFERENT option after that does, since
+// that's a genuine new attempt future retry-queue logic can use.
+function logMcqAttempt(index, optionIndex) {
+    try {
+        const q = currentMcqs[index];
+        if (!q || !window.EventLog || typeof window.EventLog.logEvent !== "function") return;
+        window.EventLog.logEvent("mcq", q.node_id || "", {
+            questionId: q.id, correct: optionIndex === q.answer
+        });
+    } catch (err) { /* logging must never block answering */ }
 }
 
 // ALPHA-PLUS — same answer-recording logic as answerCurrentQuestion,
@@ -875,8 +893,10 @@ function answerQuestionInAllView(index, optionIndex) {
         alert("Click Start Attempt before answering questions.");
         return;
     }
+    const changedInAllView = selectedAnswers[index] !== optionIndex;
     selectedAnswers[index] = optionIndex;
     attemptedQuestions.add(index);
+    if (changedInAllView) logMcqAttempt(index, optionIndex);
     renderMcqView();
 }
 

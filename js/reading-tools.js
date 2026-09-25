@@ -277,10 +277,25 @@
         }
     }
 
+    // Phase 0 event log: floor below which a session doesn't count as
+    // "real" reading (accidental opens, tab switches). No such floor
+    // existed before this — introduced here per phase-0-foundation.md
+    // Part B step 3, and also called out in the Practice Hub spec's
+    // Content Revisit section, so both consumers agree on it.
+    const MIN_LOGGED_READ_SECS = 20;
+
     function handleEndRead() {
         if (!isReading) return;
         isReading = false;
         stopTicker();
+
+        try {
+            if (activeSeconds >= MIN_LOGGED_READ_SECS &&
+                typeof selectedTopicNode !== "undefined" && selectedTopicNode && selectedTopicNode.id &&
+                window.EventLog && typeof window.EventLog.logEvent === "function") {
+                window.EventLog.logEvent("read", selectedTopicNode.id, { secs: activeSeconds });
+            }
+        } catch (err) { /* logging must never block ending the read session */ }
 
         const { endBtn, status, result, suggestion, postActions, rereadBtn } = els();
         if (endBtn) {
