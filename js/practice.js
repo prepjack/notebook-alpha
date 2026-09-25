@@ -312,6 +312,158 @@ function boxStripHtml(topicId) {
     return html;
 }
 
+/* -----------------------------------------------------
+   Phase 1 — reusable scoped "tool" components
+   (see phase-1-reusable-component.md)
+
+   A `scope` is any node in the content hierarchy. This phase only
+   handles leaf-node scopes (isLeaf: true) — parent-node aggregation is
+   Phase 3's job. Shape:
+     { nodeId: string, label: string, isLeaf: true }
+
+   Only renderFlashcardsPanel is wired into the live Tree view this
+   phase (see the treeViewHtml() call sites below) — it is a pure
+   extraction of the pre-existing boxStripHtml(), so the Tree view's
+   visible output is unchanged. renderMcqPanel / renderReadPanel /
+   renderFuturePanel exist and are correct/testable per the spec, but
+   are deliberately NOT added to the live Tree view yet: Phase 2 is
+   where the actual 4-square grid appears, and wiring partial new UI in
+   here risked disrupting the current layout for no visible benefit.
+   ----------------------------------------------------- */
+
+function scopeForTopic(nodeId, node) {
+    return { nodeId: nodeId, label: (node && node.title) || nodeId, isLeaf: true };
+}
+
+// ---- Flashcards panel: structural extraction only, no behavior change ----
+function renderFlashcardsPanel(scope) {
+    if (!scope || !scope.nodeId) return "";
+    return boxStripHtml(scope.nodeId);
+}
+
+// ---- MCQ panel: read-only summary (total / attempted / accuracy) ----
+// MCQ due/priority logic is still explicitly deferred; this is just a
+// counts display plus a "Solve" button into the existing MCQ flow.
+
+// Session-lifetime cache: the total-questions-in-scope count needs a
+// network call (there is no local/synchronous source for it today), so
+// don't refetch it every re-render — only once per topic per page load.
+const mcqTotalCache = new Map(); // nodeId -> count, or null if unknown
+
+async function fetchMcqTotalForTopic(nodeId) {
+    if (mcqTotalCache.has(nodeId)) return mcqTotalCache.get(nodeId);
+    let total = null;
+    try {
+        const res = await fetch(GOOGLE_SHEET_API + "?action=get_mcqs&node_id=" + encodeURIComponent(nodeId));
+        if (!res.ok) throw new Error("get_mcqs failed (" + res.status + ")");
+        const data = await res.json();
+        const rows = (data && data.mcqs) || [];
+        // Same "hide archived" rule mcq.js applies when it loads a topic's MCQs.
+        total = rows.filter(r => String(r.status || "").trim().toLowerCase() !== "archived").length;
+    } catch (err) {
+        console.warn("[Notebook Alpha] Could not fetch MCQ total for " + nodeId + ".", err);
+        total = null; // unknown, not zero — the panel shows "—" rather than a false 0
+    }
+    mcqTotalCache.set(nodeId, total);
+    return total;
+}
+
+// Reads 'mcq' events for one topic out of the Phase 0 event log and
+// reduces them to one outcome per question (the LATEST attempt wins,
+// mirroring the `changed`-guarded de-dupe mcq.js already applies when
+// it *writes* these events on a changed answer) — so re-answering a
+// question doesn't inflate "attempted" or skew accuracy.
+function mcqEventStats(nodeId) {
+    const events = (window.EventLog ? window.EventLog.readLog() : [])
+        .filter(e => e && e.type === "mcq" && e.topicId === nodeId);
+    const latestByQuestion = new Map();
+    events.forEach(e => {
+        const prev = latestByQuestion.get(e.questionId);
+        if (!prev || e.t > prev.t) latestByQuestion.set(e.questionId, e);
+    });
+    const attempts = Array.from(latestByQuestion.values());
+    const attempted = attempts.length;
+    const correct = attempts.filter(e => e.correct).length;
+    // Deliberately correct/attempts, NOT an average of per-question
+    // percentages — matters once Phase 3 aggregates a parent scope.
+    return { attempted: attempted, correct: correct, accuracy: attempted ? correct / attempted : null };
+}
+
+async function renderMcqPanel(scope) {
+    if (!scope || !scope.nodeId) return "";
+    const stats = mcqEventStats(scope.nodeId);
+    const total = await fetchMcqTotalForTopic(scope.nodeId);
+    const totalLabel = total == null ? "—" : String(total);
+    const accLabel = stats.accuracy == null ? "—" : Math.round(stats.accuracy * 100) + "%";
+    return '<div class="tool-panel tool-panel-mcq" data-scope="' + escapeHtml(scope.nodeId) + '">' +
+        '<div class="tool-panel-title">MCQ</div>' +
+        '<div class="tool-panel-sub">' + stats.attempted + " / " + totalLabel + " attempted · " + accLabel + " accuracy</div>" +
+        '<button type="button" class="bottom-strip-btn practice-mcq-solve" data-mcq-solve="' + escapeHtml(scope.nodeId) + '">Solve</button>' +
+        "</div>";
+}
+
+// ---- Read panel: read-only summary from the event log's 'read' events ----
+// NOTE on the New/Continue/Revisit split: the spec describes "Continue"
+// as the last session being "very short / below the completion floor
+// from Phase 0" — but Phase 0's floor (20s) means anything below it is
+// never logged at all, so the event log alone can't distinguish "never
+// read" from "read only briefly". Until Phase 4 defines real completion
+// tracking, this uses a judgment-call threshold (READ_CONTINUE_CEILING_SECS)
+// on the last LOGGED session's length to approximate "started but
+// probably didn't get through it". Flagged here so it's easy to find
+// and replace when Phase 4 lands.
+const READ_CONTINUE_CEILING_SECS = 120;
+
+function readPanelState(nodeId) {
+    const events = (window.EventLog ? window.EventLog.readLog() : [])
+        .filter(e => e && e.type === "read" && e.topicId === nodeId);
+    if (!events.length) return { state: "new", lastReadAt: null, lastSecs: null };
+    const last = events.reduce((a, b) => (b.t > a.t ? b : a));
+    const state = (Number(last.secs) || 0) < READ_CONTINUE_CEILING_SECS ? "continue" : "revisit";
+    return { state: state, lastReadAt: last.t, lastSecs: last.secs };
+}
+
+function renderReadPanel(scope) {
+    if (!scope || !scope.nodeId) return "";
+    const info = readPanelState(scope.nodeId);
+    let label, sub;
+    if (info.state === "new") {
+        label = "New";
+        sub = "Not opened yet.";
+    } else if (info.state === "continue") {
+        label = "Continue";
+        sub = "Started last time (~" + info.lastSecs + "s).";
+    } else {
+        const d = Math.floor((Date.now() - info.lastReadAt) / 86400000);
+        label = "Revisit";
+        sub = "Last read " + (d <= 0 ? "today" : plural(d, "day") + " ago") + ".";
+    }
+    return '<div class="tool-panel tool-panel-read tool-panel-state-' + info.state + '" data-scope="' + escapeHtml(scope.nodeId) + '">' +
+        '<div class="tool-panel-title">Read <span class="tool-panel-state">' + label + "</span></div>" +
+        '<div class="tool-panel-sub">' + escapeHtml(sub) + "</div>" +
+        '<a class="bottom-strip-btn practice-open" href="index.html?openNode=' + encodeURIComponent(scope.nodeId) + '">Open topic</a>' +
+        "</div>";
+}
+
+// ---- Future/placeholder panel: no logic, just reserves the 4th square ----
+function renderFuturePanel(scope) {
+    return '<div class="tool-panel tool-panel-future" aria-disabled="true">' +
+        '<div class="tool-panel-title">Coming soon</div>' +
+        '<div class="tool-panel-sub">A future practice aspect will live here.</div>' +
+        "</div>";
+}
+
+// Exposed for Phase 2 (which wires these into the new shell) and for
+// tests, same spirit as window.Flashcards / window.EventLog elsewhere.
+window.PracticeTools = {
+    scopeForTopic: scopeForTopic,
+    renderFlashcardsPanel: renderFlashcardsPanel,
+    renderMcqPanel: renderMcqPanel,
+    renderReadPanel: renderReadPanel,
+    renderFuturePanel: renderFuturePanel,
+    __test: { mcqEventStats: mcqEventStats, readPanelState: readPanelState, fetchMcqTotalForTopic: fetchMcqTotalForTopic }
+};
+
 // Live HH:MM:SS ticker for expanded Waiting cards. Re-queries the DOM
 // every second rather than tracking timers per render, so it survives
 // render() rebuilding the tree without any extra bookkeeping. Cheap: only
@@ -508,7 +660,7 @@ function treeViewHtml(summary) {
         let body;
         if (isLeafTopic) {
             body = '<div class="practice-row-actions"><a class="bottom-strip-btn practice-open" href="index.html?openNode=' + encodeURIComponent(id) + '">Open topic</a></div>' +
-                boxStripHtml(id);
+                renderFlashcardsPanel(scopeForTopic(id, n));
         } else {
             const st = stats(id);
             body = (st.overdue || st.dueToday || st.upcoming || st.later || st.reviewed)
@@ -533,7 +685,7 @@ function treeViewHtml(summary) {
             orphans.map(id => '<div class="practice-tree-row" data-node-id="' + escapeHtml(id) + '">' +
                 '<span class="practice-tree-toggle practice-tree-leaf" aria-hidden="true"></span>' +
                 '<div class="practice-row-main"><div class="practice-row-title practice-row-unknown">Topic not found <span class="practice-row-id">(' + escapeHtml(id) + ")</span></div>" +
-                boxStripHtml(id) + "</div></div>").join("");
+                renderFlashcardsPanel(scopeForTopic(id, null)) + "</div></div>").join("");
     }
     return html;
 }
