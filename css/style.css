@@ -4937,13 +4937,94 @@ a.bottom-strip-btn.practice-open{
     color:var(--muted);
 }
 
-/* ---- Plan Today / Queue view placeholders ---- */
-.practice-plan-placeholder,
+/* ---- Queue view Future sub-tab placeholder ---- */
 .practice-queue-placeholder{
     padding:14px 16px;
     border:1px dashed var(--line);
     border-radius:10px;
     background:var(--paper);
+}
+
+/* ---- Phase 5: Plan Today card ---- */
+.practice-plan-summary{
+    margin-bottom:2px;
+}
+.practice-plan-consistency{
+    margin-bottom:12px;
+    font:11px Arial,sans-serif;
+    color:var(--muted);
+}
+.practice-plan-item .practice-row-title{
+    font-weight:700;
+}
+.practice-plan-count{
+    width:56px;
+    padding:4px 6px;
+    border:1px solid var(--line);
+    border-radius:6px;
+    font:12px Arial,sans-serif;
+    text-align:center;
+}
+.practice-plan-add-row{
+    justify-content:flex-start;
+    margin:10px 0;
+}
+.practice-plan-custom-row{
+    display:flex;
+    gap:8px;
+    margin-bottom:14px;
+}
+.practice-plan-custom-input{
+    flex:1;
+    min-width:0;
+    padding:6px 9px;
+    border:1px solid var(--line);
+    border-radius:7px;
+    font:12px Arial,sans-serif;
+}
+.practice-plan-reflection-label{
+    display:block;
+    margin-top:14px;
+    margin-bottom:6px;
+    font:11px Arial,sans-serif;
+    color:var(--muted);
+}
+.practice-plan-reflection{
+    width:100%;
+    box-sizing:border-box;
+    padding:7px 10px;
+    border:1px solid var(--line);
+    border-radius:8px;
+    font:13px Arial,sans-serif;
+    margin-bottom:8px;
+}
+.practice-plan-confirm{
+    margin-top:12px;
+    color:var(--green);
+    font-weight:700;
+}
+
+/* Header pill (Phase 5, section 7) — visible from Plan Today / Queue
+   view / Tree view alike, since it sits in the heading row rather than
+   inside any one view's own hidden/shown container. */
+.practice-plan-pill{
+    margin-left:auto;
+    padding:4px 11px;
+    border:1px solid var(--line);
+    border-radius:12px;
+    background:#fff;
+    color:var(--muted);
+    font:700 11px Arial,sans-serif;
+    cursor:pointer;
+    white-space:nowrap;
+}
+.practice-plan-pill:hover{
+    border-color:#9db9a6;
+}
+.practice-plan-pill-done{
+    color:var(--green);
+    border-color:#9db9a6;
+    background:var(--green-soft);
 }
 
 @media (max-width:700px){

@@ -645,6 +645,7 @@ window.PracticeTools = {
     isLeaf: isLeaf,
     getDescendantLeafIds: getDescendantLeafIds,
     getAllLeafIds: getAllLeafIds,
+    readGapState: readGapState,
     renderFlashcardsPanel: renderFlashcardsPanel,
     renderMcqPanel: renderMcqPanel,
     renderReadPanel: renderReadPanel,
@@ -1313,10 +1314,250 @@ function queueMcqViewHtml() {
     return html;
 }
 
-// ---- Plan Today: placeholder only, Phase 5 builds the real thing ----
+/* -----------------------------------------------------
+   Phase 5 — Plan Today: SMART Day Plan v1
+   (see phase-5-day-plan-v1.md)
+
+   One card, three modes by time-of-day + plan state (not three
+   separate pages): Morning (no confirmed plan for today yet — show
+   last night's draft, let the user confirm/edit), During-day (confirmed,
+   before the evening threshold — live progress against each item), and
+   Evening (after the threshold — completion summary, reflection, and
+   drafting tomorrow's plan). All the actual data — items, estimates,
+   live progress, suggestions, the 7-day consistency figure — comes
+   from window.DayPlan (day-plan.js); this section is just the view +
+   its own editing controls.
+
+   Deliberately NOT built here: a topic-search picker for adding an
+   arbitrary item, or "+ Add to plan" buttons on Tree view / Queue view
+   rows (both are in the master spec, section 6, as v2/later work, and
+   neither is in this phase's own testing checklist). Adding an item
+   here always means "add the next best suggestion" (same priority
+   logic as suggestTomorrowItems) or a free-text custom item — good
+   enough for v1's button-based flow.
+   ----------------------------------------------------- */
+const EVENING_HOUR_THRESHOLD = 18;
+
+function fmtMinutes(secs) {
+    const mins = Math.max(0, Math.round((Number(secs) || 0) / 60));
+    if (mins < 60) return mins + "m";
+    return Math.floor(mins / 60) + "h " + (mins % 60) + "m";
+}
+
+// Flashcards/MCQ estimates are fixed ballpark figures, not a computed
+// average (see day-plan.js's estimateSecs doc comment for why) — the
+// "~" is the one-word disclosure the person asked for, so the number
+// never looks more precise than it is.
+function estimateLabel(item) {
+    const approx = item.type === "flashcards" || item.type === "mcq";
+    return (approx ? "~" : "") + fmtMinutes(item.estimateSecs);
+}
+
+function planItemLabel(item) {
+    if (item.type === "custom") return item.label || "Custom item";
+    const info = topicInfo(item.topicId || "");
+    const name = info.known ? info.title : (item.topicId || "Untitled");
+    if (item.type === "flashcards") return name + " — " + plural(item.targetCount || 0, "card");
+    if (item.type === "mcq") return name + " — " + plural(item.targetCount || 0, "question");
+    return name + " — read";
+}
+
+function planItemActionHtml(item) {
+    if (item.type === "flashcards" && item.topicId) return '<button type="button" class="bottom-strip-btn practice-review" data-review="' + escapeHtml(item.topicId) + '">Start review</button>';
+    if (item.type === "mcq" && item.topicId) return '<button type="button" class="bottom-strip-btn practice-mcq-solve" data-mcq-solve="' + escapeHtml(item.topicId) + '">Solve</button>';
+    if (item.type === "read" && item.topicId) return '<a class="bottom-strip-btn practice-open" href="index.html?openNode=' + encodeURIComponent(item.topicId) + '">Open topic</a>';
+    return "";
+}
+
+function planItemRowHtml(item, dateStr, opts) {
+    opts = opts || {};
+    let controls, stateHtml = "";
+    if (opts.editable) {
+        controls = '<div class="practice-row-actions">' +
+            ((item.type === "flashcards" || item.type === "mcq")
+                ? '<input type="number" min="1" max="200" class="practice-plan-count" data-plan-item-count="' + escapeHtml(item.id) + '" data-plan-item-target="' + escapeHtml(opts.target) + '" value="' + (item.targetCount || 0) + '">'
+                : "") +
+            '<button type="button" class="bottom-strip-btn practice-queue-secondary" data-plan-item-remove="' + escapeHtml(item.id) + '" data-plan-item-target="' + escapeHtml(opts.target) + '">Remove</button>' +
+            "</div>";
+    } else {
+        const progress = window.DayPlan.getItemProgress(item, dateStr);
+        const done = progress >= 1;
+        if (item.type === "custom") {
+            stateHtml = '<div class="tool-panel-state-inline' + (item.completed ? " tool-panel-state-revisit" : "") + '">' + (item.completed ? "Done" : "Not done yet") + "</div>";
+            controls = '<div class="practice-row-actions"><button type="button" class="bottom-strip-btn practice-queue-secondary" data-plan-item-toggle="' + escapeHtml(item.id) + '">' + (item.completed ? "Mark not done" : "Mark done") + "</button></div>";
+        } else {
+            const label = done ? "Done" : (progress > 0 ? Math.round(progress * 100) + "% done" : "Not started");
+            stateHtml = '<div class="tool-panel-state-inline' + (done ? " tool-panel-state-revisit" : "") + '">' + label + "</div>";
+            controls = done ? "" : '<div class="practice-row-actions">' + planItemActionHtml(item) + "</div>";
+        }
+    }
+    return '<div class="practice-row practice-plan-item">' +
+        '<div class="practice-row-main"><div class="practice-row-title">' + escapeHtml(planItemLabel(item)) + "</div>" +
+        '<div class="practice-row-path">' + escapeHtml(estimateLabel(item)) + "</div>" + stateHtml + "</div>" +
+        controls + "</div>";
+}
+
+// "Add" always means "the next best suggestion of this type, not
+// already in this list" — see the module doc comment on why there's
+// no free topic picker in v1.
+function nextSuggestedItem(type, existingItems) {
+    const existingTopicIds = new Set((existingItems || []).filter(it => it.type === type).map(it => it.topicId));
+    if (type === "flashcards" && window.Flashcards && typeof window.Flashcards.getDueSummary === "function") {
+        const dueSummary = window.Flashcards.getDueSummary();
+        const candidate = Object.keys(dueSummary.topics || {})
+            .filter(id => !existingTopicIds.has(id))
+            .map(id => ({ id: id, dueNow: (dueSummary.topics[id].overdue || 0) + (dueSummary.topics[id].dueToday || 0) }))
+            .filter(t => t.dueNow > 0)
+            .sort((a, b) => b.dueNow - a.dueNow)[0];
+        return candidate ? window.DayPlan.makeItem("flashcards", candidate.id, Math.min(candidate.dueNow, 20)) : null;
+    }
+    if (type === "read") {
+        const candidate = getAllLeafIds()
+            .filter(id => !existingTopicIds.has(id))
+            .map(id => ({ id: id, gap: readGapState(id) }))
+            .find(x => x.gap.state === "revisit" || x.gap.state === "continue");
+        return candidate ? window.DayPlan.makeItem("read", candidate.id, null) : null;
+    }
+    if (type === "mcq") {
+        // No real due/priority concept for MCQ yet (deliberately deferred,
+        // per longstanding project decision) — lowest accuracy among
+        // topics with existing attempts is a reasonable stand-in.
+        const candidate = getAllLeafIds()
+            .filter(id => !existingTopicIds.has(id))
+            .map(id => ({ id: id, stats: mcqEventStats(id) }))
+            .filter(x => x.stats.attempted > 0)
+            .sort((a, b) => (a.stats.accuracy == null ? 1 : a.stats.accuracy) - (b.stats.accuracy == null ? 1 : b.stats.accuracy))[0];
+        return candidate ? window.DayPlan.makeItem("mcq", candidate.id, 10) : null;
+    }
+    return null;
+}
+
+function planAddButtonsHtml(items, target) {
+    if ((items || []).length >= 3) {
+        return '<div class="practice-note">Plan is full (max 3). Remove an item to add another.</div>';
+    }
+    return '<div class="practice-row-actions practice-plan-add-row">' +
+        ["flashcards", "mcq", "read"].map(type =>
+            '<button type="button" class="bottom-strip-btn" data-plan-add="' + type + '" data-plan-target="' + escapeHtml(target) + '">+ ' +
+            (type === "flashcards" ? "Flashcards" : type === "mcq" ? "MCQ" : "Read") + "</button>").join("") +
+        "</div>";
+}
+
+function planCustomAddHtml(target) {
+    return '<div class="practice-plan-custom-row">' +
+        '<input type="text" class="practice-plan-custom-input" placeholder="Custom item (e.g. \u2018reorganize notes\u2019)" maxlength="80">' +
+        '<button type="button" class="bottom-strip-btn" data-plan-add-custom="' + escapeHtml(target) + '">Add custom</button>' +
+        "</div>";
+}
+
+function planHeaderHtml(plan) {
+    const total = window.DayPlan.planTotalSecs(plan.items);
+    const consistency = window.DayPlan.consistencyLast7Days();
+    return '<div class="practice-summary practice-plan-summary">' +
+        '<span class="practice-summary-big">Plan: ' + fmtMinutes(total) + "</span></div>" +
+        '<div class="practice-plan-consistency">' + consistency.completedDays + " of the last " + consistency.of +
+        " days had something done \u2014 steady, not a streak.</div>";
+}
+
+function planMorningModeHtml(plan, dateStr) {
+    const items = plan.items || [];
+    let html = '<div class="practice-summary">Good morning! Here\u2019s last night\u2019s draft \u2014 confirm it or tweak it before today\u2019s progress starts counting.</div>';
+    html += planHeaderHtml(plan);
+    html += items.length ? items.map(it => planItemRowHtml(it, dateStr, { editable: true, target: "items" })).join("")
+        : '<div class="practice-summary">No draft from last night. Add up to 3 things for today.</div>';
+    html += planAddButtonsHtml(items, "items");
+    html += planCustomAddHtml("items");
+    html += '<button type="button" class="bottom-strip-btn practice-plan-confirm" data-plan-confirm="1">Confirm today\u2019s plan</button>';
+    return html;
+}
+
+function planDuringDayModeHtml(plan, dateStr) {
+    const items = plan.items || [];
+    let html = planHeaderHtml(plan);
+    html += items.length ? items.map(it => planItemRowHtml(it, dateStr, { editable: false })).join("")
+        : '<div class="practice-summary">Nothing planned for today.</div>';
+    return html;
+}
+
+function planEveningModeHtml(plan, dateStr) {
+    const items = plan.items || [];
+    const doneCount = items.filter(it => window.DayPlan.getItemProgress(it, dateStr) >= 1).length;
+    let html = '<div class="practice-summary">Evening check-in \u2014 here\u2019s how today went.</div>';
+    html += '<div class="practice-summary practice-plan-summary"><span class="practice-summary-big">' + doneCount + " / " + items.length + "</span> done today</div>";
+    html += items.map(it => planItemRowHtml(it, dateStr, { editable: false })).join("");
+    html += '<label class="practice-plan-reflection-label" for="practice-plan-reflection">What got in the way? (optional)</label>' +
+        '<input type="text" id="practice-plan-reflection" class="practice-plan-reflection" value="' + escapeHtml(plan.eveningReflection || "") + '" placeholder="One line is enough\u2026">' +
+        '<button type="button" class="bottom-strip-btn" data-plan-reflection-save="1">Save reflection</button>';
+
+    html += '<div class="practice-group-title">Tomorrow\u2019s plan (draft)</div>';
+    const draft = plan.tomorrowPlan || [];
+    html += draft.length ? draft.map(it => planItemRowHtml(it, dateStr, { editable: true, target: "tomorrowPlan" })).join("") : "";
+    html += planAddButtonsHtml(draft, "tomorrowPlan");
+    html += planCustomAddHtml("tomorrowPlan");
+    return html;
+}
+
+// One-time-per-date auto-fill of tomorrow's draft on first entry into
+// Evening mode (never overwrites an already-started draft, and never
+// re-runs on every render() — see the guard).
+let eveningDraftSeededFor = null;
+function ensureEveningDraftSeeded(plan, dateStr) {
+    if (eveningDraftSeededFor === dateStr) return;
+    eveningDraftSeededFor = dateStr;
+    if (plan.tomorrowPlan && plan.tomorrowPlan.length) return;
+    window.DayPlan.saveDayPlan(dateStr, { tomorrowPlan: window.DayPlan.suggestTomorrowItems() });
+}
+
 function planViewHtml() {
-    return '<div class="practice-summary practice-plan-placeholder">SMART Day Plan is coming soon — a morning objective, an evening check-in, ' +
-        "and tomorrow's plan, measured automatically from what you do on the site.</div>";
+    if (!window.DayPlan) return '<div class="practice-summary">Day Plan module failed to load.</div>';
+    const plan = window.DayPlan.rollOverIfNeeded();
+    const dateStr = plan.date;
+    const hour = new Date().getHours();
+
+    if (!plan.morningConfirmedAt) return planMorningModeHtml(plan, dateStr);
+    if (hour < EVENING_HOUR_THRESHOLD) return planDuringDayModeHtml(plan, dateStr);
+    ensureEveningDraftSeeded(plan, dateStr);
+    return planEveningModeHtml(window.DayPlan.getDayPlan(dateStr) || plan, dateStr);
+}
+
+function updatePlanPill() {
+    const pill = el("practice-plan-pill");
+    if (!pill || !window.DayPlan) return;
+    const state = window.DayPlan.todayPillState();
+    if (!state.hasPlan || !state.total) { pill.hidden = true; return; }
+    pill.hidden = false;
+    pill.textContent = "Today " + state.done + "/" + state.total;
+    pill.classList.toggle("practice-plan-pill-done", state.done >= state.total);
+}
+
+// Mutates whichever of today's two item lists ("items" or
+// "tomorrowPlan") the caller names, via the same read-modify-write
+// saveDayPlan() everything else in this section goes through.
+function updatePlanItems(target, mutate) {
+    const dateStr = window.DayPlan.getTodayDateString();
+    const plan = window.DayPlan.getDayPlan(dateStr) || {};
+    const list = (plan[target] || []).slice();
+    const patch = {};
+    patch[target] = mutate(list);
+    window.DayPlan.saveDayPlan(dateStr, patch);
+}
+
+function addPlanItem(target, type) {
+    updatePlanItems(target, list => {
+        if (list.length >= 3) return list;
+        const item = nextSuggestedItem(type, list);
+        if (item) list.push(item);
+        return list;
+    });
+}
+
+function addCustomPlanItem(target, label) {
+    if (!label || !label.trim()) return;
+    updatePlanItems(target, list => {
+        if (list.length >= 3) return list;
+        list.push(window.DayPlan.makeItem("custom", null, null, label.trim()));
+        return list;
+    });
 }
 
 const QUEUE_PLACEHOLDER_COPY = {
@@ -1344,6 +1585,7 @@ const PRACTICE_VIEW_KEYS = ["plan", "tree", "queue-read", "queue-flashcards", "q
 function render() {
     const summary = getSummary();
     updateMenu(summary);
+    updatePlanPill(); // header pill is outside the per-view hidden toggling below, so it refreshes regardless of which tab is open
     const heading = el("practice-right-heading");
     if (heading) heading.textContent = VIEW_HEADINGS[view] || "PRACTICE";
 
@@ -1533,23 +1775,73 @@ function bindEvents() {
             render();
             return;
         }
+        if (event.target.closest("#practice-plan-pill")) { selectView("plan"); return; }
+        const planAdd = event.target.closest("[data-plan-add]");
+        if (planAdd) { addPlanItem(planAdd.dataset.planTarget, planAdd.dataset.planAdd); render(); return; }
+        const planAddCustom = event.target.closest("[data-plan-add-custom]");
+        if (planAddCustom) {
+            const row = planAddCustom.closest(".practice-plan-custom-row");
+            const input = row ? row.querySelector(".practice-plan-custom-input") : null;
+            addCustomPlanItem(planAddCustom.dataset.planAddCustom, input ? input.value : "");
+            render();
+            return;
+        }
+        const planRemove = event.target.closest("[data-plan-item-remove]");
+        if (planRemove) {
+            updatePlanItems(planRemove.dataset.planItemTarget, list => list.filter(it => it.id !== planRemove.dataset.planItemRemove));
+            render();
+            return;
+        }
+        const planToggle = event.target.closest("[data-plan-item-toggle]");
+        if (planToggle) {
+            const id = planToggle.dataset.planItemToggle;
+            updatePlanItems("items", list => list.map(it => it.id === id ? Object.assign({}, it, { completed: !it.completed }) : it));
+            render();
+            return;
+        }
+        if (event.target.closest("[data-plan-confirm]")) {
+            window.DayPlan.saveDayPlan(window.DayPlan.getTodayDateString(), { morningConfirmedAt: Date.now() });
+            render();
+            return;
+        }
+        if (event.target.closest("[data-plan-reflection-save]")) {
+            const input = el("practice-plan-reflection");
+            window.DayPlan.saveDayPlan(window.DayPlan.getTodayDateString(), { eveningReflection: input ? input.value : "" });
+            render();
+            return;
+        }
     });
 
     // Phase 4's scope filter: a chain of <select>s (see scopeFilterHtml).
     // "change" bubbles the same as "click", so one delegated listener
     // here covers every step, same pattern as the click handler above.
+    // Also covers Phase 5's per-item card-count number input.
     el("practice-right").addEventListener("change", event => {
         const step = event.target.closest("[data-scope-filter-step]");
-        if (!step) return;
-        const idx = Number(step.dataset.scopeFilterStep);
-        queueFilterPath = queueFilterPath.slice(0, idx);
-        if (step.value) queueFilterPath.push(step.value);
-        queueReadShowAll = false; // scope just changed: restart the Read tab's 5-item cap
-        render();
+        if (step) {
+            const idx = Number(step.dataset.scopeFilterStep);
+            queueFilterPath = queueFilterPath.slice(0, idx);
+            if (step.value) queueFilterPath.push(step.value);
+            queueReadShowAll = false; // scope just changed: restart the Read tab's 5-item cap
+            render();
+            return;
+        }
+        const countInput = event.target.closest("[data-plan-item-count]");
+        if (countInput) {
+            const target = countInput.dataset.planItemTarget;
+            const id = countInput.dataset.planItemCount;
+            const count = Math.max(1, Number(countInput.value) || 1);
+            updatePlanItems(target, list => list.map(it => it.id === id
+                ? Object.assign({}, it, { targetCount: count, estimateSecs: window.DayPlan.estimateSecs(it.type, it.topicId, count) })
+                : it));
+            render();
+            return;
+        }
     });
 
-    // A review answer or a sync merge changed progress: refresh.
+    // A review answer, a sync merge, or a day-plan edit changed progress: refresh.
     window.addEventListener("flashcards-progress-changed", scheduleRender);
+    window.addEventListener("day-plan-changed", scheduleRender);
 }
 
 /* -----------------------------------------------------
