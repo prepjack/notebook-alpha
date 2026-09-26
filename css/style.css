@@ -4779,13 +4779,54 @@ a.bottom-strip-btn.practice-open{
     font:11px Arial,sans-serif;
     color:var(--muted);
 }
-.practice-node-placeholder{
+/* ---- Phase 3: parent-scope square body-click, one level of children
+   (see childrenSummaryHtml in practice.js) ---- */
+.practice-children-summary{
     margin-top:10px;
-    padding:9px 12px;
-    border:1px dashed var(--line);
-    border-radius:9px;
-    font:12px/1.5 Arial,sans-serif;
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+}
+.practice-children-summary-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    padding:8px 10px;
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:var(--paper);
+    cursor:pointer;
+}
+.practice-children-summary-row:hover{
+    border-color:#9db9a6;
+}
+.practice-children-summary-title{
+    font:700 12px Arial,sans-serif;
+    color:var(--text);
+}
+.practice-children-summary-stat{
+    font:11px Arial,sans-serif;
     color:var(--muted);
+    text-align:right;
+}
+
+/* ---- Phase 3, section 5: recursive scope filter — not wired into any
+   view yet (Phase 4's Queue view does that); styled now so it doesn't
+   land unstyled the day it is. ---- */
+.practice-scope-filter{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    margin-bottom:12px;
+}
+.practice-scope-filter-step{
+    padding:6px 8px;
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:#fff;
+    font:12px Arial,sans-serif;
+    color:var(--text);
 }
 
 /* ---- Phase 2: 4-square panel (Tree view, topic selected) ---- */

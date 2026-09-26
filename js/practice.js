@@ -148,6 +148,86 @@ function buildChildren() {
     Object.keys(childrenOf).forEach(parent => {
         childrenOf[parent].sort((a, b) => (nodesById[a].sort - nodesById[b].sort) || (nodesById[a].idx - nodesById[b].idx));
     });
+    leafIdsCache = new Map(); // content structure just changed: stale entries would be wrong
+}
+
+/* -----------------------------------------------------
+   Phase 3 — structural leaf + descendant-leaf lookup
+   (see phase-3-aggregation.md)
+
+   "Leaf" here means "has no children in the actual content tree" —
+   independent of whether a flashcard deck has ever been opened for it
+   (that's a separate, localStorage-only notion used elsewhere for the
+   Flashcards square's glance text). A Chapter with only one Topic under
+   it is still a non-leaf: it aggregates that one topic same as if it
+   had ten.
+   ----------------------------------------------------- */
+function isLeaf(id) {
+    return !((childrenOf[id] || []).length);
+}
+
+// nodeId -> string[] of every leaf-topic id underneath it (or [nodeId]
+// itself, if it already is one). Content structure is fixed at load
+// time (see the module docblock), so this is memoized per node and only
+// cleared by buildChildren() above when the tree actually reloads.
+let leafIdsCache = new Map();
+function getDescendantLeafIds(nodeId) {
+    if (leafIdsCache.has(nodeId)) return leafIdsCache.get(nodeId);
+    const result = [];
+    (function walk(id) {
+        const kids = childrenOf[id] || [];
+        if (!kids.length) { result.push(id); return; }
+        kids.forEach(walk);
+    })(nodeId);
+    leafIdsCache.set(nodeId, result);
+    return result;
+}
+
+// Builds a scope for ANY node — leaf or not — from the live tree,
+// unlike scopeForTopic() above/below which is only ever handed an
+// already-known leaf topic id (e.g. the "not in the tree any more"
+// orphan list, where there's no node to look up isLeaf against).
+function scopeForNode(nodeId) {
+    const n = nodesById[nodeId];
+    const leaf = isLeaf(nodeId);
+    return {
+        nodeId: nodeId,
+        label: (n && n.title) || nodeId,
+        isLeaf: leaf,
+        leafIds: leaf ? [nodeId] : getDescendantLeafIds(nodeId)
+    };
+}
+
+// Sums Leitner box-summaries (state numbers) across a set of leaf
+// topics. Returns null if none of them have a known deck yet, same
+// "no deck yet" convention boxStripHtml()/squareTileContent() already
+// use for a single topic.
+function aggregateBoxSummary(leafIds) {
+    let total = 0, readyTotal = 0, anyDeck = false;
+    const boxReady = [0, 0, 0, 0, 0];
+    leafIds.forEach(id => {
+        const s = window.Flashcards ? window.Flashcards.getBoxSummary(id) : null;
+        if (!s) return;
+        anyDeck = true;
+        total += s.total;
+        readyTotal += s.readyTotal;
+        (s.boxes || []).forEach((b, i) => { boxReady[i] += b.readyCount || 0; });
+    });
+    if (!anyDeck) return null;
+    return { total: total, readyTotal: readyTotal, boxes: boxReady.map((readyCount, i) => ({ box: i + 1, readyCount: readyCount })) };
+}
+
+// Sums 'mcq' event-log stats (history numbers) across a set of leaf
+// topics — raw correct/attempted counts first, THEN divided (see the
+// spec's aggregation rule); never an average of each topic's own %.
+function aggregateMcqEventStats(leafIds) {
+    let attempted = 0, correct = 0;
+    leafIds.forEach(id => {
+        const s = mcqEventStats(id);
+        attempted += s.attempted;
+        correct += s.correct;
+    });
+    return { attempted: attempted, correct: correct, accuracy: attempted ? correct / attempted : null };
 }
 
 async function loadTree() {
@@ -368,7 +448,29 @@ function scopeForTopic(nodeId, node) {
 // ---- Flashcards panel: structural extraction only, no behavior change ----
 function renderFlashcardsPanel(scope) {
     if (!scope || !scope.nodeId) return "";
+    if (scope.isLeaf === false) return aggregateFlashcardsPanelHtml(scope);
     return boxStripHtml(scope.nodeId);
+}
+
+// Phase 3: same square, summed across every descendant leaf topic. No
+// "Start review" button here — a parent scope has no single deck to
+// open a session against; Phase 4's Queue view is where a real
+// cross-topic session gets designed (see phase-3-aggregation.md,
+// "Start review (N)" note — deliberately deferred, not a Phase 3 gap).
+function aggregateFlashcardsPanelHtml(scope) {
+    const leafIds = scope.leafIds || getDescendantLeafIds(scope.nodeId);
+    const agg = aggregateBoxSummary(leafIds);
+    if (!agg) {
+        return '<div class="box-strip box-strip-aggregate"><div class="box-strip-header">' +
+            '<span class="box-strip-idle">No flashcard decks opened yet under this node.</span></div></div>';
+    }
+    const breakdown = agg.boxes.map(b => "Box " + b.box + ": " + b.readyCount).join(" · ");
+    return '<div class="box-strip box-strip-aggregate">' +
+        '<div class="box-strip-header"><span class="box-strip-total">' + plural(agg.total, "flashcard") + " across " + plural(leafIds.length, "topic") + "</span>" +
+        (agg.readyTotal > 0
+            ? '<span class="box-strip-idle" title="' + escapeHtml(breakdown) + '">' + agg.readyTotal + " ready across this scope ⓘ</span>"
+            : '<span class="box-strip-idle" title="' + escapeHtml(breakdown) + '">Nothing ready right now ⓘ</span>') +
+        "</div></div>";
 }
 
 // ---- MCQ panel: read-only summary (total / attempted / accuracy) ----
@@ -421,6 +523,7 @@ function mcqEventStats(nodeId) {
 
 async function renderMcqPanel(scope) {
     if (!scope || !scope.nodeId) return "";
+    if (scope.isLeaf === false) return aggregateMcqPanelHtml(scope);
     const stats = mcqEventStats(scope.nodeId);
     const total = await fetchMcqTotalForTopic(scope.nodeId);
     const totalLabel = total == null ? "—" : String(total);
@@ -429,6 +532,23 @@ async function renderMcqPanel(scope) {
         '<div class="tool-panel-title">MCQ</div>' +
         '<div class="tool-panel-sub">' + stats.attempted + " / " + totalLabel + " attempted · " + accLabel + " accuracy</div>" +
         '<button type="button" class="bottom-strip-btn practice-mcq-solve" data-mcq-solve="' + escapeHtml(scope.nodeId) + '">Solve</button>' +
+        "</div>";
+}
+
+// Phase 3 aggregate twin — totals summed with a real await per leaf (this
+// function is already async, unlike the live grid's mcqPanelHtmlSync, so
+// it can just fetch instead of needing a cache-and-reconcile dance). No
+// "Solve" button: there's no single topic id to hand mcq.html.
+async function aggregateMcqPanelHtml(scope) {
+    const leafIds = scope.leafIds || getDescendantLeafIds(scope.nodeId);
+    const stats = aggregateMcqEventStats(leafIds);
+    const totals = await Promise.all(leafIds.map(fetchMcqTotalForTopic));
+    const known = totals.filter(t => t != null);
+    const totalLabel = known.length ? String(known.reduce((a, b) => a + b, 0)) : "—";
+    const accLabel = stats.accuracy == null ? "—" : Math.round(stats.accuracy * 100) + "%";
+    return '<div class="tool-panel tool-panel-mcq" data-scope="' + escapeHtml(scope.nodeId) + '">' +
+        '<div class="tool-panel-title">MCQ</div>' +
+        '<div class="tool-panel-sub">' + stats.attempted + " / " + totalLabel + " attempted · " + accLabel + " accuracy across " + plural(leafIds.length, "topic") + "</div>" +
         "</div>";
 }
 
@@ -455,6 +575,7 @@ function readPanelState(nodeId) {
 
 function renderReadPanel(scope) {
     if (!scope || !scope.nodeId) return "";
+    if (scope.isLeaf === false) return aggregateReadPanelHtml(scope);
     const info = readPanelState(scope.nodeId);
     let label, sub;
     if (info.state === "new") {
@@ -475,6 +596,25 @@ function renderReadPanel(scope) {
         "</div>";
 }
 
+// Phase 3 aggregate twin — "X of Y topics read" instead of one date,
+// per the spec (a single last-read date stops meaning anything once a
+// scope spans dozens of topics).
+function aggregateReadPanelHtml(scope) {
+    const leafIds = scope.leafIds || getDescendantLeafIds(scope.nodeId);
+    let readCount = 0, revisitCount = 0;
+    leafIds.forEach(id => {
+        const st = readPanelState(id).state;
+        if (st !== "new") readCount++;
+        if (st === "revisit") revisitCount++;
+    });
+    const sub = readCount + " of " + plural(leafIds.length, "topic") + " read" +
+        (revisitCount ? " · " + plural(revisitCount, "topic") + " ready to revisit" : "");
+    return '<div class="tool-panel tool-panel-read" data-scope="' + escapeHtml(scope.nodeId) + '">' +
+        '<div class="tool-panel-title">Read</div>' +
+        '<div class="tool-panel-sub">' + escapeHtml(sub) + "</div>" +
+        "</div>";
+}
+
 // ---- Future/placeholder panel: no logic, just reserves the 4th square ----
 function renderFuturePanel(scope) {
     return '<div class="tool-panel tool-panel-future" aria-disabled="true">' +
@@ -487,11 +627,21 @@ function renderFuturePanel(scope) {
 // tests, same spirit as window.Flashcards / window.EventLog elsewhere.
 window.PracticeTools = {
     scopeForTopic: scopeForTopic,
+    scopeForNode: scopeForNode,
+    isLeaf: isLeaf,
+    getDescendantLeafIds: getDescendantLeafIds,
     renderFlashcardsPanel: renderFlashcardsPanel,
     renderMcqPanel: renderMcqPanel,
     renderReadPanel: renderReadPanel,
     renderFuturePanel: renderFuturePanel,
-    __test: { mcqEventStats: mcqEventStats, readPanelState: readPanelState, fetchMcqTotalForTopic: fetchMcqTotalForTopic }
+    renderScopeFilter: renderScopeFilter,
+    __test: {
+        mcqEventStats: mcqEventStats,
+        readPanelState: readPanelState,
+        fetchMcqTotalForTopic: fetchMcqTotalForTopic,
+        aggregateBoxSummary: aggregateBoxSummary,
+        aggregateMcqEventStats: aggregateMcqEventStats
+    }
 };
 
 /* -----------------------------------------------------
@@ -538,8 +688,35 @@ const SQUARE_KINDS = ["read", "flashcards", "mcq", "future"];
 // jump-straight-in button (or none, for Future). Deliberately thinner
 // than the full renderXPanel() output, which only shows up once the
 // square's body is clicked.
+// Phase 3: same tile shape, aggregated across scope.leafIds, and with no
+// buttonHtml — a parent scope has no single action to jump straight
+// into (see phase-3-aggregation.md's Start-review decision). The
+// square's BODY click is the only interaction at this level; it opens
+// the one-level children breakdown (childrenSummaryHtml, below) rather
+// than the full leaf detail (box-strip / MCQ breakdown / read detail).
+function squareTileContentAggregate(kind, scope) {
+    const leafIds = scope.leafIds;
+    if (kind === "read") {
+        let readCount = 0;
+        leafIds.forEach(id => { if (readPanelState(id).state !== "new") readCount++; });
+        return { title: "Read", stat: readCount + " of " + plural(leafIds.length, "topic") + " read", buttonHtml: "" };
+    }
+    if (kind === "flashcards") {
+        const agg = aggregateBoxSummary(leafIds);
+        const stat = !agg ? "No decks yet" : agg.readyTotal > 0 ? plural(agg.readyTotal, "card") + " ready" : "Nothing ready";
+        return { title: "Flashcards", stat: stat, buttonHtml: "" };
+    }
+    if (kind === "mcq") {
+        const stats = aggregateMcqEventStats(leafIds);
+        const accLabel = stats.accuracy == null ? "—" : Math.round(stats.accuracy * 100) + "%";
+        return { title: "MCQ", stat: stats.attempted + " attempted · " + accLabel + " accuracy", buttonHtml: "" };
+    }
+    return { title: "Future", stat: "Coming soon", buttonHtml: "" };
+}
+
 function squareTileContent(kind, scope) {
     const nodeId = scope.nodeId;
+    if (scope.isLeaf === false) return squareTileContentAggregate(kind, scope);
     if (kind === "read") {
         const info = readPanelState(nodeId);
         const stat = info.state === "new" ? "Not opened yet"
@@ -568,7 +745,50 @@ function squareTileContent(kind, scope) {
     return { title: "Future", stat: "Coming soon", buttonHtml: "" };
 }
 
+// One compact row's worth of stat text for a given square kind, scoped
+// to a single child node (which may itself be a leaf or another
+// branch) — used only by childrenSummaryHtml's one-level drill-down.
+function childKindStat(kind, childScope) {
+    const leafIds = childScope.leafIds;
+    if (kind === "read") {
+        let readCount = 0;
+        leafIds.forEach(id => { if (readPanelState(id).state !== "new") readCount++; });
+        return childScope.isLeaf ? squareTileContent("read", childScope).stat : readCount + " of " + plural(leafIds.length, "topic") + " read";
+    }
+    if (kind === "flashcards") {
+        const agg = aggregateBoxSummary(leafIds);
+        return !agg ? "No decks yet" : agg.readyTotal > 0 ? plural(agg.readyTotal, "card") + " ready" : "Nothing ready";
+    }
+    if (kind === "mcq") {
+        const stats = aggregateMcqEventStats(leafIds);
+        const accLabel = stats.accuracy == null ? "—" : Math.round(stats.accuracy * 100) + "%";
+        return stats.attempted + " attempted · " + accLabel;
+    }
+    return "Coming soon";
+}
+
+// Phase 3, section 4: a parent square's body click shows ONE level of
+// children (not every descendant leaf's full detail at once). Each row
+// is just a name + this square's own key number; clicking a row is a
+// navigation action (drill into that child's scope), reusing the same
+// data-select-node delegation the tree's own row titles already use —
+// distinct from this square's body/button click, same as the spec
+// requires.
+function childrenSummaryHtml(kind, scope) {
+    const kids = childrenOf[scope.nodeId] || [];
+    if (!kids.length) return '<div class="practice-summary">No sub-topics here.</div>';
+    return '<div class="practice-children-summary">' + kids.map(id => {
+        const n = nodesById[id];
+        const childScope = scopeForNode(id);
+        return '<div class="practice-children-summary-row" data-select-node="' + escapeHtml(id) + '">' +
+            '<span class="practice-children-summary-title">' + escapeHtml((n && n.title) || id) + "</span>" +
+            '<span class="practice-children-summary-stat">' + escapeHtml(childKindStat(kind, childScope)) + "</span>" +
+            "</div>";
+    }).join("") + "</div>";
+}
+
 function squareDetailHtml(kind, scope) {
+    if (scope.isLeaf === false) return childrenSummaryHtml(kind, scope);
     if (kind === "read") return renderReadPanel(scope);
     if (kind === "flashcards") return renderFlashcardsPanel(scope);
     if (kind === "mcq") return mcqPanelHtmlSync(scope);
@@ -594,6 +814,67 @@ function squareGridHtml(scope) {
         : "";
 
     return '<div class="practice-square-grid">' + tiles + "</div>" + detail;
+}
+
+/* -----------------------------------------------------
+   Phase 3, section 5 — recursive scope filter
+
+   Built now, not wired into any view yet: Queue view (Phase 4) is what
+   will actually put this above its flat lists. Deliberately reuses the
+   real childrenOf tree (same data Tree view walks) so a branch that is
+   deeper than Subject > Course > Unit > Chapter > Topic > Subtopic
+   needs no change here — each step just asks "does the currently
+   selected node have children?" and stops the moment the answer is no
+   (isLeaf), instead of assuming a fixed number of levels.
+
+   Adapted from the spec's renderScopeFilter(onChange) pseudocode to a
+   (container, onChange) signature: this file's existing components
+   (bindEvents, etc.) all wire real DOM via delegated listeners rather
+   than a callback that returns a string, and a set of <select> chains
+   needs to react to its OWN change events, not just call back on paint.
+   ----------------------------------------------------- */
+function scopeFilterOptionsHtml(nodeIds, selectedId) {
+    return '<option value="">—</option>' + nodeIds.map(id => {
+        const n = nodesById[id];
+        return '<option value="' + escapeHtml(id) + '"' + (id === selectedId ? " selected" : "") + ">" +
+            escapeHtml((n && n.title) || id) + "</option>";
+    }).join("");
+}
+
+function scopeFilterHtml(path) {
+    let html = '<div class="practice-scope-filter" data-scope-filter="1">';
+    let parent = "";
+    for (let i = 0; i <= path.length; i++) {
+        const options = childrenOf[parent] || [];
+        if (!options.length) break; // this branch has nothing left to narrow by
+        const selectedId = path[i] || "";
+        html += '<select class="practice-scope-filter-step" data-scope-filter-step="' + i + '">' +
+            scopeFilterOptionsHtml(options, selectedId) + "</select>";
+        if (!selectedId) break; // wait for a pick before offering the next level down
+        parent = selectedId;
+        if (isLeaf(selectedId)) break; // hit an actual topic: no deeper level exists
+    }
+    return html + "</div>";
+}
+
+// Renders the filter chain into `container` and calls onChange(nodeId
+// or null) every time the effective (deepest-selected) scope changes.
+// Returns a repaint function so a caller can force a refresh (e.g. after
+// a content reload) without re-registering the listener.
+function renderScopeFilter(container, onChange) {
+    let path = [];
+    function paint() { container.innerHTML = scopeFilterHtml(path); }
+    container.addEventListener("change", event => {
+        const select = event.target.closest("[data-scope-filter-step]");
+        if (!select) return;
+        const step = Number(select.dataset.scopeFilterStep);
+        path = path.slice(0, step);
+        if (select.value) path.push(select.value);
+        paint();
+        onChange(path.length ? path[path.length - 1] : null);
+    });
+    paint();
+    return paint;
 }
 
 // Live HH:MM:SS ticker for expanded Waiting cards. Re-queries the DOM
@@ -759,25 +1040,7 @@ function expandForDue(knownDeckIds) {
 
 function treeViewHtml(summary) {
     const knownDeckIds = new Set(window.Flashcards ? window.Flashcards.getKnownTopicIds() : []);
-    if (!knownDeckIds.size) {
-        return '<div class="practice-summary">No flashcards opened yet. Open a topic and press Flashcard once; its deck (and this tree) picks it up from then on.</div>';
-    }
     if (!treeLoaded) return loadingHtml();
-
-    // "Does this node, or anything under it, have a known deck?" —
-    // memoized rollup, separate from the review-based `stats()` rollup
-    // below (which still drives the chip counts on intermediate rows).
-    const hasDeckMemo = {};
-    const visiting = new Set();
-    function hasDeck(id) {
-        if (id in hasDeckMemo) return hasDeckMemo[id];
-        if (visiting.has(id)) return false;
-        visiting.add(id);
-        let result = knownDeckIds.has(id);
-        (childrenOf[id] || []).forEach(c => { if (hasDeck(c)) result = true; });
-        visiting.delete(id);
-        return (hasDeckMemo[id] = result);
-    }
 
     if (!treeAutoExpanded) {
         treeAutoExpanded = true;
@@ -792,11 +1055,15 @@ function treeViewHtml(summary) {
     const stats = makeStats(summary);
 
     function node(id, depth) {
-        if (!hasDeck(id)) return ""; // nothing under this branch has a deck yet: not shown
+        // Phase 3: the tree now mirrors the home page ToC in full —
+        // every node renders, whether or not a flashcard deck has ever
+        // been opened for anything under it (that used to gate display
+        // here; see scopeForNode()'s isLeaf, which is the real content
+        // hierarchy, not a localStorage notion).
         const kids = (childrenOf[id] || []).map(k => node(k, depth + 1)).join("");
         const n = nodesById[id];
         const isOpen = expanded.has(id);
-        const isLeafTopic = knownDeckIds.has(id);
+        const isLeafTopic = isLeaf(id);
         const isSelected = selectedNode === id;
         const toggle = kids
             ? '<button type="button" class="practice-tree-toggle" data-toggle="' + escapeHtml(id) + '" aria-expanded="' + isOpen + '" aria-label="' + (isOpen ? "Collapse" : "Expand") + '">' + (isOpen ? "▾" : "▸") + "</button>"
@@ -809,21 +1076,25 @@ function treeViewHtml(summary) {
         if (isLeafTopic) {
             // One-line glance stays visible either way, so the tree stays
             // scannable without opening every topic's panel at once.
-            const bs = window.Flashcards ? window.Flashcards.getBoxSummary(id) : null;
+            const bs = knownDeckIds.has(id) && window.Flashcards ? window.Flashcards.getBoxSummary(id) : null;
             const glance = !bs ? "No deck yet" : bs.readyTotal > 0 ? plural(bs.readyTotal, "card") + " ready" : "Nothing ready right now";
             body = title +
                 '<div class="practice-row-glance">' + escapeHtml(glance) + "</div>" +
-                (isSelected ? squareGridHtml(scopeForTopic(id, n)) : "");
+                (isSelected ? squareGridHtml(scopeForNode(id)) : "");
         } else {
             const st = stats(id);
             const chips = (st.overdue || st.dueToday || st.upcoming || st.later || st.reviewed)
                 ? '<div class="practice-chips">' + chipsHtml(st, true) + "</div>"
                 : "";
             body = title + chips +
-                (isSelected ? '<div class="practice-node-placeholder">Select a topic (not a section) to see its Read / Flashcards / MCQ / Future details.</div>' : "");
+                (isSelected ? squareGridHtml(scopeForNode(id)) : "");
         }
 
-        const row = '<div class="practice-tree-row' + (highlight === id ? " practice-row-highlight" : "") + '" style="--depth:' + depth + '" data-node-id="' + escapeHtml(id) + '">' +
+        // data-highlight-state: reserved hook only, no styling or logic
+        // yet — a later phase decides what "activity in this branch"
+        // should mean and paints it (grey/green or otherwise). Kept
+        // neutral on purpose so this phase makes no visual change.
+        const row = '<div class="practice-tree-row' + (highlight === id ? " practice-row-highlight" : "") + '" data-highlight-state="pending" style="--depth:' + depth + '" data-node-id="' + escapeHtml(id) + '">' +
             toggle +
             '<div class="practice-row-main">' + body + "</div>" +
             "</div>";
@@ -1088,6 +1359,13 @@ function bindEvents() {
             } else {
                 selectedNode = id;
                 expandedSquare = null; // fresh node: no square pre-expanded
+                // The click may have come from a non-leaf square's
+                // one-level children drill-down (childrenSummaryHtml),
+                // whose rows can point at a node the tree hasn't
+                // expanded down to yet. Without this, selectedNode would
+                // change but its square grid would render nowhere
+                // visible, hidden behind a collapsed ancestor toggle.
+                if (nodesById[id]) ancestorsOf(id).forEach(a => expanded.add(a));
             }
             render();
             return;
