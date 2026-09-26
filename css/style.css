@@ -4768,6 +4768,38 @@ a.bottom-strip-btn.practice-open{
     text-decoration:none;
     display:inline-block;
 }
+
+/* ---- Phase 4: Queue view's Read tab state chip (New/Continue/Revisit)
+   — same chip look as .practice-chip, deliberately no red/overdue tone
+   on any of the three, per the spec's "gentle" rule for this tab. ---- */
+.tool-panel-state-inline{
+    display:inline-block;
+    padding:2px 9px;
+    border:1px solid var(--line);
+    border-radius:11px;
+    font:700 11px/1.5 Arial,sans-serif;
+    color:var(--muted);
+    background:#fff;
+    margin-top:6px;
+}
+.tool-panel-state-revisit{
+    color:var(--green);
+    border-color:#9db9a6;
+    background:var(--green-soft);
+}
+.tool-panel-state-continue{
+    border-style:dashed;
+}
+
+/* Later / Remembered — secondary, quieter than the primary action
+   button (Open topic / Start review / Solve), so the eye still lands
+   on the primary button first. */
+.practice-queue-secondary{
+    background:transparent;
+    color:var(--muted);
+    border-style:dashed;
+}
+
 .practice-row-selectable{
     cursor:pointer;
 }

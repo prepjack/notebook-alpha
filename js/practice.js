@@ -183,6 +183,13 @@ function getDescendantLeafIds(nodeId) {
     return result;
 }
 
+// Every leaf-topic id on the whole site — just getDescendantLeafIds
+// starting from the virtual root ("" is childrenOf's key for the
+// top-level Subjects, same key buildChildren() already uses).
+function getAllLeafIds() {
+    return getDescendantLeafIds("");
+}
+
 // Builds a scope for ANY node — leaf or not — from the live tree,
 // unlike scopeForTopic() above/below which is only ever handed an
 // already-known leaf topic id (e.g. the "not in the tree any more"
@@ -283,7 +290,6 @@ let lastQueueSub = "queue-read";           // which Queue sub-tab to return to f
 const expanded = new Set();                // tree PARENT nodes currently opened (children visible)
 let treeAutoExpanded = false;               // open the nodes that have due cards, once
 let scrolledToTopic = false;
-let mcqBuilt = false;                       // unused post-Phase-2 (see ensureMcqFrame note below), kept for Phase 4
 
 // Tree view: the node whose 4-square panel (or non-leaf placeholder) is
 // open, and which of the 4 squares is expanded to its full detail render.
@@ -292,6 +298,14 @@ let mcqBuilt = false;                       // unused post-Phase-2 (see ensureMc
 let selectedNode = null;
 let expandedSquare = null;      // "read" | "flashcards" | "mcq" | "future" | null
 let nodeAutoSelected = false;   // auto-open ?topic= once the tree has loaded, like treeAutoExpanded
+
+// Phase 4: Queue view's scope filter, shared across the Read/Flashcards/
+// MCQ sub-tabs (switching sub-tab keeps whatever branch you narrowed to
+// — deliberate, not an oversight: "show me this chapter's queue" reads
+// naturally across all three tools). Same path-of-selected-ids shape the
+// Phase 3 scopeFilterHtml() was designed around.
+let queueFilterPath = [];
+let queueReadShowAll = false;   // Read tab's "Show more" (list caps at 5)
 
 function params() {
     try {
@@ -630,6 +644,7 @@ window.PracticeTools = {
     scopeForNode: scopeForNode,
     isLeaf: isLeaf,
     getDescendantLeafIds: getDescendantLeafIds,
+    getAllLeafIds: getAllLeafIds,
     renderFlashcardsPanel: renderFlashcardsPanel,
     renderMcqPanel: renderMcqPanel,
     renderReadPanel: renderReadPanel,
@@ -640,7 +655,10 @@ window.PracticeTools = {
         readPanelState: readPanelState,
         fetchMcqTotalForTopic: fetchMcqTotalForTopic,
         aggregateBoxSummary: aggregateBoxSummary,
-        aggregateMcqEventStats: aggregateMcqEventStats
+        aggregateMcqEventStats: aggregateMcqEventStats,
+        readGapState: readGapState,
+        snoozeTopic: snoozeTopic,
+        markRemembered: markRemembered
     }
 };
 
@@ -819,19 +837,16 @@ function squareGridHtml(scope) {
 /* -----------------------------------------------------
    Phase 3, section 5 — recursive scope filter
 
-   Built now, not wired into any view yet: Queue view (Phase 4) is what
-   will actually put this above its flat lists. Deliberately reuses the
-   real childrenOf tree (same data Tree view walks) so a branch that is
-   deeper than Subject > Course > Unit > Chapter > Topic > Subtopic
-   needs no change here — each step just asks "does the currently
-   selected node have children?" and stops the moment the answer is no
-   (isLeaf), instead of assuming a fixed number of levels.
-
-   Adapted from the spec's renderScopeFilter(onChange) pseudocode to a
-   (container, onChange) signature: this file's existing components
-   (bindEvents, etc.) all wire real DOM via delegated listeners rather
-   than a callback that returns a string, and a set of <select> chains
-   needs to react to its OWN change events, not just call back on paint.
+   Deliberately reuses the real childrenOf tree (same data Tree view
+   walks) so a branch that is deeper than Subject > Course > Unit >
+   Chapter > Topic > Subtopic needs no change here — each step just
+   asks "does the currently selected node have children?" and stops the
+   moment the answer is no (isLeaf), instead of assuming a fixed number
+   of levels. scopeFilterHtml/scopeFilterOptionsHtml below are the pure,
+   reusable part; Queue view (Phase 4, further down) is what actually
+   mounts this above its three real lists, driven off the shared
+   queueFilterPath state rather than a private closure — see
+   renderScopeFilter's own doc comment for why.
    ----------------------------------------------------- */
 function scopeFilterOptionsHtml(nodeIds, selectedId) {
     return '<option value="">—</option>' + nodeIds.map(id => {
@@ -861,6 +876,16 @@ function scopeFilterHtml(path) {
 // or null) every time the effective (deepest-selected) scope changes.
 // Returns a repaint function so a caller can force a refresh (e.g. after
 // a content reload) without re-registering the listener.
+//
+// NOT used by Queue view (Phase 4) below — see the note at
+// queueFilterPath's declaration. Kept only as the literal, reusable
+// (container, onChange) component the Phase 3 doc asked for, in case a
+// future standalone mount (a modal, a different page) wants one; Queue
+// view itself needs the filter's selected path to survive across full
+// render() rebuilds, which a private closure here can't do, so it reads
+// scopeFilterHtml() directly against the shared queueFilterPath state
+// and wires changes through the same delegated listener as everything
+// else in this file (see bindEvents' "change" listener).
 function renderScopeFilter(container, onChange) {
     let path = [];
     function paint() { container.innerHTML = scopeFilterHtml(path); }
@@ -924,74 +949,7 @@ function loadingHtml() {
 
 /* -----------------------------------------------------
    Views
-
-   Everything below this point up to "Render + navigation" (dueViewHtml,
-   flashcardsViewHtml, the MCQ iframe embed) was the old flat-tab
-   content. Phase 2's Queue view sub-tabs are placeholders instead (see
-   queuePlaceholderHtml near render()) — Phase 4 designs the real
-   cross-topic queues from scratch per phase-2-new-shell.md, so these are
-   left here unwired rather than deleted, in case any of the logic
-   (grouping, sorting, the topicRowHtml layout) is worth reusing then.
    ----------------------------------------------------- */
-
-// ---- Due view: by WHEN ----
-function dueViewHtml(summary) {
-    const ids = Object.keys(summary.topics);
-    let html = "";
-
-    if (summary.total > 0) {
-        const dueTopics = ids.filter(id => dueNowOf(summary.topics[id]) > 0).length;
-        html += '<div class="practice-summary"><span class="practice-summary-big">' + plural(summary.total, "card") + "</span> for review, from " +
-            plural(dueTopics, "topic") + ". " +
-            (summary.overdue ? '<span class="practice-chip practice-chip-overdue">' + summary.overdue + " overdue</span> " : "") +
-            (summary.dueToday ? '<span class="practice-chip practice-chip-today">' + summary.dueToday + " due today</span>" : "") + "</div>";
-    } else if (!ids.length) {
-        html += '<div class="practice-summary">No practice data yet. Review some flashcards inside a topic; each card comes back here when it is due.</div>';
-    } else {
-        html += '<div class="practice-summary">Nothing is due right now.</div>';
-    }
-
-    // Note when arriving from a topic's "open practice" button.
-    const topicId = topicParam();
-    if (topicId) {
-        const info = topicInfo(topicId);
-        const label = info.known ? info.title : "This topic";
-        const t = summary.topics[topicId];
-        let text = "";
-        if (!t) text = label + ": no flashcard progress yet. Open the topic and review its cards first.";
-        else if (dueNowOf(t) === 0) text = label + ": nothing due" + (t.nextFuture ? ". Next review: " + prettyDateTime(t.nextFuture) + "." : ".");
-        if (text) html += '<div class="practice-note">' + escapeHtml(text) + "</div>";
-    }
-
-    if (!treeLoaded && ids.length) return html + loadingHtml();
-
-    const buckets = [
-        { title: "Overdue", pick: t => t.overdue, review: true, field: "overdue" },
-        { title: "Due today", pick: t => t.dueToday, review: true, field: "dueToday" },
-        { title: "Next 7 days", pick: t => t.upcoming, review: false, field: "upcoming" },
-        { title: "Later", pick: t => t.later, review: false, field: "later" }
-    ];
-    buckets.forEach(bucket => {
-        const inBucket = ids.filter(id => bucket.pick(summary.topics[id]) > 0);
-        if (!inBucket.length) return;
-        html += '<div class="practice-group-title">' + bucket.title + " · " + plural(inBucket.reduce((n, id) => n + bucket.pick(summary.topics[id]), 0), "card") + "</div>";
-        html += sortTopicIds(inBucket, summary).map(id => {
-            const t = summary.topics[id];
-            const count = bucket.pick(t);
-            const chip = {};
-            chip[bucket.field] = count;
-            const extra = bucket.field === "later" && t.nextFuture ? "Next: " + escapeHtml(prettyDateTime(t.nextFuture)) : "";
-            // ONE Review button per topic, carrying the topic's whole due-now count
-            // (a session always opens every due card of the topic): on its Overdue
-            // row, or on its Due-today row when nothing is overdue.
-            let reviewCount = 0;
-            if (bucket.field === "overdue") reviewCount = dueNowOf(t);
-            else if (bucket.field === "dueToday" && !t.overdue) reviewCount = t.dueToday;
-            return topicRowHtml(id, chip, reviewCount, { extra: extra });
-        }).join("");
-    });
-    return html;
-}
 
 // ---- Tree view: by WHERE ----
 function makeStats(summary) {
@@ -1116,60 +1074,6 @@ function treeViewHtml(summary) {
     return html;
 }
 
-// ---- Flashcards view: what to review NOW ----
-function flashcardsViewHtml(summary) {
-    const ids = Object.keys(summary.topics);
-    let html = "";
-
-    if (!ids.length) {
-        return '<div class="practice-summary">No flashcards reviewed yet. Open a topic that has flashcards and review them once; they come back here when due.</div>';
-    }
-    if (!treeLoaded) return loadingHtml();
-
-    const dueIds = ids.filter(id => dueNowOf(summary.topics[id]) > 0);
-    const restIds = ids.filter(id => dueNowOf(summary.topics[id]) === 0);
-
-    if (dueIds.length) {
-        html += '<div class="practice-summary"><span class="practice-summary-big">' + plural(summary.total, "card") + "</span> ready to review, in " + plural(dueIds.length, "topic") + ".</div>";
-        html += '<div class="practice-group-title">Ready to review</div>';
-        html += sortTopicIds(dueIds, summary).map(id => topicRowHtml(id, summary.topics[id], dueNowOf(summary.topics[id]))).join("");
-    } else {
-        html += '<div class="practice-summary">Nothing to review right now.</div>';
-    }
-
-    if (restIds.length) {
-        html += '<div class="practice-group-title">Reviewed, not due yet</div>';
-        html += sortTopicIds(restIds, summary).map(id => {
-            const t = summary.topics[id];
-            return topicRowHtml(id, t, 0, { showReviewed: true, extra: t.nextFuture ? "Next review: " + escapeHtml(prettyDateTime(t.nextFuture)) : "" });
-        }).join("");
-    }
-    html += '<p class="practice-footnote">Cards you have not reviewed yet stay inside their topic: open it and press Flashcard to start them.</p>';
-    return html;
-}
-
-// ---- MCQs view: the existing page, embedded once and kept alive ----
-function ensureMcqFrame() {
-    const host = el("pv-mcq");
-    if (!host || mcqBuilt) return;
-    mcqBuilt = true;
-    const topic = topicParam();
-    const url = "mcq.html" + (topic ? "?topic=" + encodeURIComponent(topic) : "");
-    host.innerHTML =
-        '<div class="practice-mcq-bar"><span id="practice-mcq-label"></span>' +
-        '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">Open in new tab ↗</a></div>' +
-        '<iframe class="practice-mcq-frame" title="MCQ practice" src="' + escapeHtml(url) + '"></iframe>';
-    updateMcqLabel();
-}
-
-function updateMcqLabel() {
-    const label = el("practice-mcq-label");
-    if (!label) return;
-    const topic = topicParam();
-    if (!topic) label.textContent = "All questions";
-    else label.textContent = "Topic: " + (topicInfo(topic).known ? topicInfo(topic).title : topic);
-}
-
 /* -----------------------------------------------------
    Render + navigation
    ----------------------------------------------------- */
@@ -1185,6 +1089,230 @@ function setBadge(id, count) {
     badge.hidden = count === 0;
 }
 
+/* -----------------------------------------------------
+   Phase 4 — Queue view: flat, cross-topic, scope-filterable lists
+   (see phase-4-queue-view.md)
+
+   Tree view = navigation ("go into this topic"). Queue view = a filter
+   on one flat list ("give me the priority list, optionally narrowed") —
+   selecting a scope-filter value below never navigates anywhere, it
+   just re-renders the same list with a different leafIds set.
+   ----------------------------------------------------- */
+
+function currentQueueFilterId() {
+    return queueFilterPath.length ? queueFilterPath[queueFilterPath.length - 1] : null;
+}
+
+function queueScopeIds() {
+    const filterId = currentQueueFilterId();
+    return filterId ? getDescendantLeafIds(filterId) : getAllLeafIds();
+}
+
+/* ---- Read sub-tab: gap-ladder state ----
+
+   The 1d -> 3d -> 7d -> 21d ladder is derived purely from the event
+   log's own 'read' events, so it stays correct across devices for free
+   (event-log.js already merges by union across devices) instead of
+   needing its own synced store. Only the two genuinely manual actions
+   -- "Later" (snooze) and "Remembered" (advance without an actual read)
+   -- get their own tiny localStorage entry, since neither could ever be
+   represented honestly by a real read event. A "Remembered" click is
+   folded into the exact same chronological simulation as a real
+   qualifying read (same floor, same "only advances if actually due"
+   rule), so the two paths can't drift apart into different logic. */
+const READ_GAP_STAGES_DAYS = [1, 3, 7, 21];
+const READ_OVERRIDES_KEY = "practice:readOverrides";
+
+function readOverrides() {
+    try {
+        return JSON.parse(localStorage.getItem(READ_OVERRIDES_KEY) || "{}") || {};
+    } catch (e) {
+        return {};
+    }
+}
+function saveReadOverrides(map) {
+    try { localStorage.setItem(READ_OVERRIDES_KEY, JSON.stringify(map)); } catch (e) { /* storage full/unavailable: override just won't persist */ }
+}
+function snoozeTopic(topicId) {
+    const all = readOverrides();
+    all[topicId] = Object.assign({}, all[topicId], { snoozedUntil: Date.now() + 3 * 86400000 });
+    saveReadOverrides(all);
+}
+function markRemembered(topicId) {
+    const all = readOverrides();
+    const entry = Object.assign({}, all[topicId]);
+    entry.remembered = (entry.remembered || []).concat(Date.now());
+    all[topicId] = entry;
+    saveReadOverrides(all);
+}
+
+// One state per topic: "new" (never read/remembered), "continue"
+// (started, below the completion floor), "revisit" (gap has passed),
+// "settled" (read, gap not passed yet — nothing to do), or "snoozed"
+// (manually hidden via "Later"). Only new/continue/revisit belong in
+// the Queue list; settled and snoozed are deliberately left out below.
+function readGapState(topicId) {
+    const events = (window.EventLog ? window.EventLog.readLog() : [])
+        .filter(e => e && e.type === "read" && e.topicId === topicId)
+        .map(e => ({ t: e.t, secs: Number(e.secs) || 0, manual: false }));
+    const override = readOverrideFor(topicId);
+    (override.remembered || []).forEach(t => events.push({ t: t, secs: READ_CONTINUE_CEILING_SECS, manual: true }));
+    events.sort((a, b) => a.t - b.t);
+
+    if (!events.length) return { state: "new", lastReadAt: null, lastSecs: null, nextRevisitAt: null };
+
+    let stage = -1;           // -1 = ladder not started (no qualifying read yet)
+    let nextRevisitAt = null;
+    let lastReadAt = null, lastSecs = null, lastWasShort = false;
+
+    events.forEach(e => {
+        lastReadAt = e.t;
+        lastSecs = e.secs;
+        lastWasShort = e.secs < READ_CONTINUE_CEILING_SECS && !e.manual;
+        if (lastWasShort) return; // below the floor: doesn't touch the ladder
+        if (stage === -1) {
+            stage = 0; // first qualifying read starts the ladder at 1 day
+        } else if (nextRevisitAt !== null && e.t >= nextRevisitAt) {
+            stage = Math.min(stage + 1, READ_GAP_STAGES_DAYS.length - 1); // was actually due, and got read again: advance
+        } // else: re-read early, before it was due — ladder doesn't move
+        nextRevisitAt = e.t + READ_GAP_STAGES_DAYS[stage] * 86400000;
+    });
+
+    if (lastWasShort) return { state: "continue", lastReadAt: lastReadAt, lastSecs: lastSecs, nextRevisitAt: null };
+    const now = Date.now();
+    if ((override.snoozedUntil || 0) > now) return { state: "snoozed", lastReadAt: lastReadAt, lastSecs: lastSecs, nextRevisitAt: nextRevisitAt };
+    if (nextRevisitAt !== null && nextRevisitAt <= now) return { state: "revisit", lastReadAt: lastReadAt, lastSecs: lastSecs, nextRevisitAt: nextRevisitAt };
+    return { state: "settled", lastReadAt: lastReadAt, lastSecs: lastSecs, nextRevisitAt: nextRevisitAt };
+}
+function readOverrideFor(topicId) {
+    return readOverrides()[topicId] || {};
+}
+
+// Lower sorts first: gently-due (Revisit, most overdue-for-revisit)
+// ahead of Continue (already started) ahead of New (never opened) —
+// per the doc's "surfaces the most gently due first" rule. New topics
+// have no due-by date to rank within, so they fall back to path/title
+// order (same tie-break sortTopicIds already uses elsewhere).
+function readQueuePriority(gap) {
+    if (gap.state === "revisit") return 0;
+    if (gap.state === "continue") return 1;
+    return 2; // "new"
+}
+
+function readQueueItems(leafIds) {
+    return leafIds
+        .map(id => ({ id: id, gap: readGapState(id) }))
+        .filter(item => item.gap.state === "new" || item.gap.state === "continue" || item.gap.state === "revisit")
+        .sort((a, b) => {
+            const pa = readQueuePriority(a.gap), pb = readQueuePriority(b.gap);
+            if (pa !== pb) return pa - pb;
+            if (pa === 0) return (Date.now() - a.gap.nextRevisitAt) < (Date.now() - b.gap.nextRevisitAt) ? 1 : -1;
+            const ia = topicInfo(a.id), ib = topicInfo(b.id);
+            return (ia.parents + ia.title).localeCompare(ib.parents + ib.title);
+        });
+}
+
+function readQueueRowHtml(id, gap) {
+    const info = topicInfo(id);
+    let label, sub;
+    if (gap.state === "new") { label = "New"; sub = "Not started yet."; }
+    else if (gap.state === "continue") { label = "Continue"; sub = "Started last time (~" + gap.lastSecs + "s)."; }
+    else {
+        const d = Math.floor((Date.now() - gap.lastReadAt) / 86400000);
+        label = "Revisit"; sub = "Last read " + (d <= 0 ? "today" : plural(d, "day") + " ago") + ".";
+    }
+    const name = info.known
+        ? '<div class="practice-row-title">' + escapeHtml(info.title || "Untitled") + "</div>" +
+          (info.parents ? '<div class="practice-row-path">' + escapeHtml(info.parents) + "</div>" : "")
+        : '<div class="practice-row-title practice-row-unknown">Topic not found <span class="practice-row-id">(' + escapeHtml(id) + ")</span></div>";
+    return '<div class="practice-row" data-topic-id="' + escapeHtml(id) + '">' +
+        '<div class="practice-row-main">' + name +
+        '<div class="tool-panel-state tool-panel-state-inline tool-panel-state-' + gap.state + '">' + label + "</div>" +
+        '<div class="practice-row-path">' + escapeHtml(sub) + "</div></div>" +
+        '<div class="practice-row-actions">' +
+        '<a class="bottom-strip-btn practice-open" href="index.html?openNode=' + encodeURIComponent(id) + '">Open topic</a>' +
+        '<button type="button" class="bottom-strip-btn practice-queue-secondary" data-queue-later="' + escapeHtml(id) + '">Later</button>' +
+        '<button type="button" class="bottom-strip-btn practice-queue-secondary" data-queue-remembered="' + escapeHtml(id) + '">Remembered</button>' +
+        "</div></div>";
+}
+
+function queueReadViewHtml() {
+    const items = readQueueItems(queueScopeIds());
+    let html = scopeFilterHtml(queueFilterPath);
+    if (!items.length) return html + '<div class="practice-summary">Nothing needs a (re)read right now in this scope.</div>';
+    const visible = queueReadShowAll ? items : items.slice(0, 5);
+    html += visible.map(it => readQueueRowHtml(it.id, it.gap)).join("");
+    if (!queueReadShowAll && items.length > 5) {
+        html += '<button type="button" class="bottom-strip-btn" data-queue-read-show-more="1">Show ' + (items.length - 5) + " more</button>";
+    }
+    return html;
+}
+
+/* ---- Flashcards sub-tab: current Leitner state, most-overdue first ----
+   Reuses the same summary.topics / topicRowHtml / sortTopicIds the old
+   pre-shell flat tabs used (removed once Phase 4 confirmed what was
+   worth keeping — see git history for the original dueViewHtml /
+   flashcardsViewHtml if needed). Only topics with a known deck have an
+   entry in summary.topics at all, so that's the natural "has
+   flashcards" filter. */
+function queueFlashcardsViewHtml(summary) {
+    const ids = queueScopeIds().filter(id => summary.topics[id]);
+    let html = scopeFilterHtml(queueFilterPath);
+    if (!ids.length) return html + '<div class="practice-summary">No flashcard decks in this scope yet.</div>';
+    html += sortTopicIds(ids, summary).map(id => {
+        const t = summary.topics[id];
+        const extra = dueNowOf(t) === 0 && t.nextFuture ? "Next review: " + escapeHtml(prettyDateTime(t.nextFuture)) : "";
+        return topicRowHtml(id, t, dueNowOf(t), { showReviewed: true, extra: extra });
+    }).join("");
+    return html;
+}
+
+/* ---- MCQ sub-tab: pending/attempted/accuracy, no retry-queue logic ----
+   Deliberately NOT a full "every leaf topic site-wide" fetch: with no
+   scope filter applied, this only lists topics with at least one
+   attempt already (free — comes straight out of the event log), so
+   opening the tab doesn't fire one get_mcqs network call per leaf topic
+   on the whole site. Apply the scope filter to narrow to a branch and
+   never-attempted ("pending") topics appear there too, since fetching
+   totals for one bounded branch is cheap. This is a deliberate scope
+   trade-off, not an oversight — flag it if a bulk totals endpoint ever
+   makes the whole-site version cheap too. */
+function queueMcqViewHtml() {
+    const filterId = currentQueueFilterId();
+    const leafIds = queueScopeIds();
+    let html = scopeFilterHtml(queueFilterPath);
+    const candidateIds = filterId ? leafIds : leafIds.filter(id => mcqEventStats(id).attempted > 0);
+    candidateIds.forEach(ensureMcqTotalLoaded);
+
+    const rows = candidateIds.map(id => {
+        const stats = mcqEventStats(id);
+        const cached = mcqTotalCache.has(id) ? mcqTotalCache.get(id) : undefined;
+        const pending = typeof cached === "number" ? Math.max(cached - stats.attempted, 0) : null;
+        return { id: id, stats: stats, cached: cached, pending: pending };
+    }).filter(r => r.stats.attempted > 0 || r.pending === null || r.pending > 0); // drop confirmed-zero, never-attempted topics
+
+    if (!rows.length) return html + '<div class="practice-summary">No MCQ activity in this scope yet.</div>';
+
+    rows.sort((a, b) => (a.stats.accuracy == null ? 1 : a.stats.accuracy) - (b.stats.accuracy == null ? 1 : b.stats.accuracy) || b.stats.attempted - a.stats.attempted);
+
+    html += rows.map(r => {
+        const info = topicInfo(r.id);
+        const totalLabel = r.cached === undefined ? "…" : (r.cached == null ? "—" : String(r.cached));
+        const accLabel = r.stats.accuracy == null ? "—" : Math.round(r.stats.accuracy * 100) + "%";
+        const pendingText = r.pending == null ? "" : " · " + plural(r.pending, "question") + " pending";
+        const name = info.known
+            ? '<div class="practice-row-title">' + escapeHtml(info.title || "Untitled") + "</div>" +
+              (info.parents ? '<div class="practice-row-path">' + escapeHtml(info.parents) + "</div>" : "")
+            : '<div class="practice-row-title practice-row-unknown">Topic not found <span class="practice-row-id">(' + escapeHtml(r.id) + ")</span></div>";
+        return '<div class="practice-row" data-topic-id="' + escapeHtml(r.id) + '">' +
+            '<div class="practice-row-main">' + name +
+            '<div class="practice-row-path">' + r.stats.attempted + " / " + totalLabel + " attempted · " + accLabel + " accuracy" + pendingText + "</div></div>" +
+            '<div class="practice-row-actions"><button type="button" class="bottom-strip-btn practice-mcq-solve" data-mcq-solve="' + escapeHtml(r.id) + '">Solve</button></div>' +
+            "</div>";
+    }).join("");
+    return html;
+}
+
 // ---- Plan Today: placeholder only, Phase 5 builds the real thing ----
 function planViewHtml() {
     return '<div class="practice-summary practice-plan-placeholder">SMART Day Plan is coming soon — a morning objective, an evening check-in, ' +
@@ -1192,13 +1320,10 @@ function planViewHtml() {
 }
 
 const QUEUE_PLACEHOLDER_COPY = {
-    "queue-read": "A cross-topic queue of what to (re)read next is coming here.",
-    "queue-flashcards": "A cross-topic queue of due flashcards is coming here — replacing the per-topic Start-review button in Tree view with one combined list.",
-    "queue-mcq": "A cross-topic MCQ due/retry queue is coming here.",
     "queue-future": "Future practice aspects will queue up here too."
 };
 
-// ---- Queue view sub-tabs: placeholders only, Phase 4 builds these ----
+// ---- Queue view Future sub-tab: ghost placeholder, no logic needed ----
 function queuePlaceholderHtml(subview) {
     return '<div class="practice-summary practice-queue-placeholder">' + escapeHtml(QUEUE_PLACEHOLDER_COPY[subview] || "Coming soon.") + "</div>";
 }
@@ -1229,10 +1354,10 @@ function render() {
 
     if (view === "plan") el("pv-plan").innerHTML = planViewHtml();
     else if (view === "tree") el("pv-tree").innerHTML = treeViewHtml(summary);
-    else if (view.indexOf("queue-") === 0) {
-        const host = el("pv-" + view);
-        if (host) host.innerHTML = queuePlaceholderHtml(view);
-    }
+    else if (view === "queue-read") el("pv-queue-read").innerHTML = queueReadViewHtml();
+    else if (view === "queue-flashcards") el("pv-queue-flashcards").innerHTML = queueFlashcardsViewHtml(summary);
+    else if (view === "queue-mcq") el("pv-queue-mcq").innerHTML = queueMcqViewHtml();
+    else if (view === "queue-future") el("pv-queue-future").innerHTML = queuePlaceholderHtml(view);
 
     // Bring the highlighted topic (from ?topic=) into view, once. Only
     // Tree view has anything to scroll to.
@@ -1244,6 +1369,7 @@ function render() {
         }
     }
 }
+
 
 let renderTimer = null;
 function scheduleRender() {
@@ -1398,6 +1524,28 @@ function bindEvents() {
         if (review) { reviewTopic(review.dataset.review, review); return; }
         const mcqSolve = event.target.closest("[data-mcq-solve]");
         if (mcqSolve) { window.open("mcq.html?topic=" + encodeURIComponent(mcqSolve.dataset.mcqSolve), "_blank", "noopener"); return; }
+        const later = event.target.closest("[data-queue-later]");
+        if (later) { snoozeTopic(later.dataset.queueLater); render(); return; }
+        const remembered = event.target.closest("[data-queue-remembered]");
+        if (remembered) { markRemembered(remembered.dataset.queueRemembered); render(); return; }
+        if (event.target.closest("[data-queue-read-show-more]")) {
+            queueReadShowAll = true;
+            render();
+            return;
+        }
+    });
+
+    // Phase 4's scope filter: a chain of <select>s (see scopeFilterHtml).
+    // "change" bubbles the same as "click", so one delegated listener
+    // here covers every step, same pattern as the click handler above.
+    el("practice-right").addEventListener("change", event => {
+        const step = event.target.closest("[data-scope-filter-step]");
+        if (!step) return;
+        const idx = Number(step.dataset.scopeFilterStep);
+        queueFilterPath = queueFilterPath.slice(0, idx);
+        if (step.value) queueFilterPath.push(step.value);
+        queueReadShowAll = false; // scope just changed: restart the Read tab's 5-item cap
+        render();
     });
 
     // A review answer or a sync merge changed progress: refresh.
