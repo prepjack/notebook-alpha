@@ -4706,6 +4706,80 @@ body.practice-resizing{
     gap:8px;
     margin:8px 0 12px;
 }
+
+/* ---- Phase 5: Tree view now uses the PAGE'S OWN left/right panels —
+   #practice-left (hierarchy, appended below the Plan/Queue/Tree nav,
+   only while Tree view is active) and #practice-right/#pv-tree
+   (selected node's 4-square panel only). This mirrors the home page's
+   real ToC / content split (two actual panels) instead of a second,
+   nested split living inside the right panel alone, which is what an
+   earlier pass here (wrongly) built. ---- */
+.practice-left-tree{
+    margin-top:14px;
+    padding-top:14px;
+    border-top:1px solid var(--line);
+}
+.practice-left-tree[hidden]{
+    display:none;
+}
+.practice-tree-detail-panel{
+    padding:14px 16px;
+    border:1px solid var(--line);
+    border-radius:10px;
+    background:var(--paper);
+}
+.practice-tree-detail-empty{
+    padding:8px 2px;
+    font:13px/1.6 Arial,sans-serif;
+    color:var(--muted);
+}
+.practice-tree-detail-header{
+    margin-bottom:4px;
+}
+.practice-tree-detail-title{
+    font:700 16px Arial,sans-serif;
+    color:var(--text);
+}
+.practice-tree-row-selected{
+    border-color:var(--green);
+    background:var(--green-soft);
+}
+.practice-tree-row-selected .practice-row-title{
+    color:var(--green);
+}
+
+/* Level colour-coding (this page only — index.html's own ToC uses the
+   bare .tree-level-label class untouched, so its look doesn't change).
+   Subject → Course → Unit → Chapter → Topic → Subtopic, each its own
+   soft tag color so the level reads at a glance without more text. */
+.practice-tree-row .tree-level-label{
+    padding:1px 6px;
+    border-radius:4px;
+}
+.practice-tree-row .tree-level-label-subject{
+    color:#3f5a82 !important;
+    background:#e7edf6;
+}
+.practice-tree-row .tree-level-label-course{
+    color:#8a6d3f !important;
+    background:#f4ecdf;
+}
+.practice-tree-row .tree-level-label-unit{
+    color:#3f7d78 !important;
+    background:#e3f0ef;
+}
+.practice-tree-row .tree-level-label-chapter{
+    color:#7d4f6d !important;
+    background:#f2e7ef;
+}
+.practice-tree-row .tree-level-label-topic{
+    color:#5c6b60 !important;
+    background:#eef1ec;
+}
+.practice-tree-row .tree-level-label-subtopic{
+    color:#87908a !important;
+    background:#f1f3ef;
+}
 .practice-row-highlight{
     border-color:var(--green);
     box-shadow:0 0 0 2px var(--green-soft);

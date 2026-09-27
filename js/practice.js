@@ -10,12 +10,17 @@
                   MCQ, Future, in that fixed order. Each is a placeholder
                   for now — Phase 4 builds the real cross-topic queues.
      Tree view    the same ToC that powers the home page, unchanged in
-                  structure. Clicking a LEAF topic opens the 4-square
-                  panel (Read | Flashcards | MCQ | Future) from Phase 1,
-                  scoped to that topic, right there in the tree. Clicking
-                  a non-leaf node (Subject/Course/Unit/Chapter) shows a
-                  "select a topic" placeholder — real aggregation is
-                  Phase 3, not built here.
+                  structure, but split into two inner panes (Phase 5),
+                  mirroring the home page's own ToC/content split:
+                  LEFT inner pane is just the hierarchy — names, chips,
+                  expand/collapse — and never shows a topic's tools
+                  inline. Clicking any node's title selects it; its
+                  4-square panel (Read | Flashcards | MCQ | Future),
+                  or a "select a topic" placeholder for nothing
+                  selected, renders once in the RIGHT inner pane
+                  (treeDetailHtml()). Clicking a non-leaf node
+                  (Subject/Course/Unit/Chapter) shows the same panel,
+                  aggregated across its descendants (Phase 3).
 
    Progress comes from localStorage (kept in step across devices by
    js/progress-sync.js); a card id starts with its topic id. Topic names,
@@ -997,7 +1002,30 @@ function expandForDue(knownDeckIds) {
     if (topic && nodesById[topic]) ancestorsOf(topic).forEach(a => expanded.add(a));
 }
 
-function treeViewHtml(summary) {
+// Phase 5 — real two-panel split: the hierarchy now renders into the
+// PAGE'S OWN left panel (#practice-left-tree, appended below the
+// Plan/Queue/Tree nav — see render()), not into a second pane nested
+// inside the right panel. Names + expand/collapse ONLY, no chips or
+// per-topic glance text — exactly the home page ToC's own look (same
+// .tree-level-label / .tree-node-title classes, same Subject > Course >
+// Unit > Chapter > Topic depth labels — see app.js's getNodeLevelLabel,
+// mirrored here so both trees read identically even though each page
+// still keeps its own click behaviour, per that ToC not being a reusable
+// module: it's wired straight into index.html's content loader, popup
+// menus and drag-reorder, none of which belong on this page).
+const TREE_LEVEL_LABELS = ["Subject", "Course", "Unit", "Chapter", "Topic"];
+function levelLabelForDepth(depth) {
+    return TREE_LEVEL_LABELS[depth] || "Subtopic";
+}
+// One CSS class per level so each depth can get its own colour (see
+// ".practice-tree-row .tree-level-label-*" in style.css) — a plain
+// text label at this size reads as "all the same", so color is the
+// quickest way to tell a Subject row from a Chapter row at a glance.
+function levelSlugForDepth(depth) {
+    return (TREE_LEVEL_LABELS[depth] || "Subtopic").toLowerCase();
+}
+
+function treeHierarchyListHtml() {
     const knownDeckIds = new Set(window.Flashcards ? window.Flashcards.getKnownTopicIds() : []);
     if (!treeLoaded) return loadingHtml();
 
@@ -1008,10 +1036,15 @@ function treeViewHtml(summary) {
     const highlight = topicParam();
     if (!nodeAutoSelected) {
         nodeAutoSelected = true;
-        if (highlight && nodesById[highlight]) selectedNode = highlight;
+        if (highlight && nodesById[highlight]) {
+            selectedNode = highlight;
+            // Deep link (?topic=): phones only show one screen at a
+            // time, so jump straight to the detail screen the link
+            // actually points at, same as this page did before the
+            // hierarchy/detail split.
+            if (isMobile()) showDetail(true);
+        }
     }
-
-    const stats = makeStats(summary);
 
     function node(id, depth) {
         // Phase 3: the tree now mirrors the home page ToC in full —
@@ -1022,40 +1055,30 @@ function treeViewHtml(summary) {
         const kids = (childrenOf[id] || []).map(k => node(k, depth + 1)).join("");
         const n = nodesById[id];
         const isOpen = expanded.has(id);
-        const isLeafTopic = isLeaf(id);
         const isSelected = selectedNode === id;
         const toggle = kids
             ? '<button type="button" class="practice-tree-toggle" data-toggle="' + escapeHtml(id) + '" aria-expanded="' + isOpen + '" aria-label="' + (isOpen ? "Collapse" : "Expand") + '">' + (isOpen ? "▾" : "▸") + "</button>"
             : '<span class="practice-tree-toggle practice-tree-leaf" aria-hidden="true"></span>';
 
+        // Just the name + its level tag — no chips, no "N cards ready"
+        // glance. That's deliberately gone: this pane is pure navigation
+        // now, its detail lives in the right panel (treeDetailHtml).
         const title = '<div class="practice-row-title practice-row-selectable" data-select-node="' + escapeHtml(id) + '" aria-expanded="' + isSelected + '">' +
-            escapeHtml(n.title || "Untitled") + "</div>";
-
-        let body;
-        if (isLeafTopic) {
-            // One-line glance stays visible either way, so the tree stays
-            // scannable without opening every topic's panel at once.
-            const bs = knownDeckIds.has(id) && window.Flashcards ? window.Flashcards.getBoxSummary(id) : null;
-            const glance = !bs ? "No deck yet" : bs.readyTotal > 0 ? plural(bs.readyTotal, "card") + " ready" : "Nothing ready right now";
-            body = title +
-                '<div class="practice-row-glance">' + escapeHtml(glance) + "</div>" +
-                (isSelected ? squareGridHtml(scopeForNode(id)) : "");
-        } else {
-            const st = stats(id);
-            const chips = (st.overdue || st.dueToday || st.upcoming || st.later || st.reviewed)
-                ? '<div class="practice-chips">' + chipsHtml(st, true) + "</div>"
-                : "";
-            body = title + chips +
-                (isSelected ? squareGridHtml(scopeForNode(id)) : "");
-        }
+            '<span class="tree-level-label tree-level-label-' + levelSlugForDepth(depth) + '">' + escapeHtml(levelLabelForDepth(depth)) + '</span>' +
+            '<span class="tree-node-title">' + escapeHtml(n.title || "Untitled") + "</span>" +
+            "</div>";
 
         // data-highlight-state: reserved hook only, no styling or logic
         // yet — a later phase decides what "activity in this branch"
         // should mean and paints it (grey/green or otherwise). Kept
         // neutral on purpose so this phase makes no visual change.
-        const row = '<div class="practice-tree-row' + (highlight === id ? " practice-row-highlight" : "") + '" data-highlight-state="pending" style="--depth:' + depth + '" data-node-id="' + escapeHtml(id) + '">' +
+        // practice-tree-row-selected: the node whose panel is currently
+        // open in the right-hand detail pane — same idea as the home
+        // page's ".tree-label.active" for whatever's open in its middle
+        // panel, kept as its own class since the tree row markup differs.
+        const row = '<div class="practice-tree-row' + (highlight === id ? " practice-row-highlight" : "") + (isSelected ? " practice-tree-row-selected" : "") + '" data-highlight-state="pending" style="--depth:' + depth + '" data-node-id="' + escapeHtml(id) + '">' +
             toggle +
-            '<div class="practice-row-main">' + body + "</div>" +
+            '<div class="practice-row-main">' + title + "</div>" +
             "</div>";
         return row + (kids && isOpen ? '<div class="practice-tree-children">' + kids + "</div>" : "");
     }
@@ -1067,12 +1090,42 @@ function treeViewHtml(summary) {
     const orphans = Array.from(knownDeckIds).filter(id => !nodesById[id]);
     if (orphans.length) {
         html += '<div class="practice-group-title">Not in the tree any more</div>' +
-            orphans.map(id => '<div class="practice-tree-row" data-node-id="' + escapeHtml(id) + '">' +
+            orphans.map(id => '<div class="practice-tree-row' + (selectedNode === id ? " practice-tree-row-selected" : "") + '" data-node-id="' + escapeHtml(id) + '">' +
                 '<span class="practice-tree-toggle practice-tree-leaf" aria-hidden="true"></span>' +
-                '<div class="practice-row-main"><div class="practice-row-title practice-row-unknown">Topic not found <span class="practice-row-id">(' + escapeHtml(id) + ")</span></div>" +
-                renderFlashcardsPanel(scopeForTopic(id, null)) + "</div></div>").join("");
+                '<div class="practice-row-main"><div class="practice-row-title practice-row-selectable" data-select-node="' + escapeHtml(id) + '" aria-expanded="' + (selectedNode === id) + '"><span class="tree-node-title practice-row-unknown">Topic not found <span class="practice-row-id">(' + escapeHtml(id) + ")</span></span></div></div></div>").join("");
     }
     return html;
+}
+
+// The right panel (#pv-tree): whatever node is selected has its
+// 4-square panel (or "not in the tree" flashcards panel, for an
+// orphaned deck) rendered here — nothing else. This mirrors the home
+// page's ToC (left) / content (right) split — see index.html's
+// #left-panel / #middle-panel — instead of stacking hierarchy and
+// tools inside one flat scroller the way this page originally built it.
+function treeDetailHtml() {
+    if (!selectedNode) {
+        return '<div class="practice-tree-detail-empty">Select a topic on the left to see its Read, Flashcards, MCQ and Future tools here.</div>';
+    }
+    if (nodesById[selectedNode]) {
+        const info = topicInfo(selectedNode);
+        const header = '<div class="practice-tree-detail-header">' +
+            (info.parents ? '<div class="practice-row-path">' + escapeHtml(info.parents) + "</div>" : "") +
+            '<div class="practice-tree-detail-title">' + escapeHtml(info.title || "Untitled") + "</div>" +
+            "</div>";
+        return '<div class="practice-tree-detail-panel">' + header + squareGridHtml(scopeForNode(selectedNode)) + "</div>";
+    }
+    // Orphan: a locally-known deck whose topic id is no longer in the
+    // live tree — no square grid (there's no real node/scope for it),
+    // just its flashcards panel, same as before this split.
+    return '<div class="practice-tree-detail-panel"><div class="practice-tree-detail-header">' +
+        '<div class="practice-tree-detail-title practice-row-unknown">Topic not found <span class="practice-row-id">(' + escapeHtml(selectedNode) + ")</span></div></div>" +
+        renderFlashcardsPanel(scopeForTopic(selectedNode, null)) + "</div>";
+}
+
+function treeViewHtml() {
+    if (!treeLoaded) return loadingHtml();
+    return treeDetailHtml();
 }
 
 /* -----------------------------------------------------
@@ -1594,17 +1647,28 @@ function render() {
         if (host) host.hidden = key !== view;
     });
 
+    // Tree view's hierarchy lives in the page's own left panel, appended
+    // below the Plan/Queue/Tree nav — NOT inside pv-tree. Render it first:
+    // it's what resolves selectedNode (auto-expand / ?topic= deep link),
+    // which the right panel's detail render (below) depends on.
+    const leftTree = el("practice-left-tree");
+    if (leftTree) {
+        leftTree.hidden = view !== "tree";
+        if (view === "tree") leftTree.innerHTML = treeHierarchyListHtml();
+    }
+
     if (view === "plan") el("pv-plan").innerHTML = planViewHtml();
-    else if (view === "tree") el("pv-tree").innerHTML = treeViewHtml(summary);
+    else if (view === "tree") el("pv-tree").innerHTML = treeViewHtml();
     else if (view === "queue-read") el("pv-queue-read").innerHTML = queueReadViewHtml();
     else if (view === "queue-flashcards") el("pv-queue-flashcards").innerHTML = queueFlashcardsViewHtml(summary);
     else if (view === "queue-mcq") el("pv-queue-mcq").innerHTML = queueMcqViewHtml();
     else if (view === "queue-future") el("pv-queue-future").innerHTML = queuePlaceholderHtml(view);
 
     // Bring the highlighted topic (from ?topic=) into view, once. Only
-    // Tree view has anything to scroll to.
+    // Tree view has anything to scroll to — and it now lives in the
+    // left panel's hierarchy, not inside pv-tree.
     if (!scrolledToTopic && view === "tree") {
-        const target = document.querySelector("#pv-tree .practice-row-highlight");
+        const target = document.querySelector("#practice-left-tree .practice-row-highlight");
         if (target && typeof target.scrollIntoView === "function") {
             scrolledToTopic = true;
             target.scrollIntoView({ block: "center" });
@@ -1699,12 +1763,23 @@ function bindEvents() {
         const item = event.target.closest("button");
         if (!item) return;
         if (item.dataset.group === "queue") selectView(lastQueueSub);
-        else if (item.dataset.view) selectView(item.dataset.view);
+        // Tree view: don't auto-jump to the (empty, "select a topic")
+        // right panel on phones — land on the hierarchy in the left
+        // panel first, same as tapping the ToC on the home page. Every
+        // other view still auto-advances, since they have no left-panel
+        // browsing step of their own.
+        else if (item.dataset.view) selectView(item.dataset.view, { showDetail: item.dataset.view !== "tree" });
     });
 
     el("practice-back").addEventListener("click", () => showDetail(false));
 
-    el("practice-right").addEventListener("click", event => {
+    // Shared by both panels: the hierarchy's toggle/select/expand-all
+    // controls now live in #practice-left (below the nav) while
+    // everything else (squares, review buttons, plan items…) still
+    // lives in #practice-right — one function, bound to both roots, so
+    // a click anywhere in either finds the right branch below via the
+    // usual event.target.closest() checks.
+    function handlePracticeClick(event) {
         // A square's own button (Start review / Solve / Open topic) is
         // inside a [data-square-body] tile, so check it first: when the
         // click landed on the button, skip the body-toggle branch below
@@ -1734,6 +1809,11 @@ function bindEvents() {
                 // change but its square grid would render nowhere
                 // visible, hidden behind a collapsed ancestor toggle.
                 if (nodesById[id]) ancestorsOf(id).forEach(a => expanded.add(a));
+                // Phones: picking a name in the hierarchy screen is the
+                // same "go look at this topic" action as tapping a nav
+                // item — advance to the detail screen, same as the ToC
+                // handing off to the content panel.
+                if (view === "tree" && isMobile()) showDetail(true);
             }
             render();
             return;
@@ -1810,7 +1890,10 @@ function bindEvents() {
             render();
             return;
         }
-    });
+    }
+
+    el("practice-right").addEventListener("click", handlePracticeClick);
+    el("practice-left").addEventListener("click", handlePracticeClick);
 
     // Phase 4's scope filter: a chain of <select>s (see scopeFilterHtml).
     // "change" bubbles the same as "click", so one delegated listener
