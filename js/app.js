@@ -3118,10 +3118,11 @@ function renderStudyTree(data) {
 function renderMcqs(node) { /* MCQ practice is handled by mcq.html. */ }
 
 /* =========================================================
-   ALPHA-PLUS — RIGHT PANEL: REFERENCES | MCQ | INDEX TABS
-   MCQ practice opens INSIDE the right panel (embedded via the
-   existing dedicated mcq.html page in an iframe, so none of its
-   logic is duplicated) with its own "Open in new tab" action.
+   ALPHA-PLUS — RIGHT PANEL: REFERENCES | INDEX | PRACTICE TABS
+   Practice opens the dedicated practice.html page in a new tab
+   (deep-linked into its Tree view, this topic pre-selected) —
+   Read/Flashcards/MCQ/Future all live there now, so nothing is
+   duplicated in an iframe here the way MCQ briefly was.
    The Index tab keeps its existing in-panel behaviour and also
    gets an "Open in new tab" action, which reopens this same
    notebook page with the Index tab pre-selected (Index has no
@@ -3129,29 +3130,13 @@ function renderMcqs(node) { /* MCQ practice is handled by mcq.html. */ }
    the SAME tree/content the Table of Contents already renders).
    ========================================================= */
 
-function getMcqUrl() {
+function getPracticeUrl() {
     const topicId = selectedTopicId ||
         findFirstTopic(window.__studyData?.subjects)?.id;
 
     return topicId
-        ? `mcq.html?topic=${encodeURIComponent(topicId)}`
-        : "mcq.html";
-}
-
-let mcqFrameLoadedFor = null;
-
-function loadMcqFrame() {
-    const frame = document.getElementById("mcq-panel-frame");
-    if (!frame) return;
-
-    const url = getMcqUrl();
-    // Refresh the embedded MCQ only when the relevant topic actually
-    // changed since it was last loaded — switching tabs back and forth
-    // shouldn't reset an attempt already in progress.
-    if (mcqFrameLoadedFor === url) return;
-
-    frame.src = url;
-    mcqFrameLoadedFor = url;
+        ? `practice.html?view=tree&topic=${encodeURIComponent(topicId)}`
+        : "practice.html?view=tree";
 }
 
 function initRightPanelTabs() {
@@ -3168,12 +3153,8 @@ function selectRightPanelTab(tab) {
     tabs.forEach(b => b.classList.toggle("active", b.dataset.rightTab === tab));
 
     document.getElementById("right-tab-references").hidden = tab !== "references";
-    document.getElementById("right-tab-mcq").hidden = tab !== "mcq";
     document.getElementById("right-tab-index").hidden = tab !== "index";
-
-    if (tab === "mcq") {
-        loadMcqFrame();
-    }
+    document.getElementById("right-tab-practice").hidden = tab !== "practice";
 
     if (tab === "index") {
         const query = document.getElementById("index-search-input")?.value.trim().toLowerCase() || "";
@@ -3185,12 +3166,12 @@ function selectRightPanelTab(tab) {
     }
 }
 
-document.getElementById("mcq-open-newtab")?.addEventListener("click", () => {
-    window.open(getMcqUrl(), "_blank", "noopener");
-});
-
 document.getElementById("index-open-newtab")?.addEventListener("click", () => {
     window.open("index-directory.html", "_blank", "noopener");
+});
+
+document.getElementById("practice-open-newtab")?.addEventListener("click", () => {
+    window.open(getPracticeUrl(), "_blank", "noopener");
 });
 
 /* =========================================================
@@ -4163,11 +4144,11 @@ async function startApp() {
 
     const params = new URLSearchParams(window.location.search);
 
-    // Supports the Index tab's "Open in new tab" action, which reopens
-    // this page with ?rightTab=index so the new tab lands straight on
-    // the Index view instead of the default References tab.
+    // Supports the Index/Practice tabs' "Open in new tab" actions, which
+    // reopen this page with ?rightTab=index (or =practice) so the new
+    // tab lands straight on that view instead of the default References tab.
     const requestedTab = params.get("rightTab");
-    if (requestedTab === "index" || requestedTab === "mcq") {
+    if (requestedTab === "index" || requestedTab === "practice") {
         selectRightPanelTab(requestedTab);
     }
 
@@ -4187,8 +4168,8 @@ async function startApp() {
 
 /* =========================================================
    SELECTED TOPIC TRACKING
-   Used by getMcqUrl() (right panel MCQ tab) to scope MCQ
-   practice to whichever topic is currently open.
+   Used by getPracticeUrl() (right panel Practice tab) to scope
+   the Practice-page deep link to whichever topic is currently open.
    ========================================================= */
 
 let selectedTopicId = null;

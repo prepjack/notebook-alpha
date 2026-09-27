@@ -327,50 +327,11 @@
         resetToStartState();
     }
 
-    // "Revise": the Practice page (practice.html) shows what is due, by
-    // hierarchy or by date, plus flashcards and MCQs. Opened in a new tab
-    // (same pattern as the Index tab's "Open in new tab"); ?topic=<id> makes
-    // it highlight the topic that is open right now. selectedTopicNode is
-    // app.js's global.
-    function openPracticePage() {
-        let topicId = "";
-        try {
-            if (typeof selectedTopicNode !== "undefined" && selectedTopicNode && selectedTopicNode.id) {
-                topicId = String(selectedTopicNode.id);
-            }
-        } catch (e) { /* no topic open: open the page without a highlight */ }
-        window.open("practice.html?view=due" + (topicId ? "&topic=" + encodeURIComponent(topicId) : ""), "_blank");
-    }
-
-    // Take Test: visually wired, functionally inert for now. Its real
-    // behavior depends on the MCQ linking system, tracked separately.
-    // (Flashcard and Revise are real; see the click handler below.)
-    function handlePostReadStub(action) {
-        console.log(`[Notebook Alpha] "${action}" clicked — not implemented yet (tracked separately from the layout phases).`);
-    }
-
     document.addEventListener("DOMContentLoaded", () => {
         const { startBtn, endBtn, postActions, rereadBtn } = els();
         if (startBtn) startBtn.addEventListener("click", handleStartRead);
         if (endBtn) endBtn.addEventListener("click", handleEndRead);
         if (rereadBtn) rereadBtn.addEventListener("click", handleReread);
-        if (postActions) {
-            postActions.addEventListener("click", (event) => {
-                const btn = event.target.closest("[data-post-read-action]");
-                if (!btn) return;
-                // Phase 8: Flashcard is real now; only Take Test is still a stub.
-                if (btn.dataset.postReadAction === "flashcard" && window.Flashcards) {
-                    window.Flashcards.open();
-                    return;
-                }
-                // Revise opens the Practice page in a new tab, with this topic highlighted.
-                if (btn.dataset.postReadAction === "revise") {
-                    openPracticePage();
-                    return;
-                }
-                handlePostReadStub(btn.dataset.postReadAction);
-            });
-        }
 
         document.addEventListener("mousemove", markActive, { passive: true });
         document.addEventListener("keydown", markActive, { passive: true });

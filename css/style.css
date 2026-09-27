@@ -878,8 +878,9 @@ body.resizing-panels .workspace {
 .right-panel-tab.active{background:var(--green-soft);color:var(--green)}
 
 /* =========================================================
-   RIGHT PANEL — MCQ TAB (embedded) + "open in new tab" action
-   available on both the MCQ tab and the Index tab.
+   RIGHT PANEL — INDEX + PRACTICE TABS, "open in new tab" action
+   shared by both (References has no such action — it's already
+   in-panel only).
    ========================================================= */
 
 .right-tab-action-row {
@@ -913,6 +914,13 @@ body.resizing-panels .workspace {
     border: 1px solid var(--line);
     border-radius: 10px;
     background: var(--paper);
+}
+
+.right-tab-practice-note {
+    margin: 0;
+    padding: 2px 2px;
+    font: 13px/1.6 Arial, sans-serif;
+    color: var(--muted);
 }
 
 /* =========================================================
@@ -2456,15 +2464,6 @@ body.index-directory-resizing .index-directory-workspace {
 .reread-btn:hover:not(:disabled){
     background:var(--green-soft);
     color:var(--green);
-}
-.post-read-flashcard{
-    background:var(--green);
-    border-color:var(--green);
-    color:#fff;
-}
-.post-read-flashcard:hover:not(:disabled){
-    background:var(--green);
-    opacity:.85;
 }
 
 /* =========================================================

@@ -16,8 +16,6 @@
     <div class="header-subjects">
         <div id="subject-strip" class="subject-strip-list"></div>
         <button id="add-subject" type="button" class="subject-add-button">+ Subject</button>
-        <button id="progress-sync-btn" type="button" class="subject-add-button progress-sync-btn" data-state="new" title="Progress sync & backup">⟳ Sync</button>
-        <a href="practice.html?view=due" id="practice-link" class="subject-add-button practice-link" title="Practice: cards due for review">Practice <span id="practice-badge" class="practice-badge" hidden></span></a>
     </div>
     </header>
 <main class="app-shell">
@@ -116,18 +114,15 @@
                     <span id="reading-status-indicator" class="reading-status-indicator" hidden></span>
                     <span id="reading-time-result" class="reading-time-result" hidden></span>
                     <p id="post-read-suggestion" class="post-read-suggestion" hidden>
-                        💡 Suggestion: try <strong>Flashcard</strong> next to reinforce what you just read.
+                        💡 Suggestion: try <strong>Practice</strong> (right panel) next to reinforce what you just read.
                     </p>
                     <div id="post-read-actions" class="post-read-actions" hidden>
-                        <button type="button" class="bottom-strip-btn" data-post-read-action="test">Take Test</button>
-                        <button type="button" class="bottom-strip-btn" data-post-read-action="revise" title="Opens the Practice page in a new tab">Open practice in new tab ↗</button>
-                        <button type="button" class="bottom-strip-btn post-read-flashcard" data-post-read-action="flashcard">Flashcard</button>
                         <button type="button" id="reread-btn" class="bottom-strip-btn reread-btn" hidden>↻ Read Again</button>
                     </div>
                 </div>
             </section>
 
-            <!-- RIGHT: references / index -->
+            <!-- RIGHT: references / index / practice -->
             <aside id="right-panel" class="panel">
                 <div id="right-resizer" class="panel-resizer"
                      title="Drag this LEFT edge left/right to resize"></div>
@@ -137,7 +132,7 @@
                             title="Expand right panel to half width" aria-label="Expand right panel to half width"
                             aria-pressed="false">⇔</button>
                     <button type="button" id="right-panel-toggle" class="panel-collapse-btn"
-                            title="Collapse References / Index" aria-label="Collapse right panel"
+                            title="Collapse References / Index / Practice" aria-label="Collapse right panel"
                             aria-expanded="true">
                         <svg width="16" height="16" viewBox="0 0 16 16" fill="none"
                              xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -147,23 +142,13 @@
                     </button>
                     <div class="right-panel-tabs">
                         <button type="button" class="right-panel-tab active" data-right-tab="references">References</button>
-                        <button type="button" class="right-panel-tab" data-right-tab="mcq">MCQ</button>
                         <button type="button" class="right-panel-tab" data-right-tab="index">Index</button>
+                        <button type="button" class="right-panel-tab" data-right-tab="practice">Practice</button>
                     </div>
                 </div>
 
                 <div id="right-tab-references" class="right-tab-view">
                     <div id="resources"></div>
-                </div>
-
-                <div id="right-tab-mcq" class="right-tab-view" hidden>
-                    <div class="right-tab-action-row">
-                        <button type="button" id="mcq-open-newtab" class="right-tab-newtab-btn">
-                            Open in new tab ↗
-                        </button>
-                    </div>
-                    <iframe id="mcq-panel-frame" class="right-tab-iframe"
-                            title="MCQ Practice" loading="lazy"></iframe>
                 </div>
 
                 <div id="right-tab-index" class="right-tab-view" hidden>
@@ -184,6 +169,19 @@
                     <div id="index-scoped-list" class="index-scoped-list"></div>
                     <div id="index-az-list" class="index-az-list" hidden></div>
                 </div>
+
+                <!-- Practice tab: for now just a launcher (topic-aware deep
+                     link into Practice's Tree view — see getPracticeUrl() in
+                     app.js). Read/Flashcards/MCQ/Future for this topic all
+                     live on that page now; nothing is duplicated in here. -->
+                <div id="right-tab-practice" class="right-tab-view" hidden>
+                    <div class="right-tab-action-row">
+                        <button type="button" id="practice-open-newtab" class="right-tab-newtab-btn">
+                            Open in new tab ↗
+                        </button>
+                    </div>
+                    <p class="right-tab-practice-note">Opens this topic's Read, Flashcards, MCQ and Future tools on the Practice page.</p>
+                </div>
             </aside>
 
         </section>
@@ -199,7 +197,6 @@
         <nav class="app-footer-nav" aria-label="Footer navigation">
             <span class="app-footer-current" aria-current="page">Home</span>
             <a href="index-directory.html">Index</a>
-            <a href="mcq.html">MCQ Practice</a>
             <a href="practice.html">Practice</a>
         </nav>
         <div class="app-footer-copy">© 2026 Notebook.</div>
