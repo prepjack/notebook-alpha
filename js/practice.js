@@ -322,6 +322,10 @@ function params() {
 function topicParam() {
     return params().get("topic") || "";
 }
+function boxParam() {
+    const raw = params().get("box") || "";
+    return SQUARE_KINDS.indexOf(raw) === -1 ? "" : raw;
+}
 function isMobile() {
     return window.innerWidth <= MOBILE_MAX;
 }
@@ -1038,6 +1042,8 @@ function treeHierarchyListHtml() {
         nodeAutoSelected = true;
         if (highlight && nodesById[highlight]) {
             selectedNode = highlight;
+            const box = boxParam();
+            if (box) expandedSquare = box; // ?box=flashcards etc. — see squareGridHtml
             // Deep link (?topic=): phones only show one screen at a
             // time, so jump straight to the detail screen the link
             // actually points at, same as this page did before the

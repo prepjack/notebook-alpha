@@ -3015,7 +3015,7 @@ function createTreeNode(node, depth = 0) {
         refreshStructureSelection(node);
         renderTopic(node);
         renderResources(node);
-        renderMcqs(node);
+        renderPracticeTabStatus(node);
         label.scrollIntoView({ block: "nearest" });
     });
 
@@ -3115,14 +3115,24 @@ function renderStudyTree(data) {
     });
 }
 
-function renderMcqs(node) { /* MCQ practice is handled by mcq.html. */ }
+// MCQ practice itself lives on mcq.html / practice.html — this page's
+// own MCQ-related rendering is just the read-only status row inside
+// the Practice tab; see renderPracticeTabStatus() below.
 
 /* =========================================================
    ALPHA-PLUS — RIGHT PANEL: REFERENCES | INDEX | PRACTICE TABS
-   Practice opens the dedicated practice.html page in a new tab
-   (deep-linked into its Tree view, this topic pre-selected) —
-   Read/Flashcards/MCQ/Future all live there now, so nothing is
-   duplicated in an iframe here the way MCQ briefly was.
+   Practice shows a compact, READ-ONLY status line for each of the
+   4 practice aspects (Read/Flashcards/MCQ/Future) for whichever
+   topic is open — no tool is embedded or duplicated here, each
+   row's "Open →" link is a deep link into practice.html's Tree
+   view with that one box pre-expanded (?box=<kind> — see
+   boxParam() in practice.js). The 3 small status functions below
+   (homeReadStat/homeMcqAttemptedCount/homeMcqTotal) deliberately
+   mirror practice.js's own readPanelState/mcqEventStats/
+   fetchMcqTotalForTopic — same event-log/API shape, reimplemented
+   here read-only rather than shared, same as getNodeLevelLabel
+   earlier: this page and practice.html are two different owners
+   of their own small pieces of UI, not one shared module.
    The Index tab keeps its existing in-panel behaviour and also
    gets an "Open in new tab" action, which reopens this same
    notebook page with the Index tab pre-selected (Index has no
@@ -3130,13 +3140,137 @@ function renderMcqs(node) { /* MCQ practice is handled by mcq.html. */ }
    the SAME tree/content the Table of Contents already renders).
    ========================================================= */
 
-function getPracticeUrl() {
-    const topicId = selectedTopicId ||
+function getPracticeUrl(box, topicIdOverride) {
+    const topicId = topicIdOverride || selectedTopicId ||
         findFirstTopic(window.__studyData?.subjects)?.id;
 
-    return topicId
+    let url = topicId
         ? `practice.html?view=tree&topic=${encodeURIComponent(topicId)}`
         : "practice.html?view=tree";
+    if (box && topicId) url += `&box=${encodeURIComponent(box)}`;
+    return url;
+}
+
+// Same 120s judgment-call threshold as practice.js's
+// READ_CONTINUE_CEILING_SECS — see that file's comment for why.
+const HOME_READ_CONTINUE_CEILING_SECS = 120;
+
+function homeReadStat(topicId) {
+    const events = (window.EventLog ? window.EventLog.readLog() : [])
+        .filter(e => e && e.type === "read" && e.topicId === topicId);
+    if (!events.length) return "Not opened yet";
+    const last = events.reduce((a, b) => (b.t > a.t ? b : a));
+    if ((Number(last.secs) || 0) < HOME_READ_CONTINUE_CEILING_SECS) return "Continue reading";
+    const days = Math.floor((Date.now() - last.t) / 86400000);
+    return "Last read " + (days <= 0 ? "today" : days + (days === 1 ? " day" : " days") + " ago");
+}
+
+// Latest attempt per question wins — same de-dupe as mcqEventStats,
+// so re-answering a question doesn't inflate the "attempted" count.
+function homeMcqAttemptedCount(topicId) {
+    const events = (window.EventLog ? window.EventLog.readLog() : [])
+        .filter(e => e && e.type === "mcq" && e.topicId === topicId);
+    const latestByQuestion = new Map();
+    events.forEach(e => {
+        const prev = latestByQuestion.get(e.questionId);
+        if (!prev || e.t > prev.t) latestByQuestion.set(e.questionId, e);
+    });
+    return latestByQuestion.size;
+}
+
+// The MCQ *total* needs a network call (no local source for it) — cached
+// per topic per page load, same reasoning as practice.js's own cache.
+const homeMcqTotalCache = new Map();
+
+async function homeMcqTotal(topicId) {
+    if (homeMcqTotalCache.has(topicId)) return homeMcqTotalCache.get(topicId);
+    let total = null;
+    try {
+        const res = await fetch(GOOGLE_SHEET_API + "?action=get_mcqs&node_id=" + encodeURIComponent(topicId));
+        if (!res.ok) throw new Error("get_mcqs failed (" + res.status + ")");
+        const data = await res.json();
+        const rows = (data && data.mcqs) || [];
+        total = rows.filter(r => String(r.status || "").trim().toLowerCase() !== "archived").length;
+    } catch (err) {
+        total = null; // unknown, not zero — the row shows "—" rather than a false 0
+    }
+    homeMcqTotalCache.set(topicId, total);
+    return total;
+}
+
+function practiceTabRowHtml(title, stat, box, topicId) {
+    // "Read" already lives right here on this page (the middle panel) —
+    // sending it to practice.html would be a pointless detour. Instead
+    // this nudges the reader up to the Start/End Read controls, in
+    // place. (No reading-history view exists yet to link to either —
+    // when one does, this is the row that should point at it.)
+    // Flashcards/MCQ are real practice.html tools with nothing to show
+    // here, so those stay "Open →" deep links same as before.
+    let action = "";
+    if (box === "read") {
+        action = '<button type="button" class="practice-tab-row-open" data-read-nudge="1">Go to Read ↑</button>';
+    } else if (box) {
+        action = `<a class="practice-tab-row-open" href="${getPracticeUrl(box, topicId)}" target="_blank" rel="noopener">Open →</a>`;
+    }
+    return (
+        '<div class="practice-tab-row">' +
+            '<div class="practice-tab-row-main">' +
+                `<div class="practice-tab-row-title">${title}</div>` +
+                `<div class="practice-tab-row-stat">${stat}</div>` +
+            "</div>" +
+            action +
+        "</div>"
+    );
+}
+
+// Scrolls the Start/End Read controls (up in the content panel's own
+// sticky heading) into view and briefly flashes them — same "look
+// here" pattern as .rc-index-term-flash for a jumped-to index term.
+function nudgeToReadControls() {
+    const heading = document.querySelector(".content-panel-heading");
+    if (!heading) return;
+    heading.scrollIntoView({ behavior: "smooth", block: "start" });
+    heading.classList.remove("reading-nudge-flash");
+    void heading.offsetWidth; // restart the animation if clicked again quickly
+    heading.classList.add("reading-nudge-flash");
+    setTimeout(() => heading.classList.remove("reading-nudge-flash"), 1600);
+}
+
+document.getElementById("right-tab-practice")?.addEventListener("click", event => {
+    if (event.target.closest("[data-read-nudge]")) nudgeToReadControls();
+});
+
+function renderPracticeTabStatus(node) {
+    const container = document.getElementById("practice-tab-status");
+    if (!container || !node || !node.id) return;
+    const topicId = node.id;
+
+    const readStat = homeReadStat(topicId);
+
+    const fcSummary = window.Flashcards ? window.Flashcards.getBoxSummary(topicId) : null;
+    const fcStat = !fcSummary
+        ? "No deck yet"
+        : fcSummary.readyTotal > 0
+            ? fcSummary.readyTotal + (fcSummary.readyTotal === 1 ? " card ready" : " cards ready")
+            : "Nothing ready";
+
+    const attempted = homeMcqAttemptedCount(topicId);
+    const cachedTotal = homeMcqTotalCache.has(topicId) ? homeMcqTotalCache.get(topicId) : undefined;
+    const totalLabel = cachedTotal === undefined ? "…" : (cachedTotal == null ? "—" : String(cachedTotal));
+
+    container.innerHTML =
+        practiceTabRowHtml("Read", readStat, "read", topicId) +
+        practiceTabRowHtml("Flashcards", fcStat, "flashcards", topicId) +
+        practiceTabRowHtml("MCQ", attempted + " / " + totalLabel + " attempted", "mcq", topicId) +
+        practiceTabRowHtml("Future", "Coming soon", null, topicId);
+
+    // First look at this topic this page load: total isn't cached yet —
+    // fetch it, then repaint (only if still looking at the same topic).
+    if (cachedTotal === undefined) {
+        homeMcqTotal(topicId).then(() => {
+            if (selectedTopicId === topicId) renderPracticeTabStatus(node);
+        });
+    }
 }
 
 function initRightPanelTabs() {
@@ -3156,6 +3290,10 @@ function selectRightPanelTab(tab) {
     document.getElementById("right-tab-index").hidden = tab !== "index";
     document.getElementById("right-tab-practice").hidden = tab !== "practice";
 
+    if (tab === "practice" && selectedTopicNode) {
+        renderPracticeTabStatus(selectedTopicNode);
+    }
+
     if (tab === "index") {
         const query = document.getElementById("index-search-input")?.value.trim().toLowerCase() || "";
         if (indexTabScope === "global") {
@@ -3168,10 +3306,6 @@ function selectRightPanelTab(tab) {
 
 document.getElementById("index-open-newtab")?.addEventListener("click", () => {
     window.open("index-directory.html", "_blank", "noopener");
-});
-
-document.getElementById("practice-open-newtab")?.addEventListener("click", () => {
-    window.open(getPracticeUrl(), "_blank", "noopener");
 });
 
 /* =========================================================
@@ -4139,7 +4273,7 @@ async function startApp() {
     if (firstTopicNode) {
         renderTopic(firstTopicNode);
         renderResources(firstTopicNode);
-        renderMcqs(firstTopicNode);
+        renderPracticeTabStatus(firstTopicNode);
     }
 
     const params = new URLSearchParams(window.location.search);

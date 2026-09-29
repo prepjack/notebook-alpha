@@ -916,11 +916,67 @@ body.resizing-panels .workspace {
     background: var(--paper);
 }
 
-.right-tab-practice-note {
-    margin: 0;
-    padding: 2px 2px;
-    font: 13px/1.6 Arial, sans-serif;
+.practice-tab-status {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.practice-tab-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--paper);
+}
+
+.practice-tab-row-main {
+    min-width: 0;
+}
+
+.practice-tab-row-title {
+    font: 700 12px Arial, sans-serif;
+    color: var(--text);
+    text-transform: uppercase;
+    letter-spacing: .03em;
+}
+
+.practice-tab-row-stat {
+    margin-top: 2px;
+    font: 13px/1.4 Arial, sans-serif;
     color: var(--muted);
+}
+
+.practice-tab-row-open {
+    flex-shrink: 0;
+    padding: 5px 10px;
+    border: 1px solid #9bb2a2;
+    border-radius: 7px;
+    background: var(--green-soft);
+    color: var(--green);
+    text-decoration: none;
+    cursor: pointer;
+    font: 700 11px Arial, sans-serif;
+    letter-spacing: .02em;
+    white-space: nowrap;
+}
+
+.practice-tab-row-open:hover {
+    background: #dce8de;
+}
+
+/* The Read row's action is a <button> (no navigation — see
+   nudgeToReadControls() in app.js), Flashcards/MCQ's are <a> deep
+   links; .practice-tab-row-open covers both look the same either way. */
+.content-panel-heading.reading-nudge-flash {
+    animation: readingNudgeFlash 1.6s ease;
+}
+@keyframes readingNudgeFlash {
+    0% { background: #ffe9a8; }
+    100% { background: transparent; }
 }
 
 /* =========================================================

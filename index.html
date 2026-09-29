@@ -170,17 +170,14 @@
                     <div id="index-az-list" class="index-az-list" hidden></div>
                 </div>
 
-                <!-- Practice tab: for now just a launcher (topic-aware deep
-                     link into Practice's Tree view — see getPracticeUrl() in
-                     app.js). Read/Flashcards/MCQ/Future for this topic all
-                     live on that page now; nothing is duplicated in here. -->
+                <!-- Practice tab: a read-only status line per aspect
+                     (Read/Flashcards/MCQ/Future) for whichever topic is
+                     open — filled by renderPracticeTabStatus() in
+                     app.js. Each row's "Open →" is a topic + box deep
+                     link into Practice's Tree view; nothing is embedded
+                     or duplicated here. -->
                 <div id="right-tab-practice" class="right-tab-view" hidden>
-                    <div class="right-tab-action-row">
-                        <button type="button" id="practice-open-newtab" class="right-tab-newtab-btn">
-                            Open in new tab ↗
-                        </button>
-                    </div>
-                    <p class="right-tab-practice-note">Opens this topic's Read, Flashcards, MCQ and Future tools on the Practice page.</p>
+                    <div id="practice-tab-status" class="practice-tab-status"></div>
                 </div>
             </aside>
 
