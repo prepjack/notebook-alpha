@@ -542,6 +542,17 @@ function flagContentRemoved(data) {
   return { success: true, node_id: nodeId, content_core_flagged_orphaned: flagged };
 }
 
+// Standard: sheet mein correct_option hamesha 1-4 (1 = pehla option).
+// Letters (A-D) bhi accept karta hai, par 1-4 mein badalkar likhta hai.
+// Invalid/0 ko "" bana deta hai, taaki galat data chupke se na baithe.
+function normalizeCorrectOption_(v) {
+  const s = String(v === undefined || v === null ? "" : v).trim().toUpperCase();
+  if (/^[1-4]$/.test(s)) return Number(s);
+  const i = "ABCD".indexOf(s);
+  if (s.length === 1 && i >= 0) return i + 1;
+  return "";
+}
+
 function saveMcq(data) {
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -590,7 +601,7 @@ function saveMcq(data) {
     option_b: data.option_b || "",
     option_c: data.option_c || "",
     option_d: data.option_d || "",
-    correct_option: data.correct_option !== undefined ? data.correct_option : "0",
+    correct_option: data.correct_option !== undefined ? normalizeCorrectOption_(data.correct_option) : 1,
     explanation: data.explanation || "",
     status: data.status || "published",
     author_id: data.author_id || "author",
@@ -1814,7 +1825,8 @@ function updateMcqContent(data) {
     if (fields[col] === undefined) return;
     const colIndex = headers.indexOf(col);
     if (colIndex === -1) return;
-    sheet.getRange(targetRow, colIndex + 1).setValue(fields[col]);
+    const val = (col === "correct_option") ? normalizeCorrectOption_(fields[col]) : fields[col];
+    sheet.getRange(targetRow, colIndex + 1).setValue(val);
     changed.push(col);
   });
 
@@ -1832,6 +1844,25 @@ function updateMcqContent(data) {
   };
 }
 
+// Ek node aur uske saare descendants ke node_id (parent_id chain se).
+function getDescendantNodeIds_(ss, rootId) {
+  const nodes = getSheetData(ss, "Nodes");
+  const children = {};
+  nodes.forEach(function(n) {
+    const p = String(n.parent_id || "");
+    (children[p] = children[p] || []).push(String(n.node_id));
+  });
+  const out = new Set([String(rootId)]);
+  const stack = [String(rootId)];
+  while (stack.length) {
+    const id = stack.pop();
+    (children[id] || []).forEach(function(c) {
+      if (!out.has(c)) { out.add(c); stack.push(c); }
+    });
+  }
+  return out;
+}
+
 function handleGetMcqs(params) {
   params = params || {};
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -1840,8 +1871,16 @@ function handleGetMcqs(params) {
   const passages = getSheetDataSafe_(ss, "MCQ_Passages");
   const collections = getSheetDataSafe_(ss, "Collections");
 
+  // Orphaned (deleted topic / missing Drive folder) rows kabhi practice mein nahi aani chahiye.
+  mcqs = mcqs.filter(row => !row.orphaned_at);
+
   if (params.node_id) {
-    mcqs = mcqs.filter(row => String(row.node_id) === String(params.node_id));
+    if (String(params.include_descendants) === "1") {
+      const ids = getDescendantNodeIds_(ss, params.node_id);
+      mcqs = mcqs.filter(row => ids.has(String(row.node_id)));
+    } else {
+      mcqs = mcqs.filter(row => String(row.node_id) === String(params.node_id));
+    }
   }
   if (params.collection_id) {
     mcqs = mcqs.filter(row => String(row.collection_id) === String(params.collection_id));
@@ -3131,6 +3170,10 @@ function saveMcqsBulk(data) {
     delete incoming.collection_id_ref; // not a sheet column — resolved above
     delete incoming.warnings;          // preview-only metadata, never written
 
+        if (incoming.correct_option !== undefined) {
+      incoming.correct_option = normalizeCorrectOption_(incoming.correct_option);
+    }
+
     const existingRow = existingRowByEntity[mcq.mcq_id];
 
     if (existingRow) {
@@ -3535,14 +3578,22 @@ function progressEntryTs_(entry) {
   return isNaN(d) ? 0 : d;
 }
 
-// Is this a believable entry for this namespace? Flashcards are strict;
-// other (future) namespaces only need to be plain objects.
+// Accepts EITHER shape: the current one (dueAt, a positive epoch-ms
+// number) or the pre-upgrade one (dueDate, a YYYY-MM-DD string) — same
+// dual acceptance as the client's isValidEntry() in flashcards.js, so
+// an old browser tab that hasn't refreshed yet, or an old Export
+// backup someone imports, still syncs/merges fine. Whatever shape
+// arrives is stored as-is here (this file is deliberately a dumb
+// merge-by-ts store, same as every other namespace) — the CLIENT is
+// what normalizes everything to the new shape on read via dueAtOf().
 function isValidProgressEntry_(ns, entry) {
   if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
   if (ns === "flashcards") {
     const box = Number(entry.box);
-    return Number.isInteger(box) && box >= 1 && box <= 5 &&
-      /^\d{4}-\d{2}-\d{2}$/.test(String(entry.dueDate || ""));
+    if (!Number.isInteger(box) || box < 1 || box > 5) return false;
+    const hasDueAt = Number.isFinite(Number(entry.dueAt)) && Number(entry.dueAt) > 0;
+    const hasLegacyDate = /^\d{4}-\d{2}-\d{2}$/.test(String(entry.dueDate || ""));
+    return hasDueAt || hasLegacyDate;
   }
   return true;
 }
