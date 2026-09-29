@@ -76,11 +76,11 @@
      @assertion: <text>           (required only for assertion_reason)
      @reason: <text>              (required only for assertion_reason)
      @options:
-     A) <text>
-     B) <text>
-     C) <text>
-     D) <text>
-     @correct: A|B|C|D            (required)
+     1) <text>                    (legacy A) B) C) D) also accepted)
+     2) <text>
+     3) <text>
+     4) <text>
+     @correct: 1|2|3|4            (required; legacy A-D also accepted)
      @explanation / @difficulty / @language / @tags / @description /
      @exam / @year / @session / @source / @source_question_no  (all optional)
      @end
@@ -198,8 +198,13 @@
         String(rawOptionsText || "")
             .split("\n")
             .forEach(function (line) {
-                const m = line.trim().match(/^([A-Da-d])\)\s*(.*)$/);
-                if (m) result[m[1].toUpperCase()] = m[2];
+                // Accepts "1) text" (standard) and legacy "A) text".
+                // Result keys stay A-D internally (option_a..option_d).
+                const m = line.trim().match(/^([1-4A-Da-d])\)\s*(.*)$/);
+                if (m) {
+                    const k = m[1].toUpperCase();
+                    result["1234".indexOf(k) >= 0 ? "ABCD"["1234".indexOf(k)] : k] = m[2];
+                }
             });
         return result;
     }
@@ -211,7 +216,8 @@
         D: "A is false, but R is true"
     };
 
-    const CORRECT_LETTER_TO_INDEX_ = { A: 0, B: 1, C: 2, D: 3 };
+    // Standard: sheet stores 1-4 (1 = first option). Legacy A-D is still accepted.
+    const CORRECT_TO_NUMBER_ = { "1": 1, "2": 2, "3": 3, "4": 4, A: 1, B: 2, C: 3, D: 4 };
 
     // Explicit @question_no values are kept as numbers when they
     // parse cleanly (matches how the rest of the app treats numeric
@@ -317,13 +323,12 @@
             warnings.push("missing @options");
         }
 
-        // correct option — stored zero-based (0=A,1=B,2=C,3=D), matching
-        // the convention already used elsewhere in this project (see
-        // google-sheet-template/README.txt and Code.gs saveMcq()).
-        const correctLetter = getField_(fields, "correct").toUpperCase();
+        // correct option — stored as 1-4 (1 = first option). Accepts
+        // "1"-"4" (standard) or legacy "A"-"D" and always outputs 1-4.
+        const correctRaw = getField_(fields, "correct").toUpperCase();
         let correctOption = "";
-        if (Object.prototype.hasOwnProperty.call(CORRECT_LETTER_TO_INDEX_, correctLetter)) {
-            correctOption = CORRECT_LETTER_TO_INDEX_[correctLetter];
+        if (Object.prototype.hasOwnProperty.call(CORRECT_TO_NUMBER_, correctRaw)) {
+            correctOption = CORRECT_TO_NUMBER_[correctRaw];
         } else {
             warnings.push("missing @correct");
         }

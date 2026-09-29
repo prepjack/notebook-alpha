@@ -29,6 +29,11 @@ let markWrong = 0;
 // Phase 4 — MCQ Bank / Add MCQs
 let mcqApiData = { nodes: [], mcqs: [] };
 let mcqStudyData = { subjects: [] };
+
+// ROLL-UP (2026-09): when on, opening any node (subject/unit/chapter/topic)
+// also loads the MCQs of every sub-topic below it. MCQs are still saved once,
+// on the topic they were added to; nothing is copied to parents.
+let mcqIncludeDescendants = localStorage.getItem("alpha_mcq_include_sub") !== "0";
 let currentMcqTopic = null;
 let mcqTagSuggestions = [];
 
@@ -118,7 +123,8 @@ async function loadStudyTree() {
 async function loadMcqsForTopic(topicId) {
 
     const url = MCQ_GOOGLE_SHEET_API + "?action=get_mcqs" +
-        (topicId ? "&node_id=" + encodeURIComponent(topicId) : "");
+        (topicId ? "&node_id=" + encodeURIComponent(topicId) : "") +
+        (topicId && mcqIncludeDescendants ? "&include_descendants=1" : "");
 
     const response = await fetch(url);
 
@@ -142,18 +148,24 @@ async function loadMcqsForTopic(topicId) {
 // Row -> practice-view MCQ object. Extracted out of the old
 // "Attach MCQs" loop so both loadMcqsForTopic() and the refresh path
 // in confirmSaveMcqs() share one mapping.
+// STANDARD (2026-09): the sheet stores correct_option as 1-4 (1 = first
+// option). Inside the app, `answer` stays a 0-based index so that
+// options[answer] and every `selected === mcq.answer` check keep working.
+// These two helpers are the ONLY place that converts between the two.
+// Legacy A-D letters are still read (as 1-4) so an old cell never breaks.
+function correctToIndex(value) {
+    const s = String(value ?? "").trim().toUpperCase();
+    if (/^[1-4]$/.test(s)) return Number(s) - 1;
+    const i = "ABCD".indexOf(s);
+    return (s.length === 1 && i >= 0) ? i : 0;
+}
+function indexToCorrect(index) {
+    return Number(index) + 1;
+}
+
 function mapMcqRow(row) {
 
-    const correctOption = String(row.correct_option || "")
-        .trim()
-        .toUpperCase();
-
-    const correctIndex = {
-        A: 0,
-        B: 1,
-        C: 2,
-        D: 3
-    }[correctOption];
+    const correctIndex = correctToIndex(row.correct_option);
 
     return {
         id: row.mcq_id,
@@ -293,6 +305,15 @@ function convertApiDataToMcqData(apiData) {
     return {
         subjects: subjects
     };
+}
+
+// Path of a question's own topic (Subject › Unit › Chapter › Topic), shown
+// small above each question. Long paths keep only the last 3 levels.
+function mcqCrumbHtml(nodeId) {
+    const titles = getMcqNodePath(nodeId).map(n => n.title);
+    if (!titles.length) return "";
+    const shown = titles.length > 4 ? ["…"].concat(titles.slice(-3)) : titles;
+    return `<div class="mcq-crumb" title="${mcqEscapeHtml(titles.join(" › "))}" style="font-size:0.78em;color:#6b7a70;margin:2px 0 8px;line-height:1.4;">${shown.map(t => escapeHtml(t)).join(" › ")}</div>`;
 }
 
 function findTopic(nodes, id) {
@@ -682,6 +703,7 @@ function renderMcqView() {
                         <div class="mcq-question-number mcq-question-heading">
                             <span>Question ${i + 1} of ${currentMcqs.length}</span>
                         </div>
+                        ${mcqCrumbHtml(q.node_id)}
                         ${q.languages.length > 1 ? `
                             <div class="mcq-lang-toggle" role="group" aria-label="Question language">
                                 ${q.languages.map(lang => `
@@ -759,6 +781,7 @@ function renderMcqView() {
                 <span>Question ${currentMcqIndex + 1} of ${currentMcqs.length}</span>
                 <button type="button" class="mcq-edit-meta" id="mcq-edit-meta" title="Edit question metadata" aria-label="Edit question metadata">✏️</button>
             </div>
+            ${mcqCrumbHtml(mcq.node_id)}
 
             ${mcq.languages.length > 1 ? `
                 <div class="mcq-lang-toggle" role="group" aria-label="Question language">
@@ -1233,11 +1256,11 @@ For each simple MCQ, use:
 @topic: <node_id>
 @question: <question text>
 @options:
-A) <option A>
-B) <option B>
-C) <option C>
-D) <option D>
-@correct: A|B|C|D
+1) <option 1>
+2) <option 2>
+3) <option 3>
+4) <option 4>
+@correct: 1|2|3|4
 @explanation: <brief explanation>
 @end`,
 
@@ -1247,10 +1270,10 @@ For each assertion–reasoning MCQ, use:
 @topic: <node_id>
 @assertion: <Assertion (A)>
 @reason: <Reason (R)>
-@correct: A|B|C|D
+@correct: 1|2|3|4
 @explanation: <brief explanation>
 @end
-The parser supplies the standard A–D Assertion–Reasoning options automatically, so do not invent replacement option text unless specifically required.`,
+The parser supplies the standard four Assertion–Reasoning options (1–4) automatically, so do not invent replacement option text unless specifically required.`,
 
     comprehension: `COMPREHENSION FORMAT
 For a comprehension set, put the passage before its questions:
@@ -1267,11 +1290,11 @@ Then create each question as a normal question block and reference that passage:
 @passage: p001
 @question: <question based on the passage>
 @options:
-A) <option A>
-B) <option B>
-C) <option C>
-D) <option D>
-@correct: A|B|C|D
+1) <option 1>
+2) <option 2>
+3) <option 3>
+4) <option 4>
+@correct: 1|2|3|4
 @explanation: <brief explanation>
 @end`,
 
@@ -1282,11 +1305,11 @@ When a question depends on a table or data interpretation, keep the table/data i
 @question:
 <question and any required table/data>
 @options:
-A) <option A>
-B) <option B>
-C) <option C>
-D) <option D>
-@correct: A|B|C|D
+1) <option 1>
+2) <option 2>
+3) <option 3>
+4) <option 4>
+@correct: 1|2|3|4
 @explanation: <brief calculation/reasoning>
 @end`
 };
@@ -1815,11 +1838,11 @@ function openAddMcqModal() {
 @assertion: Assertion text
 @reason: Reason text
 @options:
-A) Option A
-B) Option B
-C) Option C
-D) Option D
-@correct: A
+1) Option 1
+2) Option 2
+3) Option 3
+4) Option 4
+@correct: 1
 @explanation: Explanation
 @difficulty: easy | medium | hard
 @language: en | hi | Hinglish | Mixed
@@ -1975,7 +1998,7 @@ function isMcqFatal(row) {
     const warnings = row.warnings || [];
     const text = warnings.join(" | ").toLowerCase();
     return !row.question || !row.option_a || !row.option_b || !row.option_c || !row.option_d ||
-        !/^[0-3]$/.test(String(row.correct_option)) ||
+        !/^[1-4]$/.test(String(row.correct_option)) ||
         text.includes("missing @question") ||
         text.includes("missing @options") ||
         text.includes("missing @correct");
@@ -2269,7 +2292,8 @@ async function confirmSaveMcqs() {
         alert(`${added} questions added, ${updated} updated.`);
 
         // Refresh practice data when the current topic is affected.
-        if (selected.some(r => r.node_id === currentMcqTopic?.id)) {
+        if (selected.some(r => r.node_id === currentMcqTopic?.id ||
+            (mcqIncludeDescendants && getMcqNodePath(r.node_id).some(n => n.id === currentMcqTopic?.id)))) {
             try {
                 const freshTree = await loadStudyTree();
                 mcqStudyData = freshTree;
@@ -2361,19 +2385,19 @@ function openMcqMetaModal(mcq) {
                 <label for="mcq-edit-question">Question</label>
                 <textarea id="mcq-edit-question" rows="3">${mcqEscapeHtml(mcq.question || "")}</textarea>
 
-                <label for="mcq-edit-option-a">Option A</label>
+                <label for="mcq-edit-option-a">Option 1</label>
                 <input id="mcq-edit-option-a" type="text" value="${mcqEscapeHtml(mcq.options?.[0] || "")}">
-                <label for="mcq-edit-option-b">Option B</label>
+                <label for="mcq-edit-option-b">Option 2</label>
                 <input id="mcq-edit-option-b" type="text" value="${mcqEscapeHtml(mcq.options?.[1] || "")}">
-                <label for="mcq-edit-option-c">Option C</label>
+                <label for="mcq-edit-option-c">Option 3</label>
                 <input id="mcq-edit-option-c" type="text" value="${mcqEscapeHtml(mcq.options?.[2] || "")}">
-                <label for="mcq-edit-option-d">Option D</label>
+                <label for="mcq-edit-option-d">Option 4</label>
                 <input id="mcq-edit-option-d" type="text" value="${mcqEscapeHtml(mcq.options?.[3] || "")}">
 
                 <label for="mcq-edit-correct">Correct Option</label>
                 <select id="mcq-edit-correct">
-                    ${["A", "B", "C", "D"].map((letter, i) =>
-                        `<option value="${letter}" ${mcq.answer === i ? "selected" : ""}>${letter}</option>`
+                    ${[1, 2, 3, 4].map((num, i) =>
+                        `<option value="${num}" ${mcq.answer === i ? "selected" : ""}>${num}</option>`
                     ).join("")}
                 </select>
 
@@ -2509,7 +2533,7 @@ async function saveMcqMeta(mcq) {
     const optionB = document.getElementById("mcq-edit-option-b")?.value.trim() || "";
     const optionC = document.getElementById("mcq-edit-option-c")?.value.trim() || "";
     const optionD = document.getElementById("mcq-edit-option-d")?.value.trim() || "";
-    const correctLetter = document.getElementById("mcq-edit-correct")?.value || "A";
+    const correctNumber = Number(document.getElementById("mcq-edit-correct")?.value) || 1;
     const explanation = document.getElementById("mcq-edit-explanation")?.value.trim() || "";
 
     const contentFields = {};
@@ -2518,8 +2542,7 @@ async function saveMcqMeta(mcq) {
     if (optionB !== String(mcq.options?.[1] || "")) contentFields.option_b = optionB;
     if (optionC !== String(mcq.options?.[2] || "")) contentFields.option_c = optionC;
     if (optionD !== String(mcq.options?.[3] || "")) contentFields.option_d = optionD;
-    const oldCorrectLetter = ["A", "B", "C", "D"][mcq.answer ?? 0];
-    if (correctLetter !== oldCorrectLetter) contentFields.correct_option = correctLetter;
+    if (correctNumber !== indexToCorrect(mcq.answer ?? 0)) contentFields.correct_option = correctNumber;
     if (explanation !== String(mcq.explanation || "")) contentFields.explanation = explanation;
 
     if (!Object.keys(fields).length && !Object.keys(contentFields).length) {
@@ -2580,3 +2603,34 @@ window.initMobileDrawers?.({
         { panel: "mcq-navigator", label: "Questions", icon: "☷", side: "right" }
     ]
 });
+
+/* ROLL-UP TOGGLE — "Include sub-topics" checkbox next to Paper Sources. */
+(function setupMcqSubtopicToggle() {
+    const anchor = document.getElementById("mcq-paper-sources-btn");
+    if (!anchor || document.getElementById("mcq-include-sub")) return;
+
+    anchor.insertAdjacentHTML("afterend",
+        `<label id="mcq-include-sub-wrap" style="display:inline-flex;align-items:center;gap:6px;margin-left:10px;font-size:0.85em;cursor:pointer;">` +
+        `<input type="checkbox" id="mcq-include-sub"> Include sub-topics</label>`);
+
+    const cb = document.getElementById("mcq-include-sub");
+    cb.checked = mcqIncludeDescendants;
+
+    cb.addEventListener("change", async () => {
+        mcqIncludeDescendants = cb.checked;
+        localStorage.setItem("alpha_mcq_include_sub", cb.checked ? "1" : "0");
+        if (!currentMcqTopic) return;
+        try {
+            allLoadedMcqs = await loadMcqsForTopic(currentMcqTopic.id);
+            currentMcqIndex = 0;
+            currentCollectionView = null;
+            selectedMcqTags = new Set();
+            selectedMcqLanguage = "";
+            mcqActiveLanguageByGroup = new Map();
+            applyMcqPracticeFilters();
+        } catch (err) {
+            console.warn("Include sub-topics reload failed:", err);
+            alert("Could not reload MCQs. Please try again.");
+        }
+    });
+})();
