@@ -1072,7 +1072,10 @@ function treeHierarchyListHtml() {
         // Just the name + its level tag — no chips, no "N cards ready"
         // glance. That's deliberately gone: this pane is pure navigation
         // now, its detail lives in the right panel (treeDetailHtml).
-        const title = '<div class="practice-row-title practice-row-selectable" data-select-node="' + escapeHtml(id) + '" aria-expanded="' + isSelected + '">' +
+        // title="": native hover tooltip with the full, untruncated name +
+        // level, same as the home page ToC (label.title in app.js).
+        const fullName = levelLabelForDepth(depth) + ": " + (n.title || "Untitled");
+        const title = '<div class="practice-row-title practice-row-selectable" data-select-node="' + escapeHtml(id) + '" title="' + escapeHtml(fullName) + '" aria-expanded="' + isSelected + '">' +
             '<span class="tree-level-label tree-level-label-' + levelSlugForDepth(depth) + '">' + escapeHtml(levelLabelForDepth(depth)) + '</span>' +
             '<span class="tree-node-title">' + escapeHtml(n.title || "Untitled") + "</span>" +
             "</div>";
