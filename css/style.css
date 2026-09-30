@@ -5522,3 +5522,49 @@ a.bottom-strip-btn.practice-open{
         width:100%;
     }
 }
+
+/* =========================================================
+   PRACTICE — MOBILE MENU AS DRAWER (2026-09-30)
+   Baaki pages (Home / MCQ / Index) jaisa. Right content hamesha full
+   width, left menu slide-in drawer; purana "← Menu" takeover band.
+   ========================================================= */
+@media (max-width:900px){
+    .practice-workspace{
+        display:block !important;
+    }
+    .practice-left,
+    .practice-shell.practice-detail-open .practice-left{
+        display:flex !important;
+        position:fixed !important;
+        top:92px !important;
+        bottom:0 !important;
+        left:0;
+        right:auto;
+        z-index:900;
+        width:min(86vw,360px) !important;
+        max-width:calc(100vw - 24px);
+        max-height:none !important;
+        height:auto !important;
+        margin:0 !important;
+        box-sizing:border-box;
+        overflow-x:hidden !important;
+        overflow-y:auto !important;
+        border-radius:0 10px 10px 0;
+        box-shadow:0 8px 28px rgba(25,35,29,.18);
+        transform:translateX(-105%);
+        visibility:hidden;
+        transition:transform .22s ease, visibility .22s ease;
+    }
+    .practice-left.mobile-drawer-open{
+        transform:translateX(0);
+        visibility:visible;
+    }
+    .practice-right,
+    .practice-shell.practice-detail-open .practice-right{
+        display:block !important;
+        margin:0;
+    }
+    .practice-back{
+        display:none !important;
+    }
+}

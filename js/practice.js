@@ -48,6 +48,9 @@ const PRACTICE_WIDTH_KEY = "practice:leftWidth";
 const PRACTICE_COLLAPSED_KEY = "practice:leftCollapsed";
 const MOBILE_MAX = 900;
 
+// Phones: the left menu is a slide-in drawer (see js/mobile-drawer.js).
+let mobileDrawers = null;
+
 const VIEW_HEADINGS = {
     plan: "PLAN TODAY",
     tree: "TREE VIEW",
@@ -1698,8 +1701,9 @@ function setMessage(text, kind) {
 }
 
 function showDetail(open) {
-    const shell = el("practice-shell");
-    if (shell) shell.classList.toggle("practice-detail-open", !!open);
+    // Phones: the menu is now a drawer and the right panel is always on
+    // screen, so "go to detail" just means "close the drawer".
+    if (open && mobileDrawers) mobileDrawers.closeAll();
 }
 
 function selectView(next, opts) {
@@ -2012,6 +2016,12 @@ function enablePanel() {
    ----------------------------------------------------- */
 
 async function initPracticePage() {
+    mobileDrawers = window.initMobileDrawers ? window.initMobileDrawers({
+        headerSelector: ".app-header",
+        breakpoint: MOBILE_MAX,
+        drawers: [{ panel: "practice-left", label: "Menu", icon: "☰", side: "left" }]
+    }) : null;
+
     enablePanel();
     bindEvents();
     setInterval(tickBoxTimers, 1000);
@@ -2021,6 +2031,8 @@ async function initPracticePage() {
     const startView = VIEW_HEADINGS[resolvedWanted] ? resolvedWanted : "tree";
     // On a phone, no ?view= means "show me the menu first".
     selectView(startView, { showDetail: !!wanted });
+    // Phone, no ?view=/?topic= in the link: show the menu first (as before).
+    if (!wanted && !topicParam() && isMobile()) mobileDrawers?.openPanel("practice-left");
 
     await loadTree();
     render();
