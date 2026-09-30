@@ -81,6 +81,8 @@
      3) <text>
      4) <text>
      @correct: 1|2|3|4            (required; legacy A-D also accepted)
+     @explanation: <concept + why the correct option is right>
+     @why_1 .. @why_4: <why THAT option is right / wrong>   (optional)
      @explanation / @difficulty / @language / @tags / @description /
      @exam / @year / @session / @source / @source_question_no  (all optional)
      @end
@@ -137,7 +139,7 @@
                 return;
             }
 
-            const tagMatch = trimmed.match(/^@([a-zA-Z_]+):\s?(.*)$/);
+            const tagMatch = trimmed.match(/^@([a-zA-Z0-9_]+):\s?(.*)$/);
 
             if (tagMatch) {
                 currentTag = tagMatch[1].toLowerCase();
@@ -395,7 +397,7 @@
             }
         }
 
-        return {
+        const built = {
             mcq_id: mcqId,
             _groupKey: groupKey,   // internal — consumed by the post-pass, never sent to the sheet
             _langSlug: langSlug,   // internal — consumed by the post-pass, never sent to the sheet
@@ -422,6 +424,16 @@
             source_question_no: getField_(fields, "source_question_no"),
             warnings: warnings
         };
+
+        // Per-option explanations (@why_1..@why_4 -> explanation_a..d).
+        // Only added when the tag is present and non-empty, so re-importing
+        // an older .md (or one without @why tags) never blanks notes that
+        // were already saved/edited in the sheet.
+        ["a", "b", "c", "d"].forEach(function (letter, i) {
+            const note = getField_(fields, "why_" + (i + 1));
+            if (note) built["explanation_" + letter] = note;
+        });
+        return built;
     }
 
     /* ---------------------------------------------------------

@@ -12,6 +12,11 @@ let attemptedQuestions = new Set();
 // Questions view share this same index-keyed state).
 let expandedExplanations = new Set();
 
+// The question body is now its own scroll area (footer strip stays put).
+// Remember what was last shown so Next/Previous scroll back to the top, while
+// picking an option (same question re-render) keeps the scroll position.
+let mcqLastScrollKey = "";
+
 // ALPHA-PLUS — main practice-panel display mode. "single" is the
 // original one-question-at-a-time view; "all" is a scrollable list
 // showing every question with its full options (question + 4 options),
@@ -178,6 +183,12 @@ function mapMcqRow(row) {
         ],
         answer: correctIndex ?? 0,
         explanation: row.explanation || "",
+        optionNotes: [
+            row.explanation_a || "",
+            row.explanation_b || "",
+            row.explanation_c || "",
+            row.explanation_d || ""
+        ],
         tags: row.tags || "",
         language: row.language || "",
         description: row.description || "",
@@ -309,6 +320,35 @@ function convertApiDataToMcqData(apiData) {
 
 // Path of a question's own topic (Subject › Unit › Chapter › Topic), shown
 // small above each question. Long paths keep only the last 3 levels.
+// Feedback body: the general explanation, then (if the sheet has per-option
+// notes) the note for what the learner picked, the correct option, and the
+// remaining options collapsed. Rows without notes show only `explanation`.
+function mcqFeedbackBodyHtml(q, sel) {
+    const general = q.explanation ? `<div>${escapeHtml(q.explanation)}</div>` : "";
+    const notes = q.optionNotes || [];
+    if (!notes.some(n => n)) return general;
+
+    const item = (i, tag) => notes[i] ? `
+        <div style="margin-top:8px;padding:8px 10px;border-left:3px solid ${i === q.answer ? "#2e7d4f" : "#b5533c"};background:rgba(0,0,0,0.03);border-radius:4px;">
+            <strong>${tag}Option ${i + 1}</strong><br>${escapeHtml(notes[i])}
+        </div>` : "";
+
+    const shown = new Set();
+    let html = general;
+    if (sel !== undefined && sel !== q.answer) {
+        html += item(sel, "Your choice — ");
+        shown.add(sel);
+    }
+    html += item(q.answer, sel === q.answer ? "Your choice · Correct — " : "Correct answer — ");
+    shown.add(q.answer);
+
+    const rest = [0, 1, 2, 3].filter(i => !shown.has(i)).map(i => item(i, "")).join("");
+    if (rest.trim()) {
+        html += `<details style="margin-top:8px;"><summary style="cursor:pointer;">Other options</summary>${rest}</details>`;
+    }
+    return html;
+}
+
 function mcqCrumbHtml(nodeId) {
     const titles = getMcqNodePath(nodeId).map(n => n.title);
     if (!titles.length) return "";
@@ -689,8 +729,13 @@ function renderMcqView() {
     // immediate correct/incorrect feedback for that question, and
     // re-renders so the right-panel grid stays in sync.
     if (mcqViewMode === "all") {
+        // The bottom strip stays in place in All Questions view (Previous/Next
+        // make no sense here) and shows live progress instead of vanishing.
         const footer = document.getElementById("mcq-question-footer");
-        if (footer) footer.innerHTML = "";
+        if (footer) {
+            footer.innerHTML = `<div style="font-size:0.9em;color:#55695c;padding:8px 4px;">Attempted ${attemptedQuestions.size} of ${currentMcqs.length} questions</div>`;
+        }
+        if (mcqLastScrollKey !== "all") { questionArea.scrollTop = 0; mcqLastScrollKey = "all"; }
         questionArea.innerHTML = `
             <div class="mcq-all-list">
                 ${currentMcqs.map((q, i) => {
@@ -735,7 +780,7 @@ function renderMcqView() {
                         ${answered && expanded ? `
                             <div class="mcq-feedback">
                                 <strong>${correct ? "Correct" : "Not correct"}</strong><br>
-                                ${escapeHtml(q.explanation || "")}
+                                ${mcqFeedbackBodyHtml(q, sel)}
                             </div>` : ""}
                     </div>`;
                 }).join("")}
@@ -778,18 +823,19 @@ function renderMcqView() {
     questionArea.innerHTML = `
         <div class="mcq-card-large">
             <div class="mcq-question-number mcq-question-heading">
-                <span>Question ${currentMcqIndex + 1} of ${currentMcqs.length}</span>
+                <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+                    <span>Question ${currentMcqIndex + 1} of ${currentMcqs.length}</span>
+                    ${mcq.languages.length > 1 ? `
+                        <div class="mcq-lang-toggle" role="group" aria-label="Question language" style="margin:0;">
+                            ${mcq.languages.map(lang => `
+                                <button type="button" class="mcq-lang-pill ${lang === mcq.activeLanguage ? "active" : ""}" data-lang="${escapeHtml(lang)}">${escapeHtml(lang)}</button>
+                            `).join("")}
+                        </div>
+                    ` : ""}
+                </div>
                 <button type="button" class="mcq-edit-meta" id="mcq-edit-meta" title="Edit question metadata" aria-label="Edit question metadata">✏️</button>
             </div>
             ${mcqCrumbHtml(mcq.node_id)}
-
-            ${mcq.languages.length > 1 ? `
-                <div class="mcq-lang-toggle" role="group" aria-label="Question language">
-                    ${mcq.languages.map(lang => `
-                        <button type="button" class="mcq-lang-pill ${lang === mcq.activeLanguage ? "active" : ""}" data-lang="${escapeHtml(lang)}">${escapeHtml(lang)}</button>
-                    `).join("")}
-                </div>
-            ` : ""}
 
             <div class="mcq-question-text">
                 ${escapeHtml(mcq.question)}
@@ -813,11 +859,14 @@ function renderMcqView() {
             ${attemptedQuestions.has(currentMcqIndex) && expandedExplanations.has(currentMcqIndex) ? `
                 <div id="mcq-feedback" class="mcq-feedback">
                     <strong>${selected === mcq.answer ? "Correct" : "Not correct"}</strong><br>
-                    ${escapeHtml(mcq.explanation || "")}
+                    ${mcqFeedbackBodyHtml(mcq, selected)}
                 </div>
             ` : ""}
         </div>
     `;
+
+    const scrollKey = "single:" + currentMcqIndex;
+    if (mcqLastScrollKey !== scrollKey) { questionArea.scrollTop = 0; mcqLastScrollKey = scrollKey; }
 
     const footer = document.getElementById("mcq-question-footer");
     if (footer) {
@@ -1261,7 +1310,11 @@ For each simple MCQ, use:
 3) <option 3>
 4) <option 4>
 @correct: 1|2|3|4
-@explanation: <brief explanation>
+@explanation: <2-3 sentences: the concept and why the correct option is right>
+@why_1: <why option 1 is right, or why it is wrong and what it actually refers to>
+@why_2: <same for option 2>
+@why_3: <same for option 3>
+@why_4: <same for option 4>
 @end`,
 
     assertion_reason: `ASSERTION–REASONING FORMAT
@@ -1271,7 +1324,11 @@ For each assertion–reasoning MCQ, use:
 @assertion: <Assertion (A)>
 @reason: <Reason (R)>
 @correct: 1|2|3|4
-@explanation: <brief explanation>
+@explanation: <2-3 sentences: the concept and why the correct option is right>
+@why_1: <why option 1 is right, or why it is wrong and what it actually refers to>
+@why_2: <same for option 2>
+@why_3: <same for option 3>
+@why_4: <same for option 4>
 @end
 The parser supplies the standard four Assertion–Reasoning options (1–4) automatically, so do not invent replacement option text unless specifically required.`,
 
@@ -1295,7 +1352,11 @@ Then create each question as a normal question block and reference that passage:
 3) <option 3>
 4) <option 4>
 @correct: 1|2|3|4
-@explanation: <brief explanation>
+@explanation: <2-3 sentences: the concept and why the correct option is right>
+@why_1: <why option 1 is right, or why it is wrong and what it actually refers to>
+@why_2: <same for option 2>
+@why_3: <same for option 3>
+@why_4: <same for option 4>
 @end`,
 
     table: `TABLE / DI FORMAT
@@ -1310,7 +1371,11 @@ When a question depends on a table or data interpretation, keep the table/data i
 3) <option 3>
 4) <option 4>
 @correct: 1|2|3|4
-@explanation: <brief calculation/reasoning>
+@explanation: <brief calculation/reasoning: how the correct option is reached>
+@why_1: <why option 1 is right, or the mistake that leads to it>
+@why_2: <same for option 2>
+@why_3: <same for option 3>
+@why_4: <same for option 4>
 @end`
 };
 
@@ -1579,6 +1644,8 @@ function buildMcqAiPrompt() {
         "- Every question must end with @end.",
         "- A genuinely required field must not be guessed. If source material does not support it, leave it out rather than fabricating it.",
         "- Keep question, option, correct answer, and explanation content faithful to the supplied source.",
+        "- @why_1 to @why_4 must each explain THAT specific option: why it is correct, or why it is wrong and what it actually refers to. Keep each to 1-2 sentences.",
+        "- Write @explanation and @why_1..@why_4 in the SAME language as the question.",
         "",
         "---",
         "FILE NAMING INSTRUCTION (for you, the human — not for the AI tool):",
@@ -1844,6 +1911,10 @@ function openAddMcqModal() {
 4) Option 4
 @correct: 1
 @explanation: Explanation
+@why_1: Why option 1 is right/wrong
+@why_2: Why option 2 is right/wrong
+@why_3: Why option 3 is right/wrong
+@why_4: Why option 4 is right/wrong
 @difficulty: easy | medium | hard
 @language: en | hi | Hinglish | Mixed
 @tags: tag1, tag2
@@ -2404,6 +2475,10 @@ function openMcqMetaModal(mcq) {
                 <label for="mcq-edit-explanation">Explanation</label>
                 <textarea id="mcq-edit-explanation" rows="3">${mcqEscapeHtml(mcq.explanation || "")}</textarea>
 
+                ${[1, 2, 3, 4].map(n => `
+                <label for="mcq-edit-why-${n}">Option ${n} — why right / wrong</label>
+                <textarea id="mcq-edit-why-${n}" rows="2">${mcqEscapeHtml(mcq.optionNotes?.[n - 1] || "")}</textarea>`).join("")}
+
                 <hr>
 
                 <label for="mcq-meta-topic">Topic</label>
@@ -2544,6 +2619,10 @@ async function saveMcqMeta(mcq) {
     if (optionD !== String(mcq.options?.[3] || "")) contentFields.option_d = optionD;
     if (correctNumber !== indexToCorrect(mcq.answer ?? 0)) contentFields.correct_option = correctNumber;
     if (explanation !== String(mcq.explanation || "")) contentFields.explanation = explanation;
+    ["a", "b", "c", "d"].forEach((letter, i) => {
+        const note = document.getElementById(`mcq-edit-why-${i + 1}`)?.value.trim() || "";
+        if (note !== String(mcq.optionNotes?.[i] || "")) contentFields["explanation_" + letter] = note;
+    });
 
     if (!Object.keys(fields).length && !Object.keys(contentFields).length) {
         document.getElementById("mcq-meta-modal")?.remove();

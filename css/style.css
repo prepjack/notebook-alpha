@@ -5461,3 +5461,64 @@ a.bottom-strip-btn.practice-open{
 .prompt-block-link .drive-note{
     margin-top:8px;
 }
+
+/* =========================================================
+   MCQ — LEFT PANEL WITH ITS OWN FOOTER (2026-09-30)
+   Main column ek panel ban jaata hai (right navigator jaisa):
+   header + scroll hone wala question + andar ka footer strip.
+   Question chhota ho ya bada, footer wahin rehta hai, aur lambe
+   question ka content footer ke peeche scroll hota hai.
+   ========================================================= */
+@media(min-width:901px){
+    .mcq-main-column{
+        position:sticky;
+        top:108px;
+        height:calc(100vh - 120px);
+        min-height:0;
+        background:#fff;
+        border:1px solid #9aab93;
+        border-radius:5px;
+        box-shadow:0 0 0 1px rgba(49,95,76,.08);
+        overflow:hidden;
+    }
+    .mcq-main-column .mcq-question-area{
+        flex:1 1 auto;
+        min-height:0;
+        border:0;
+        border-radius:0;
+        box-shadow:none;
+        outline:0;
+    }
+    .mcq-main-column #mcq-question{
+        flex:1 1 auto;
+        min-height:0;
+        overflow-y:auto;
+    }
+    .mcq-main-column .mcq-action-strip{
+        position:static;
+        flex:none;
+        width:100%;
+        margin:0;
+        border:0;
+        border-top:1px solid #cdd6c8;
+        border-radius:0;
+        box-shadow:none;
+        background:#eef1e9;
+    }
+
+    .mcq-navigator{
+        height:calc(100vh - 120px);
+    }
+    .mcq-action-strip,
+    .mcq-nav-submit{
+        box-sizing:border-box;
+        min-height:60px;
+    }
+    .mcq-nav-submit{
+        display:flex;
+        align-items:center;
+    }
+    .mcq-nav-submit .mcq-submit{
+        width:100%;
+    }
+}
