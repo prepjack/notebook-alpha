@@ -1721,11 +1721,11 @@ EXAMPLE (illustration only, do not reuse)
 Content (EN): "Iconic memory is the visual sensory memory that holds an image for a fraction of a second."
 Content (HI): "आइकॉनिक स्मृति वह दृश्य संवेदी स्मृति है जो किसी छवि को एक सेकंड के अंश भर के लिए रोके रखती है।"
 GOOD
-Q: Iconic memory is? / आइकॉनिक स्मृति क्या है?
-A: the visual sensory memory that holds an image for a fraction of a second / वह दृश्य संवेदी स्मृति है जो किसी छवि को एक सेकंड के अंश भर के लिए रोके रखती है
+Q: Iconic memory is? || आइकॉनिक स्मृति क्या है?
+A: the visual sensory memory that holds an image for a fraction of a second || वह दृश्य संवेदी स्मृति है जो किसी छवि को एक सेकंड के अंश भर के लिए रोके रखती है
 BAD (paraphrased: different words, different order)
-Q: Which short-lived store keeps pictures briefly? / कौन सा भंडार चित्र थोड़ी देर रखता है?
-A: Iconic memory / आइकॉनिक स्मृति
+Q: Which short-lived store keeps pictures briefly? || कौन सा भंडार चित्र थोड़ी देर रखता है?
+A: Iconic memory || आइकॉनिक स्मृति
 
 HOW MANY CARDS
 - One card per key concept, definition, classification, sequence or distinction that the content actually teaches.
@@ -1738,21 +1738,26 @@ The deck starts with this line, then every card is written like this:
 
 <!--===FLASHCARDS===-->
 <!--CARD-->
-Q: English question / हिंदी प्रश्न
-A: English answer / हिंदी उत्तर
+Q: English question || हिंदी प्रश्न
+A: English answer || हिंदी उत्तर
 <!--CARD-->
 Q: ...
 A: ...
 
+THE <!--CARD--> LINE
+- Write <!--CARD--> exactly ONCE per card, on its own line, immediately before that card's "Q:" line.
+- Never write it twice in a row, never after an "A:" line as a closing tag, never inside a Q or an A, and never put a blank line between it and "Q:".
+- The first line <!--===FLASHCARDS===--> appears once only, at the very top.
+
 FORMAT RULES FOR EVERY Q AND EVERY A
-- Every Q and every A is written as: English text, then " / " (space, slash, space), then Hindi text. English first, Hindi last, always both.
+- Every Q and every A is written as: English text, then " || " (space, two vertical bars, space), then Hindi text. English first, Hindi last, always both. Use " || " exactly once in every Q and every A.
 - The English side is copied from the ENGLISH content. The Hindi side is copied from the HINDI content, using that block's own sentence and terminology for the same idea (do not translate the English). Only if no Hindi content is provided, write standard UGC NET Hindi terminology yourself.
 - Keep answers short: a term, one sentence, or a short list. No long paragraphs.
-- Sequences go on ONE line, in the content's order, keeping its numbering and terms, joined with the arrow "→" (not "->"), e.g. 1. Generation → 2. Collection → 3. Storage → 4. Dissemination / 1. उत्पादन → 2. संग्रह → 3. भंडारण → 4. प्रसार
-- Do not use " / " anywhere except as the single English/Hindi separator. A slash inside a term with no spaces (like input/output) is fine.
+- Sequences go on ONE line, in the content's order, keeping its numbering and terms, joined with the arrow "→" (not "->"), e.g. 1. Generation → 2. Collection → 3. Storage → 4. Dissemination || 1. उत्पादन → 2. संग्रह → 3. भंडारण → 4. प्रसार
+- " || " is the ONLY English/Hindi separator and must never appear anywhere else. A slash "/" is an ordinary character: use it freely for aliases and alternates exactly as the content writes them, e.g. "OPAC / Online Public Access Catalogue".
 - Each card must stand alone: no "as above", no section numbers, no references to the article.
 - No images, tables, Mermaid, HTML or {{ }} markers. Standard Markdown bold/italic is fine.
-- Math: write formulas in LaTeX between single dollar signs, e.g. $x^2 + y_1$ or $\\frac{a}{b}$. Never put a spaced slash " / " inside a formula (use \\frac instead), never use the dollar sign for money (write Rs.), and use only standard LaTeX that KaTeX supports (no chemistry \\ce{...}, no custom macros, no images of equations).
+- Math: write formulas in LaTeX between single dollar signs, e.g. $x^2 + y_1$ or $\\frac{a}{b}$. Never put " || " inside a formula, never use the dollar sign for money (write Rs.), and use only standard LaTeX that KaTeX supports (no chemistry \\ce{...}, no custom macros, no images of equations).
 
 CHECK BEFORE YOU ANSWER
 For every card confirm: (1) each answer word appears in the source in the same order; (2) any list is complete and in the content's order; (3) every term is spelled exactly as in the content; (4) nothing was added. Fix or delete any card that fails.

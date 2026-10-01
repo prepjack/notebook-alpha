@@ -92,16 +92,31 @@
     }
 
     // =========================================================
-    // Bilingual split: "English / हिंदी"
+    // Bilingual split: "English || हिंदी"   (old decks: "English / हिंदी")
     // =========================================================
-    // Cards are authored as "English text / हिंदी text". A "/" is the
+    // NEW decks use " || " (space, two vertical bars, space) as the ONLY
+    // English/Hindi separator, so "/" is free for aliases such as
+    // "OPAC / Online Public Access Catalogue". If a segment contains
+    // " || " the FIRST one splits it. Segments with no " || " fall back
+    // to the OLD rule below, so decks saved before this change still work.
+    //
+    // OLD rule: "English text / हिंदी text". A "/" is the
     // separator only if there is NO Devanagari before it and SOME after
     // it; when several slashes qualify the LAST one wins, so
     // "input/output / इनपुट/आउटपुट" splits after "output", and Hindi-side
     // alternates ("a / b / c") stay together on the Hindi side.
     const DEVANAGARI_RE = /[\u0900-\u097F]/;
 
+    const BILINGUAL_SEP_RE = /\s\|\|\s/;
+
     function splitOneSegment(text) {
+        const sep = BILINGUAL_SEP_RE.exec(text);
+        if (sep) {
+            return {
+                en: text.slice(0, sep.index).trim(),
+                hi: text.slice(sep.index + sep[0].length).trim()
+            };
+        }
         let cut = -1;
         for (let i = 0; i < text.length; i++) {
             if (text[i] !== "/") continue;
