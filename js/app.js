@@ -1499,6 +1499,11 @@ The file is rendered using marked.js (GitHub-flavored Markdown). Use:
 - Mermaid diagrams
 - Chart blocks
 - Markdown images
+- Math in LaTeX: inline between single dollar signs, e.g. $x^2 + y_1$ or $\\frac{a}{b}$;
+  a separate equation line between double dollar signs, e.g. $$a^2 + b^2 = c^2$$.
+  Never use the dollar sign for money (write Rs. or the rupee symbol), and do not use
+  \\( \\) or \\[ \\] delimiters. Use only standard LaTeX that KaTeX supports: no chemistry
+  \\ce{...} syntax, no custom \\newcommand macros, no images of equations.
 - {{Term}} double-curly-brace wrapping for key terminologies, concepts,
   and definitions worth flagging as glossary/index candidates — see
   INDEX TERM MARKING below for how to use this (note: this only marks a
@@ -1747,6 +1752,7 @@ FORMAT RULES FOR EVERY Q AND EVERY A
 - Do not use " / " anywhere except as the single English/Hindi separator. A slash inside a term with no spaces (like input/output) is fine.
 - Each card must stand alone: no "as above", no section numbers, no references to the article.
 - No images, tables, Mermaid, HTML or {{ }} markers. Standard Markdown bold/italic is fine.
+- Math: write formulas in LaTeX between single dollar signs, e.g. $x^2 + y_1$ or $\\frac{a}{b}$. Never put a spaced slash " / " inside a formula (use \\frac instead), never use the dollar sign for money (write Rs.), and use only standard LaTeX that KaTeX supports (no chemistry \\ce{...}, no custom macros, no images of equations).
 
 CHECK BEFORE YOU ANSWER
 For every card confirm: (1) each answer word appears in the source in the same order; (2) any list is complete and in the content's order; (3) every term is spelled exactly as in the content; (4) nothing was added. Fix or delete any card that fails.

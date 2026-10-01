@@ -600,6 +600,12 @@
     function renderMd(text) {
         const src = niceArrows(text);
         try {
+            // Math-aware renderer from js/richcontent.js ($...$ via KaTeX).
+            // Same inline-vs-block rule as below; falls through to the
+            // original path if richcontent.js is not loaded on this page.
+            if (typeof window.renderRichInline === "function") {
+                return window.renderRichInline(src, src.includes("\n"));
+            }
             if (window.marked && window.DOMPurify) {
                 const html = src.includes("\n")
                     ? window.marked.parse(src)

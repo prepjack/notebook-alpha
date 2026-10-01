@@ -100,6 +100,60 @@
         return { text, terms };
     }
 
+        // ---- MATH SUPPORT (KaTeX) ----
+    // $...$ / $$...$$ ko marked se bachao: placeholder se badlo, baad mein wapas.
+    function protectMath(input) {
+        const store = [];
+        const keep = (raw, tex, display) => {
+            store.push({ raw: raw, tex: tex, display: display });
+            return "@@MATH" + (store.length - 1) + "@@";
+        };
+        const text = String(input || "")
+            .replace(/\$\$([\s\S]+?)\$\$/g, (m, t) => keep(m, t, true))
+            .replace(/\$(?!\s)([^$\n]+?)\$/g, (m, t) => /\s$/.test(t) ? m : keep(m, t, false));
+        return { text: text, store: store };
+    }
+
+    function restoreMath(container, store) {
+        if (!store.length) return;
+        const nodes = [];
+        const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) nodes.push(walker.currentNode);
+
+        nodes.forEach(node => {
+            if (!/@@MATH\d+@@/.test(node.nodeValue)) return;
+            const inCode = node.parentElement && node.parentElement.closest("pre, code");
+            if (inCode || typeof katex === "undefined") {
+                node.nodeValue = node.nodeValue.replace(/@@MATH(\d+)@@/g, (m, i) => store[Number(i)].raw);
+                return;
+            }
+            const frag = document.createDocumentFragment();
+            node.nodeValue.split(/(@@MATH\d+@@)/).forEach(part => {
+                const m = part.match(/^@@MATH(\d+)@@$/);
+                if (!m) { frag.append(part); return; }
+                const item = store[Number(m[1])];
+                const el = document.createElement(item.display ? "div" : "span");
+                try { katex.render(item.tex, el, { displayMode: item.display, throwOnError: false }); }
+                catch (e) { el.textContent = item.raw; }
+                frag.append(el);
+            });
+            node.replaceWith(frag);
+        });
+    }
+
+    // MCQ ke question/option/explanation ke liye (mcq.js isse call karega).
+    // block = true -> paragraph/table wala poora markdown; false -> inline.
+    window.renderRichInline = function (text, block) {
+        if (typeof marked === "undefined" || typeof DOMPurify === "undefined") {
+            return escapeIndexAttr(text);
+        }
+        const math = protectMath(text);
+        const div = document.createElement("div");
+        div.innerHTML = DOMPurify.sanitize(block ? marked.parse(math.text) : marked.parseInline(math.text));
+        restoreMath(div, math.store);
+        return div.innerHTML;
+    };
+
     /**
      * Destroys tracked lottie-web instances whose element lives inside
      * `container` (or, with no argument, every tracked instance whose
@@ -645,12 +699,14 @@
         // reader of the raw {{}} term list; app.js itself no longer reads
         // it (its old auto-reconciliation consumer was removed in the
         // manual-only refactor, step 3).
-        const { text, terms } = extractIndexTerms(resolvedText);
+                const math = protectMath(resolvedText);
+        const { text, terms } = extractIndexTerms(math.text);
         window.lastRenderedIndexTerms = terms;
 
         const html = marked.parse(text);
         container.innerHTML = DOMPurify.sanitize(html, { ADD_ATTR: ["target", "data-term"] });
-
+        restoreMath(container, math.store);
+        
         container.querySelectorAll("a[href]").forEach(a => {
             a.setAttribute("target", "_blank");
             a.setAttribute("rel", "noopener noreferrer");

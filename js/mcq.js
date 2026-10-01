@@ -200,6 +200,7 @@ function mapMcqRow(row) {
         question_no: row.question_no ?? "",
         node_id: row.node_id || "",
         question_group_id: row.question_group_id || "",
+        passage_id: row.passage_id || "",
         warnings: row.warnings || []
     };
 }
@@ -324,13 +325,13 @@ function convertApiDataToMcqData(apiData) {
 // notes) the note for what the learner picked, the correct option, and the
 // remaining options collapsed. Rows without notes show only `explanation`.
 function mcqFeedbackBodyHtml(q, sel) {
-    const general = q.explanation ? `<div>${escapeHtml(q.explanation)}</div>` : "";
+    const general = q.explanation ? `<div>${renderRichInline(q.explanation, true)}</div>` : "";
     const notes = q.optionNotes || [];
     if (!notes.some(n => n)) return general;
 
     const item = (i, tag) => notes[i] ? `
         <div style="margin-top:8px;padding:8px 10px;border-left:3px solid ${i === q.answer ? "#2e7d4f" : "#b5533c"};background:rgba(0,0,0,0.03);border-radius:4px;">
-            <strong>${tag}Option ${i + 1}</strong><br>${escapeHtml(notes[i])}
+            <strong>${tag}Option ${i + 1}</strong><br>${renderRichInline(notes[i])}
         </div>` : "";
 
     const shown = new Set();
@@ -347,6 +348,19 @@ function mcqFeedbackBodyHtml(q, sel) {
         html += `<details style="margin-top:8px;"><summary style="cursor:pointer;">Other options</summary>${rest}</details>`;
     }
     return html;
+}
+
+// Comprehension MCQs: shows the shared passage above the question.
+// In the all-questions list a passage is shown only once, above the first
+// question that uses it (prevQ = the question just before this one).
+function mcqPassageHtml(q, prevQ) {
+    const pid = String(q.passage_id || "").trim();
+    if (!pid) return "";
+    if (prevQ && String(prevQ.passage_id || "").trim() === pid) return "";
+    const passage = ((mcqApiData && mcqApiData.passages) || [])
+        .find(p => String(p.passage_id) === pid);
+    if (!passage || !passage.content) return "";
+    return `<div class="mcq-passage" style="margin:0 0 12px;padding:10px 12px;border-left:3px solid #2e7d4f;background:rgba(0,0,0,0.03);border-radius:4px;"><strong>Passage</strong><div>${renderRichInline(passage.content, true)}</div></div>`;
 }
 
 function mcqCrumbHtml(nodeId) {
@@ -756,7 +770,8 @@ function renderMcqView() {
                                 `).join("")}
                             </div>
                         ` : ""}
-                        <div class="mcq-question-text">${escapeHtml(q.question)}</div>
+                        ${mcqPassageHtml(q, i > 0 ? currentMcqs[i - 1] : null)}
+                        <div class="mcq-question-text">${renderRichInline(q.question, true)}</div>
                         <div class="mcq-large-options">
                             ${q.options.map((option, oi) => `
                                 <button
@@ -766,7 +781,7 @@ function renderMcqView() {
                                     data-option-index="${oi}"
                                 >
                                     <span class="mcq-radio-circle" aria-hidden="true"></span>
-                                    <span class="mcq-option-text">${escapeHtml(option)}</span>
+                                    <span class="mcq-option-text">${renderRichInline(option)}</span>
                                 </button>
                             `).join("")}
                         </div>
@@ -837,8 +852,9 @@ function renderMcqView() {
             </div>
             ${mcqCrumbHtml(mcq.node_id)}
 
+            ${mcqPassageHtml(mcq)}
             <div class="mcq-question-text">
-                ${escapeHtml(mcq.question)}
+                ${renderRichInline(mcq.question, true)}
             </div>
 
             <div class="mcq-large-options">
@@ -851,7 +867,7 @@ function renderMcqView() {
                         data-option-index="${index}"
                     >
                         <span class="mcq-radio-circle" aria-hidden="true"></span>
-                        <span class="mcq-option-text">${escapeHtml(option)}</span>
+                        <span class="mcq-option-text">${renderRichInline(option)}</span>
                     </button>
                 `).join("")}
             </div>
@@ -1054,7 +1070,7 @@ function showResult() {
             if (selected === undefined) {
                 return `<div class="result-question">
                     <strong>Q${index + 1} — Unanswered</strong><br>
-                    ${escapeHtml(mcq.question)}
+                    ${renderRichInline(mcq.question)}
                 </div>`;
             }
 
@@ -1062,10 +1078,10 @@ function showResult() {
 
             return `<div class="result-question ${isCorrect ? "correct" : "wrong"}">
                 <strong>Q${index + 1} — ${isCorrect ? "Correct" : "Wrong"}</strong><br>
-                ${escapeHtml(mcq.question)}<br><br>
-                Your answer: ${escapeHtml(mcq.options[selected])}<br>
-                Correct answer: ${escapeHtml(mcq.options[mcq.answer])}<br><br>
-                ${escapeHtml(mcq.explanation)}
+                ${renderRichInline(mcq.question)}<br><br>
+                Your answer: ${renderRichInline(mcq.options[selected])}<br>
+                Correct answer: ${renderRichInline(mcq.options[mcq.answer])}<br><br>
+                ${renderRichInline(mcq.explanation)}
             </div>`;
         }).join("");
 
@@ -1333,7 +1349,7 @@ For each assertion–reasoning MCQ, use:
 The parser supplies the standard four Assertion–Reasoning options (1–4) automatically, so do not invent replacement option text unless specifically required.`,
 
     comprehension: `COMPREHENSION FORMAT
-For a comprehension set, put the passage before its questions:
+For a comprehension set, put the passage before its questions. Use a passage id that is unique across ALL files (for example <collection-slug>-p1, <collection-slug>-p2); never reuse p001/p002 in a different file, because the same id overwrites the earlier passage:
 @passage: p001
 @topic: <node_id>
 @passage_kind: text
@@ -1592,7 +1608,8 @@ function buildMcqAiPrompt() {
 
     if (includeMath) {
         lines.push("", "MATH / NUMERIC-HEAVY INSTRUCTION", 
-            "Include math or numeric-heavy questions where relevant. Preserve equations, calculations, units, percentages, ratios, tables, and numerical data accurately. Do not replace a required calculation with a vague conceptual question.");
+            "Include math or numeric-heavy questions where relevant. Preserve equations, calculations, units, percentages, ratios, tables, and numerical data accurately. Do not replace a required calculation with a vague conceptual question.",
+            "MATH WRITING FORMAT: write every formula in LaTeX. Inline math goes between single dollar signs, e.g. $x^2 + y^2 = r^2$ or $\\frac{a}{b}$; a separate equation line goes between double dollar signs, e.g. $$\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}$$. Never use the dollar sign for money (write Rs. or the rupee symbol instead), and do not use \\( \\) or \\[ \\] delimiters. Use only standard LaTeX that KaTeX supports: no chemistry \\ce{...} syntax, no custom \\newcommand macros, and no images of equations.");
     }
 
     // PHASE 8a — N=1 keeps the old single-@collection instruction;
@@ -1884,6 +1901,13 @@ function openAddMcqModal() {
                     <label><input type="checkbox" value="comprehension"> Comprehension</label>
                     <label><input type="checkbox" value="table"> Table/DI</label>
                     <label><input id="mcq-include-math" type="checkbox"> Include math</label>
+                </div>
+                <div class="mcq-math-hint" style="font-size:0.85em;line-height:1.45;margin:6px 0 10px;padding:8px 10px;border-left:3px solid #b8860b;background:rgba(184,134,11,0.08);border-radius:4px;">
+                    <strong>Math &amp; passage tips</strong><br>
+                    • Write formulas as $...$ (inline) or $$...$$ (own line).<br>
+                    • Never use $ for money — write ₹ or Rs. instead.<br>
+                    • Only standard LaTeX that KaTeX supports will show. Chemistry \\ce{...}, custom macros (\\newcommand) and equation images will not.<br>
+                    • Passage ids must be unique across ALL files (e.g. ugcnet-jun2025-p1). Reusing p001 in another file overwrites the earlier passage.
                 </div>
 
                 <label for="mcq-question-count"><span class="mcq-field-num mcq-num-yellow">9.</span> How many questions?</label>
