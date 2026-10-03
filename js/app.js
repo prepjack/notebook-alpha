@@ -1766,37 +1766,6 @@ STUDY CONTENT (the source of truth for every card)
 
 <PASTE CONTENT HERE>`;
 
-const QUIZ_AI_PROMPT = `You are a quiz generator for UGC NET (Library & Information Science) practice.
-
-TOPIC: <PUT TOPIC NAME HERE>
-PATH: <PUT HIERARCHY PATH HERE>
-
-TASK
-Using ONLY the study content at the bottom, create a short interactive practice quiz and show it right here in a live preview (Canvas / interactive view). If this interface cannot render HTML, give me one complete self-contained HTML file in a single code block instead. Do not ask me any questions first; build the quiz right away.
-
-QUIZ
-- 10 multiple-choice questions, 4 options each, exactly one correct answer.
-- Cover the whole content evenly; do not cluster on one section.
-- UGC NET style: definitions, distinctions, classifications, sequences, "which of the following..." plus a few application-type questions.
-- Wrong options must be plausible (common confusions from the content), never silly.
-- Never use a fact that is not in the content. If unsure about a question, skip it.
-- Every question in English with the Hindi version directly below it (Devanagari; keep standard English technical terms). Options likewise bilingual and short. If no Hindi content is provided, write the Hindi yourself in standard UGC NET terminology.
-- Ignore image links, Mermaid/chart blocks and {{ }} markers; use only the text.
-
-BEHAVIOUR
-- One question at a time, with progress like "3 / 10".
-- Tapping an option instantly shows correct/wrong (green/red) and a one-line explanation (EN + HI); then lock the answer and show a "Next" button.
-- Shuffle option order. Never use "all of the above" or "none of the above".
-- End screen: score, the questions missed with the correct answers, and a "Try again" button that reshuffles.
-
-DESIGN
-- Mobile-first: single column, large tap targets (min 48px), readable font, works in portrait.
-- One self-contained file: inline CSS + JS, no external libraries, fonts, images or network calls, no localStorage.
-- Clean, calm, light background.
-
-STUDY CONTENT (the only source for every question)
-
-<PASTE CONTENT HERE>`;
 
 /* =========================================================
    CONTENT GENERATION PROMPT — VERSION PICKER (EN / HI / AI)
@@ -2136,12 +2105,7 @@ function openAddContentLink() {
                 </div>
 
                 <div class="prompt-block">
-                    <div class="prompt-block-row">
-                        <button type="button" class="content-action" id="copy-quiz-prompt-btn" onclick="copyQuizPrompt()">📝 Copy Small Quiz Prompt</button>
-                        <label class="flashcard-enonly"><input type="checkbox" id="quiz-en-only"> EN only (shorter)</label>
-                    </div>
-                    <p class="prompt-block-desc"><strong>What it does:</strong> copies a prompt that already contains this topic's text. Pasted into Gemini, it builds a quick 10-question bilingual practice quiz with instant feedback and a score at the end.</p>
-                    <p class="prompt-block-desc"><strong>What to do:</strong> paste it into Gemini (or another AI that can show a live preview) and take the quiz right there, on your phone or laptop. Nothing is saved on this site, and every run makes fresh questions. Tick "EN only" for a shorter paste.</p>
+                    <div class="prompt-block" id="quiz-section-host"></div>
                 </div>
 
                 <details class="content-link-guide">
@@ -2174,6 +2138,18 @@ All local filenames above must exist in the same linked folder.</pre>
             </div>
         </div>`;
     document.body.appendChild(modal);
+
+    const quizHost = document.getElementById("quiz-section-host");
+    if (quizHost && window.QuizPrompt) {
+        window.QuizPrompt.mount(quizHost, {
+            api: GOOGLE_SHEET_API,
+            nodeId: selectedTopicNode.id,
+            topic: selectedTopicNode.title || "",
+            subject: String(buildTopicBreadcrumb(selectedTopicNode) || "").split(" → ")[0],
+            getSplit: () => currentLanguageSplit,
+            clean: cleanContentForPrompt
+        });
+    }
 }
 
 // "i" button tooltips: hover opens them on desktop (CSS); a click/tap toggles
@@ -2318,13 +2294,6 @@ const TOPIC_PROMPT_KINDS = {
         name: "Flashcard prompt",
         next: "Paste it into any AI, then save its output as flashcards.md in this topic's Drive folder."
     },
-    quiz: {
-        template: QUIZ_AI_PROMPT,
-        buttonId: "copy-quiz-prompt-btn",
-        enOnlyId: "quiz-en-only",
-        name: "Small quiz prompt",
-        next: "Paste it into Gemini (or another AI that can show a live preview) and take the quiz there. Nothing from it is saved on this site."
-    }
 };
 
 function copyTopicContentPrompt(kind) {
@@ -2414,7 +2383,7 @@ function copyTopicContentPrompt(kind) {
 }
 
 function copyFlashcardPrompt() { copyTopicContentPrompt("flashcard"); }
-function copyQuizPrompt() { copyTopicContentPrompt("quiz"); }
+
 
 function fallbackCopyText(text, onSuccess, onFailure) {
     const ta = document.createElement("textarea");

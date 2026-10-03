@@ -5581,3 +5581,12 @@ a.bottom-strip-btn.practice-open{
 .quiz-add-preview.err{color:#b3261e}
 .quiz-add-actions{margin-top:14px;text-align:right}
 .quiz-add-actions .bottom-strip-btn:disabled{opacity:.5;cursor:not-allowed}
+
+.qp-row{display:flex;gap:10px}
+.qp-row>div{flex:1}
+.quiz-panel-btns{display:flex;gap:6px;flex-wrap:wrap}
+
+.quiz-host input[type="text"],.quiz-host input[type="number"],.quiz-host select{width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid #cfd8d2;border-radius:8px;font:13px Arial,sans-serif;background:#fff}
+.quiz-host .qh-copyrow{margin-top:12px}
+.quiz-host .qh-sep{border:0;border-top:1px solid #e1e7e3;margin:16px 0 4px}
+.qh-listrow{font:12px/1.6 Arial,sans-serif;color:#46554d;padding:2px 0}

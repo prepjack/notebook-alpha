@@ -2145,9 +2145,9 @@ function quizPanelHtml(scope) {
     let html = '<div class="tool-panel tool-panel-quiz" data-scope="' + escapeHtml(nodeId) + '">' +
         '<div class="quiz-panel-head"><div class="tool-panel-title">Quiz' +
         (quizzesAll === null ? "" : " (" + list.length + ")") + "</div>" +
-        '<button type="button" class="bottom-strip-btn" data-quiz-add="' + escapeHtml(nodeId) + '">+ Add quiz</button></div>';
+                "</div>";
     if (quizzesAll === null) html += '<div class="tool-panel-sub">Loading…</div>';
-    else if (!list.length) html += '<div class="tool-panel-sub">No quizzes for this topic yet. Generate one from the topic content, save it in Drive, then add its link here.</div>';
+    else if (!list.length) html += '<div class="tool-panel-sub">No quizzes for this topic yet. Open this topic\'s Add Content Folder box and use its Quiz section to make and add one.</div>';
     else html += list.map(q => quizRowHtml(q, false)).join("");
     return html + "</div>";
 }
@@ -2173,6 +2173,20 @@ function handleQuizClick(event) {
     if (add) { openQuizAddModal(add.dataset.quizAdd); return true; }
     const del = event.target.closest("[data-quiz-delete]");
     if (del) { deleteQuiz(del.dataset.quizDelete); return true; }
+        const qp = event.target.closest("[data-quiz-prompt]");
+    if (qp) {
+        const id = qp.dataset.quizPrompt;
+        const titles = pathTitles(id) || [];
+        if (!window.QuizPrompt) { setMessage("js/quiz-prompt.js is not loaded.", "error"); return true; }
+        window.QuizPrompt.open({
+            api: GOOGLE_SHEET_API,
+            nodeId: id,
+            link: mdLinks[id] || "",
+            subject: titles[0] || "",
+            topic: titles[titles.length - 1] || id
+        });
+        return true;
+    }
     return false;
 }
 
