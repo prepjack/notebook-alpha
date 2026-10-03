@@ -17,7 +17,7 @@
 
    window.QuizPrompt.mount(hostElement, ctx)     (used inside the "Add Content
    Folder" box on the notebook page: one place for prompt + add quiz)
-       ctx = { api, nodeId, topic, subject, getSplit(), clean(text) }
+       ctx = { api, nodeId, topic, subject, parent, getSplit(), clean(text) }
        getSplit() -> { en, hi, ai } of the topic's currently loaded text
        clean(text) -> the page's own cleanContentForPrompt()
 
@@ -42,7 +42,8 @@
     var LANG_OPTIONS = [
         { v: "en", label: "English" },
         { v: "hi", label: "Hindi" },
-        { v: "hinglish", label: "Hinglish" }
+        { v: "hinglish", label: "Hinglish (Hindi in Roman letters)" },
+        { v: "bilingual", label: "English + हिंदी (bilingual)" }
     ];
 
     var modalKeyHandler = null;
@@ -57,10 +58,11 @@
         return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
     }
 
-    function fileNameFor(topic, nodeId, focus, lang) {
-        var base = slug(topic) || slug(nodeId) || "topic";
+    function fileNameFor(topic, nodeId, focus, lang, parent) {
+        var base = [slug(parent), slug(topic)].filter(Boolean).join("_") || slug(nodeId) || "topic";
         var f = slug(focus);
-        return base + (f ? "-" + f : "") + "-" + lang + ".html";
+        var code = lang === "bilingual" ? "bi" : lang;
+        return base + (f ? "-" + f : "") + "-" + code + ".html";
     }
 
     // Content as the model should see it: drop {{Term}} markers (keep the
@@ -76,6 +78,20 @@
         var count = o.count;
         var minTypes = count < 6 ? 3 : 4;
         var exam = o.exam ? o.exam : "(not specified)";
+        var bil = o.lang === "bilingual" ? [
+            "9. LANGUAGE bilingual hai: question, har option, explanation, tf ki reason",
+            "   aur match/order ke har item ko ek hi string mein is format mein do:",
+            "   \"English text || हिंदी text\"  (pehle English, phir ' || ', phir Devanagari",
+            "   Hindi; technical terms Hindi side mein bhi English hi rakho). Renderer is",
+            "   string ko ' || ' pe todkar English upar aur Hindi neeche (halke rang mein)",
+            "   dikhaye. HAR string mein SIRF EK ' || ' ho (ek string = ek baat). Isliye",
+            "   stmt ke statements, ar ke assertion/reason, aur har option alag string ho,",
+            "   aur har string apna ' || ' rakhe. Renderer split karte waqt sirf PEHLE",
+            "   ' || ' pe tode (indexOf se), split(' || ') se nahi.",
+            "   answer wale fields (option index, True/False, sahi order) is",
+            "   format se bahar rahein. evidence aur fib ke typed accepted answers sirf",
+            "   English mein hon."
+        ].join("\n") : null;
         return [
             "Tum ek experienced exam question-setter ho. Neeche diye STUDY CONTENT se ek",
             "chhota practice quiz banana hai, jo ek single self-contained HTML file ho.",
@@ -84,7 +100,7 @@
             "SUBJECT: " + (o.subject || "(not specified)"),
             "TOPIC: " + o.topic,
             "FOCUS: " + (o.focus || "(none: balanced mix)"),
-            "LANGUAGE: " + o.lang + "    (en / hi / hinglish: poora quiz isi mein)",
+            "LANGUAGE: " + o.lang + "    (en / hi / hinglish / bilingual: poora quiz isi mein)",
             "QUESTIONS: " + count,
             "",
             "STUDY CONTENT:",
@@ -120,6 +136,7 @@
             "   random rakho.",
             "7. Koi question duplicate na ho, aur ek question dusre ka answer na de.",
             "8. Technical terms English mein hi rakho, chahe LANGUAGE hindi/hinglish ho.",
+            bil,
             "",
             "== QUESTION TYPES ==",
             "Core (hamesha available):",
@@ -150,6 +167,11 @@
             "   </script>",
             "   quiz-data ek JSON ARRAY ho (object nahi). Questions alag se JS mein",
             "   hardcode mat karo; ek generic renderer in dono blocks se padhe.",
+            "   stmt: statements ek alag \"statements\" ARRAY mein do (har Statement ek item),",
+            "   question mein sirf intro line. ar: \"assertion\" aur \"reason\" alag fields mein,",
+            "   question mein sirf intro line (ya khali). Statements/assertion/reason ko kabhi",
+            "   question string ke andar \\n se jodkar mat bharo. Renderer inhe alag-alag",
+            "   dikhaye.",
             "4. FILE NAME: quiz-meta ke \"file_name\" mein bilkul yahi naam do: " + o.fileName,
             "   Wahi naam <title> ke saath bhi do. Kabhi \"quiz.html\" ya \"index.html\"",
             "   naam mat rakho.",
@@ -163,7 +185,7 @@
             "8. Result screen par bhejo:",
             "   parent.postMessage({type:'quiz-result', score, total, byType, wrongIds}, '*');",
             "9. Output sirf poora HTML code, koi extra text nahi."
-        ].join("\n");
+        ].filter(function (x) { return x !== null; }).join("\n");
     }
 
     function options(list, selected) {
@@ -230,7 +252,7 @@
                 subject: opts.subject || "",
                 topic: topic,
                 content: content || "[PASTE THE TOPIC CONTENT HERE]",
-                fileName: fileNameFor(topic, opts.nodeId, focus, lang)
+                fileName: fileNameFor(topic, opts.nodeId, focus, lang, opts.parent)
             };
         }
 
@@ -403,7 +425,7 @@
         }
         function showName() {
             var o = current();
-            status(copyStatus, "Suggested file name: " + fileNameFor(topic, nodeId, o.focus, o.lang));
+            status(copyStatus, "Suggested file name: " + fileNameFor(topic, nodeId, o.focus, o.lang, ctx.parent));
         }
         [langEl, focusEl].forEach(function (e) { e.addEventListener("change", showName); });
         showName();
@@ -417,7 +439,7 @@
             }
             var o = current();
             o.content = cb.text;
-            o.fileName = fileNameFor(topic, nodeId, o.focus, o.lang);
+            o.fileName = fileNameFor(topic, nodeId, o.focus, o.lang, ctx.parent);
             lsSet(LS_LANG, o.lang); lsSet(LS_COUNT, String(o.count)); lsSet(LS_EXAM, o.exam);
             var prompt = buildPrompt(o);
             var original = copyEl.innerHTML;

@@ -2146,6 +2146,7 @@ All local filenames above must exist in the same linked folder.</pre>
             nodeId: selectedTopicNode.id,
             topic: selectedTopicNode.title || "",
             subject: String(buildTopicBreadcrumb(selectedTopicNode) || "").split(" → ")[0],
+            parent: (function () { const p = String(buildTopicBreadcrumb(selectedTopicNode) || "").split(" → "); return p.length > 1 ? p[p.length - 2] : ""; })(),
             getSplit: () => currentLanguageSplit,
             clean: cleanContentForPrompt
         });
