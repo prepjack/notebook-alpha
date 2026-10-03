@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Quiz</title>
+<style>
+:root{--bg:#fff;--fg:#1a1a1a;--bar:#f1f2f4;--mut:#666;--ac:#2563eb}
+@media(prefers-color-scheme:dark){:root{--bg:#15171a;--fg:#eee;--bar:#202327;--mut:#9aa0a6;--ac:#6ea0ff}}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,sans-serif}
+body{display:flex;flex-direction:column}
+#top{display:flex;align-items:center;gap:10px;padding:8px 12px;padding-top:calc(8px + env(safe-area-inset-top,0px));background:var(--bar);font-size:.95rem}
+#top a{color:var(--ac);text-decoration:none;white-space:nowrap}
+#ttl{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#frame{flex:1;border:0;width:100%;display:none;background:var(--bg)}
+#msg{margin:auto;padding:24px;text-align:center;color:var(--mut)}
+</style>
+</head>
+<body>
+<div id="top"><a href="javascript:history.length>1?history.back():window.close()">&larr; Back</a><span id="ttl"></span></div>
+<div id="msg">Loading quiz...</div>
+<iframe id="frame" sandbox="allow-scripts" title="Quiz"></iframe>
+
+<script src="js/event-log.js"></script>
+
+<script>
+// >>> PASTE your Apps Script web app URL here (same one used in js/app.js) <<<
+var WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzE7zuqKXMmvfoP6LNCRw159odJsqWW9O0hEWm7uHIelnQJz4x7iFMnbTDKvm8lpIw5QA/exec";
+
+var params = new URLSearchParams(location.search);
+var quizId = params.get("id");
+var frame = document.getElementById("frame");
+var msg = document.getElementById("msg");
+var current = { quiz_id: quizId, node_id: "", title: "" };
+var CACHE_KEY = "na_quizhtml_" + quizId;
+
+function fail(t) { msg.textContent = t; msg.style.display = "block"; frame.style.display = "none"; }
+
+function render(payload) {
+  current.node_id = payload.node_id || "";
+  current.title = payload.title || "Quiz";
+  document.title = current.title;
+  document.getElementById("ttl").textContent = current.title;
+  frame.srcdoc = payload.html;
+  frame.style.display = "block";
+  msg.style.display = "none";
+}
+
+function fetchQuiz() {
+  return fetch(WEB_APP_URL + "?action=get_quiz_html&quiz_id=" + encodeURIComponent(quizId))
+    .then(function (r) { return r.json(); });
+}
+
+function load() {
+  if (!quizId) return fail("No quiz id in the link.");
+  if (WEB_APP_URL.indexOf("PASTE_") === 0) return fail("quiz.html: WEB_APP_URL is not set.");
+
+  var cached = null;
+  try { cached = JSON.parse(localStorage.getItem(CACHE_KEY) || "null"); } catch (e) {}
+
+  if (cached && cached.html) {
+    render(cached);                       // instant open
+    fetchQuiz().then(function (d) {       // refresh in background for next time
+      if (d && d.ok) { try { localStorage.setItem(CACHE_KEY, JSON.stringify(d)); } catch (e) {} }
+    }).catch(function () {});
+    return;
+  }
+
+  fetchQuiz().then(function (d) {
+    if (!d || !d.ok) return fail((d && d.error) || "Could not load this quiz.");
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify(d)); } catch (e) {} // big quizzes may not fit; fine
+    render(d);
+  }).catch(function () { fail("Network error. Check your connection and try again."); });
+}
+
+// ---- Result handling ----
+window.addEventListener("message", function (ev) {
+  if (ev.source !== frame.contentWindow) return;           // only our quiz iframe
+  var d = ev.data;
+  if (!d || d.type !== "quiz-result") return;
+  var score = Number(d.score), total = Number(d.total);
+  if (!isFinite(score) || !isFinite(total) || total <= 0 || score < 0 || score > total) return;
+  recordQuizResult({
+    quiz_id: current.quiz_id,
+    node_id: current.node_id,
+    score: score,
+    total: total,
+    byType: (d.byType && typeof d.byType === "object") ? d.byType : {},
+    wrongIds: Array.isArray(d.wrongIds) ? d.wrongIds.slice(0, 200) : [],
+    ts: Date.now()
+  });
+});
+
+// Single place that stores an attempt.
+// 1) Fallback store (works today): last 20 attempts per quiz in localStorage,
+//    key "na_quiz_results" -> { quiz_id: [ {score,total,ts,...}, ... ] }
+// 2) EventLog hook: wired in Phase 3 once the EventLog module's API is known.
+   function recordQuizResult(r) {
+       try {
+           if (window.EventLog) window.EventLog.logEvent("quiz", r.node_id, {
+               quizId: r.quiz_id, score: r.score, total: r.total,
+               byType: r.byType, wrongIds: r.wrongIds
+           });
+       } catch (e) {}
+   }
+
+load();
+</script>
+</body>
+</html>

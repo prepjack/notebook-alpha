@@ -57,7 +57,7 @@ const VIEW_HEADINGS = {
     "queue-read": "QUEUE VIEW · READ",
     "queue-flashcards": "QUEUE VIEW · FLASHCARDS",
     "queue-mcq": "QUEUE VIEW · MCQ",
-    "queue-future": "QUEUE VIEW · FUTURE"
+    "queue-future": "QUEUE VIEW · QUIZ"
 };
 
 // Old flat-tab view ids (before this phase) -> closest new view. Keeps
@@ -713,7 +713,7 @@ function mcqPanelHtmlSync(scope) {
         "</div>";
 }
 
-const SQUARE_KINDS = ["read", "flashcards", "mcq", "future"];
+const SQUARE_KINDS = ["read", "flashcards", "mcq", "quiz"];
 
 // Compact tile content for one square — title, one-line stat, and its
 // jump-straight-in button (or none, for Future). Deliberately thinner
@@ -742,7 +742,7 @@ function squareTileContentAggregate(kind, scope) {
         const accLabel = stats.accuracy == null ? "—" : Math.round(stats.accuracy * 100) + "%";
         return { title: "MCQ", stat: stats.attempted + " attempted · " + accLabel + " accuracy", buttonHtml: "" };
     }
-    return { title: "Future", stat: "Coming soon", buttonHtml: "" };
+    return quizTileContent(scope);
 }
 
 function squareTileContent(kind, scope) {
@@ -773,7 +773,7 @@ function squareTileContent(kind, scope) {
         return { title: "MCQ", stat: stats.attempted + " / " + totalLabel + " attempted",
             buttonHtml: '<button type="button" class="practice-square-btn bottom-strip-btn" data-mcq-solve="' + escapeHtml(nodeId) + '">Solve</button>' };
     }
-    return { title: "Future", stat: "Coming soon", buttonHtml: "" };
+    return quizTileContent(scope);
 }
 
 // One compact row's worth of stat text for a given square kind, scoped
@@ -795,7 +795,7 @@ function childKindStat(kind, childScope) {
         const accLabel = stats.accuracy == null ? "—" : Math.round(stats.accuracy * 100) + "%";
         return stats.attempted + " attempted · " + accLabel;
     }
-    return "Coming soon";
+    return quizChildStat(childScope);
 }
 
 // Phase 3, section 4: a parent square's body click shows ONE level of
@@ -823,7 +823,7 @@ function squareDetailHtml(kind, scope) {
     if (kind === "read") return renderReadPanel(scope);
     if (kind === "flashcards") return renderFlashcardsPanel(scope);
     if (kind === "mcq") return mcqPanelHtmlSync(scope);
-    return renderFuturePanel(scope);
+    return quizPanelHtml(scope);
 }
 
 function squareGridHtml(scope) {
@@ -1674,7 +1674,7 @@ function render() {
     else if (view === "queue-read") el("pv-queue-read").innerHTML = queueReadViewHtml();
     else if (view === "queue-flashcards") el("pv-queue-flashcards").innerHTML = queueFlashcardsViewHtml(summary);
     else if (view === "queue-mcq") el("pv-queue-mcq").innerHTML = queueMcqViewHtml();
-    else if (view === "queue-future") el("pv-queue-future").innerHTML = queuePlaceholderHtml(view);
+    else if (view === "queue-future") el("pv-queue-future").innerHTML = queueQuizViewHtml();
 
     // Bring the highlighted topic (from ?topic=) into view, once. Only
     // Tree view has anything to scroll to — and it now lives in the
@@ -1855,6 +1855,7 @@ function bindEvents() {
             render();
             return;
         }
+        if (handleQuizClick(event)) return;
         const review = event.target.closest("[data-review]");
         if (review) { reviewTopic(review.dataset.review, review); return; }
         const mcqSolve = event.target.closest("[data-mcq-solve]");
@@ -2040,5 +2041,281 @@ async function initPracticePage() {
     await loadTree();
     render();
 }
+
+/* =========================================================
+   QUIZ (Phase 3-4) — the 4th square ("Future" -> "Quiz")
+
+   PASTE THIS WHOLE BLOCK in practice.js, directly ABOVE the very last
+   line `initPracticePage();`  (it must come before that call, because
+   the `let` variables below have to exist before the first render).
+
+   Data: one lazy fetch of every quiz row (get_quizzes), kept in
+   quizzesAll. Attempts come from the EventLog ("quiz" events, written
+   by quiz.html), so scores sync across devices like everything else.
+   ========================================================= */
+
+let quizzesAll = null;        // null = not loaded yet, [] = loaded but empty
+let quizzesLoading = false;
+let quizAddKeyHandler = null;
+
+function ensureQuizzesLoaded(force) {
+    if (quizzesLoading) return;
+    if (quizzesAll !== null && !force) return;
+    quizzesLoading = true;
+    fetch(GOOGLE_SHEET_API + "?action=get_quizzes")
+        .then(r => r.json())
+        .then(d => { quizzesAll = (d && Array.isArray(d.quizzes)) ? d.quizzes : []; })
+        .catch(() => { if (quizzesAll === null) quizzesAll = []; })
+        .finally(() => { quizzesLoading = false; scheduleRender(); });
+}
+
+// ---- stats from the event log ----
+function quizStats(quizId) {
+    const ev = (window.EventLog ? window.EventLog.readLog() : [])
+        .filter(e => e && e.type === "quiz" && e.quizId === quizId && Number(e.total) > 0)
+        .sort((a, b) => a.t - b.t);
+    if (!ev.length) return { attempts: 0, last: null };
+    return { attempts: ev.length, last: ev[ev.length - 1] };
+}
+
+function quizScoreLabel(s) {
+    return s.attempts ? "last " + s.last.score + "/" + s.last.total + " · " + plural(s.attempts, "attempt") : "not tried";
+}
+
+// Never-tried first, then lowest last score, then oldest.
+function quizPriority(q) {
+    const s = quizStats(String(q.quiz_id));
+    return s.attempts ? s.last.score / s.last.total : -1;
+}
+function sortQuizzes(list) {
+    return list.slice().sort((a, b) =>
+        quizPriority(a) - quizPriority(b) ||
+        String(a.created_at).localeCompare(String(b.created_at)));
+}
+
+function quizzesForNodes(ids) {
+    const set = new Set(ids.map(String));
+    return (quizzesAll || []).filter(q => set.has(String(q.node_id)));
+}
+
+// ---- square tile (leaf and parent scopes) ----
+function quizChildStat(childScope) {
+    if (quizzesAll === null) return "…";
+    const list = quizzesForNodes(childScope.leafIds || [childScope.nodeId]);
+    if (!list.length) return "No quizzes";
+    const tried = list.filter(q => quizStats(String(q.quiz_id)).attempts > 0).length;
+    return plural(list.length, "quiz") + " · " + tried + " tried";
+}
+
+function quizTileContent(scope) {
+    ensureQuizzesLoaded();
+    if (quizzesAll === null) return { title: "Quiz", stat: "…", buttonHtml: "" };
+    const stat = quizChildStat(scope);
+    if (scope.isLeaf === false) return { title: "Quiz", stat: stat, buttonHtml: "" };
+    const list = sortQuizzes(quizzesForNodes([scope.nodeId]));
+    if (!list.length) return { title: "Quiz", stat: "No quizzes yet", buttonHtml: "" };
+    return {
+        title: "Quiz",
+        stat: stat,
+        buttonHtml: '<button type="button" class="practice-square-btn bottom-strip-btn" data-quiz-start="' +
+            escapeHtml(String(list[0].quiz_id)) + '">Start</button>'
+    };
+}
+
+// ---- rows / panels ----
+function quizRowHtml(q, withTopic) {
+    const id = String(q.quiz_id);
+    const s = quizStats(id);
+    const info = withTopic ? topicInfo(String(q.node_id)) : null;
+    const where = info && info.title ? escapeHtml(info.title) + " · " : "";
+    return '<div class="practice-row quiz-row" data-quiz-id="' + escapeHtml(id) + '">' +
+        '<div class="practice-row-main"><div class="practice-row-title">' + escapeHtml(q.title || "Quiz") + "</div>" +
+        '<div class="practice-row-path">' + where + plural(Number(q.question_count) || 0, "question") + " · " + quizScoreLabel(s) + "</div></div>" +
+        '<div class="practice-row-actions">' +
+        '<button type="button" class="bottom-strip-btn" data-quiz-start="' + escapeHtml(id) + '">Start ↗</button>' +
+        '<button type="button" class="quiz-del-btn" data-quiz-delete="' + escapeHtml(id) + '" title="Remove this quiz">✕</button>' +
+        "</div></div>";
+}
+
+// Detail of the Quiz square for a leaf topic.
+function quizPanelHtml(scope) {
+    ensureQuizzesLoaded();
+    const nodeId = scope.nodeId;
+    const list = sortQuizzes(quizzesForNodes([nodeId]));
+    let html = '<div class="tool-panel tool-panel-quiz" data-scope="' + escapeHtml(nodeId) + '">' +
+        '<div class="quiz-panel-head"><div class="tool-panel-title">Quiz' +
+        (quizzesAll === null ? "" : " (" + list.length + ")") + "</div>" +
+        '<button type="button" class="bottom-strip-btn" data-quiz-add="' + escapeHtml(nodeId) + '">+ Add quiz</button></div>';
+    if (quizzesAll === null) html += '<div class="tool-panel-sub">Loading…</div>';
+    else if (!list.length) html += '<div class="tool-panel-sub">No quizzes for this topic yet. Generate one from the topic content, save it in Drive, then add its link here.</div>';
+    else html += list.map(q => quizRowHtml(q, false)).join("");
+    return html + "</div>";
+}
+
+// Queue view -> Quiz sub-tab.
+function queueQuizViewHtml() {
+    ensureQuizzesLoaded();
+    const html = scopeFilterHtml(queueFilterPath);
+    if (quizzesAll === null) return html + loadingHtml();
+    const list = sortQuizzes(quizzesForNodes(queueScopeIds()));
+    if (!list.length) return html + '<div class="practice-summary">No quizzes in this scope yet.</div>';
+    return html + list.map(q => quizRowHtml(q, true)).join("");
+}
+
+// ---- clicks (called from handlePracticeClick) ----
+function handleQuizClick(event) {
+    const start = event.target.closest("[data-quiz-start]");
+    if (start) {
+        window.open("quiz.html?id=" + encodeURIComponent(start.dataset.quizStart), "_blank", "noopener");
+        return true;
+    }
+    const add = event.target.closest("[data-quiz-add]");
+    if (add) { openQuizAddModal(add.dataset.quizAdd); return true; }
+    const del = event.target.closest("[data-quiz-delete]");
+    if (del) { deleteQuiz(del.dataset.quizDelete); return true; }
+    return false;
+}
+
+async function deleteQuiz(quizId) {
+    const q = (quizzesAll || []).find(x => String(x.quiz_id) === String(quizId));
+    const name = q && q.title ? q.title : "this quiz";
+    if (!confirm('Remove "' + name + '" from this topic?\n(The file in Drive is not deleted.)')) return;
+    try {
+        await fetch(GOOGLE_SHEET_API, {
+            method: "POST",
+            mode: "no-cors",
+            body: JSON.stringify({ action: "delete_quiz", quiz_id: quizId })
+        });
+    } catch (e) {
+        setMessage("Couldn't remove the quiz. Check your connection.", "error");
+        return;
+    }
+    quizzesAll = (quizzesAll || []).filter(x => String(x.quiz_id) !== String(quizId));
+    scheduleRender();
+    setTimeout(() => ensureQuizzesLoaded(true), 1500); // re-sync with the server's truth
+}
+
+// ---- Add Quiz popup ----
+function closeQuizAddModal() {
+    const m = document.getElementById("quiz-add-modal");
+    if (m) m.remove();
+    if (quizAddKeyHandler) {
+        document.removeEventListener("keydown", quizAddKeyHandler);
+        quizAddKeyHandler = null;
+    }
+}
+
+function openQuizAddModal(nodeId) {
+    closeQuizAddModal();
+    const info = topicInfo(nodeId);
+    const wrap = document.createElement("div");
+    wrap.id = "quiz-add-modal";
+    wrap.innerHTML =
+        '<div class="add-resource-overlay"><div class="add-resource-modal mcq-add-modal quiz-add-modal">' +
+        '<button type="button" class="modal-close" id="quiz-add-close">×</button>' +
+        "<h2>➕ Add Quiz</h2>" +
+        '<p class="add-resource-scope">Topic: ' + escapeHtml(info.title || nodeId) + "</p>" +
+        '<label class="quiz-lbl">Drive link of the quiz .html file</label>' +
+        '<input type="text" id="quiz-add-link" placeholder="https://drive.google.com/file/d/…/view" autocomplete="off">' +
+        '<div id="quiz-add-preview" class="quiz-add-preview">Paste the link — title and question count fill in automatically.</div>' +
+        '<label class="quiz-lbl">Title</label>' +
+        '<input type="text" id="quiz-add-title" placeholder="e.g. Basics recall">' +
+        '<div class="quiz-add-actions"><button type="button" class="bottom-strip-btn" id="quiz-add-save" disabled>Save quiz</button></div>' +
+        "</div></div>";
+    document.body.appendChild(wrap);
+
+    const linkEl = document.getElementById("quiz-add-link");
+    const titleEl = document.getElementById("quiz-add-title");
+    const prevEl = document.getElementById("quiz-add-preview");
+    const saveEl = document.getElementById("quiz-add-save");
+    let fileId = "";
+    let titleTouched = false;
+    let timer = null;
+    let token = 0;
+
+    function setPreview(text, kind) {
+        prevEl.textContent = text;
+        prevEl.className = "quiz-add-preview" + (kind ? " " + kind : "");
+    }
+
+    async function runPreview() {
+        const link = linkEl.value.trim();
+        const mine = ++token;
+        fileId = "";
+        saveEl.disabled = true;
+        if (!link) { setPreview("Paste the link — title and question count fill in automatically."); return; }
+        setPreview("Checking the file…");
+        try {
+            const res = await fetch(GOOGLE_SHEET_API + "?action=preview_quiz&ref=" + encodeURIComponent(link));
+            const d = await res.json();
+            if (mine !== token) return; // a newer paste replaced this one
+            if (!d || !d.ok) { setPreview((d && d.error) || "Couldn't read this file.", "err"); return; }
+            const i = d.info || {};
+            if (!i.has_data) { setPreview("This HTML has no quiz-data block. Regenerate it with the quiz prompt.", "err"); return; }
+            fileId = i.drive_file_id || "";
+            if (!titleTouched) titleEl.value = i.title || "";
+            const bits = [plural(i.question_count || 0, "question")];
+            if (i.exam) bits.push(i.exam);
+            if (i.language) bits.push(i.language);
+            setPreview("✓ " + bits.join(" · "), "ok");
+            saveEl.disabled = false;
+        } catch (e) {
+            if (mine === token) setPreview("Network error. Try again.", "err");
+        }
+    }
+
+    linkEl.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(runPreview, 600); });
+    titleEl.addEventListener("input", () => { titleTouched = true; });
+
+    saveEl.addEventListener("click", async () => {
+        const link = linkEl.value.trim();
+        if (!link || !fileId) return;
+        saveEl.disabled = true;
+        saveEl.textContent = "Saving…";
+        try {
+            await fetch(GOOGLE_SHEET_API, {
+                method: "POST",
+                mode: "no-cors",
+                body: JSON.stringify({ action: "save_quiz", node_id: nodeId, ref: link, title: titleEl.value.trim() })
+            });
+        } catch (e) {
+            setPreview("Couldn't reach the server.", "err");
+            saveEl.disabled = false;
+            saveEl.textContent = "Save quiz";
+            return;
+        }
+        // no-cors hides the response, so confirm by reading it back.
+        let found = false;
+        for (let attempt = 0; attempt < 3 && !found; attempt++) {
+            await new Promise(r => setTimeout(r, 1200));
+            try {
+                const res = await fetch(GOOGLE_SHEET_API + "?action=get_quizzes&node_id=" + encodeURIComponent(nodeId));
+                const d = await res.json();
+                found = ((d && d.quizzes) || []).some(q => String(q.drive_file_id) === fileId);
+            } catch (e) { /* retry */ }
+        }
+        if (!found) {
+            setPreview("Couldn't confirm the save. Check the Quizzes sheet, then try again.", "err");
+            saveEl.disabled = false;
+            saveEl.textContent = "Save quiz";
+            return;
+        }
+        closeQuizAddModal();
+        ensureQuizzesLoaded(true);
+    });
+
+    document.getElementById("quiz-add-close").addEventListener("click", closeQuizAddModal);
+    wrap.querySelector(".add-resource-overlay").addEventListener("click", ev => {
+        if (ev.target.classList.contains("add-resource-overlay")) closeQuizAddModal();
+    });
+    quizAddKeyHandler = ev => { if (ev.key === "Escape") closeQuizAddModal(); };
+    document.addEventListener("keydown", quizAddKeyHandler);
+    linkEl.focus();
+}
+
+// A quiz finished in another tab (quiz.html writes the EventLog to
+// localStorage) or the user came back to this tab: refresh the scores.
+window.addEventListener("storage", e => { if (e.key === "eventLog") scheduleRender(); });
+window.addEventListener("focus", scheduleRender);
 
 initPracticePage();

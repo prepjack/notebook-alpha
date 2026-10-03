@@ -5568,3 +5568,16 @@ a.bottom-strip-btn.practice-open{
         display:none !important;
     }
 }
+
+/* QUIZ (Phase 3-4) — append at the very END of style.css */
+.quiz-panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
+.quiz-row .practice-row-actions{display:flex;align-items:center;gap:8px}
+.quiz-del-btn{border:0;background:transparent;color:#a66;cursor:pointer;font-size:14px;padding:4px 6px;border-radius:6px}
+.quiz-del-btn:hover{background:#f6e6e6}
+.quiz-add-modal{width:min(520px,94vw)}
+.quiz-lbl{display:block;margin:10px 0 5px;color:#68736b;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+.quiz-add-preview{font:12px/1.5 Arial,sans-serif;color:var(--muted);margin:6px 0 4px;min-height:18px}
+.quiz-add-preview.ok{color:var(--green)}
+.quiz-add-preview.err{color:#b3261e}
+.quiz-add-actions{margin-top:14px;text-align:right}
+.quiz-add-actions .bottom-strip-btn:disabled{opacity:.5;cursor:not-allowed}

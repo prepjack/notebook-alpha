@@ -3273,7 +3273,7 @@ function renderPracticeTabStatus(node) {
         practiceTabRowHtml("Read", readStat, "read", topicId) +
         practiceTabRowHtml("Flashcards", fcStat, "flashcards", topicId) +
         practiceTabRowHtml("MCQ", attempted + " / " + totalLabel + " attempted", "mcq", topicId) +
-        practiceTabRowHtml("Future", "Coming soon", null, topicId);
+        practiceTabRowHtml("Quiz", "Open to see quizzes", "quiz", topicId);
 
     // First look at this topic this page load: total isn't cached yet —
     // fetch it, then repaint (only if still looking at the same topic).
