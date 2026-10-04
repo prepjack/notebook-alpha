@@ -5590,3 +5590,43 @@ a.bottom-strip-btn.practice-open{
 .quiz-host .qh-copyrow{margin-top:12px}
 .quiz-host .qh-sep{border:0;border-top:1px solid #e1e7e3;margin:16px 0 4px}
 .qh-listrow{font:12px/1.6 Arial,sans-serif;color:#46554d;padding:2px 0}
+
+/* QUIZ TYPES (counters, presets, custom types) — append at the END of style.css */
+.quiz-host .qh-presets{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 8px}
+.quiz-host .qh-preset{border:1px solid #cfd8d2;background:#f4f7f5;color:#2f3d35;border-radius:999px;padding:5px 12px;font:12px Arial,sans-serif;cursor:pointer}
+.quiz-host .qh-preset:hover{background:#e8efea}
+.quiz-host .qh-types{display:flex;flex-direction:column;gap:4px}
+.quiz-host .qh-trow{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 10px;border:1px solid #e1e7e3;border-radius:8px;background:#fff;opacity:.6}
+.quiz-host .qh-trow.on{opacity:1;border-color:#9bb8a6;background:#f2f8f4}
+.quiz-host .qh-tname{font:13px Arial,sans-serif;color:#2f3d35}
+.quiz-host .qh-tname em{font-style:normal;color:#7a867f;font-size:11px}
+.quiz-host .qh-tctl{display:flex;align-items:center;gap:4px;flex-shrink:0}
+.quiz-host .qh-step{width:28px;height:28px;border:1px solid #cfd8d2;background:#fff;border-radius:6px;font:16px/1 Arial,sans-serif;cursor:pointer;padding:0}
+.quiz-host .qh-step:hover{background:#e8efea}
+.quiz-host input[type="number"].qh-tcount{width:44px;text-align:center;padding:5px 2px}
+.quiz-host .qh-del{border:0;background:transparent;color:#a66;cursor:pointer;font-size:14px;padding:4px 6px}
+.quiz-host .qh-addtype-btn{margin-top:8px;border:1px dashed #9bb8a6;background:transparent;color:#2f6b45;border-radius:8px;padding:6px 12px;font:12px Arial,sans-serif;cursor:pointer}
+.quiz-host .qh-addform{margin-top:8px;display:flex;flex-direction:column;gap:6px}
+.quiz-host .qh-addform[hidden]{display:none}
+.quiz-host .qh-addform textarea{width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid #cfd8d2;border-radius:8px;font:13px Arial,sans-serif;resize:vertical}
+.quiz-host .qh-addform-row{display:flex;gap:8px}
+.quiz-host .qh-addform-row button{border:1px solid #cfd8d2;background:#f4f7f5;border-radius:8px;padding:6px 14px;font:12px Arial,sans-serif;cursor:pointer}
+.quiz-host .qh-total{font-weight:400;text-transform:none;letter-spacing:0;color:#2f6b45}
+
+/* QUESTION TYPES expand/collapse strip — append at the END of style.css
+   (after the quiz-types-styles.css block) */
+.quiz-host .qh-strip{display:flex;align-items:center;gap:8px;width:100%;margin-top:10px;padding:9px 12px;border:1px solid #cfd8d2;border-radius:8px;background:#f4f7f5;cursor:pointer;text-align:left;font:13px Arial,sans-serif;color:#2f3d35}
+.quiz-host .qh-strip:hover{background:#e8efea}
+.quiz-host .qh-arrow{display:inline-block;width:12px;transition:transform .15s}
+.quiz-host .qh-strip[aria-expanded="true"] .qh-arrow{transform:rotate(90deg)}
+.quiz-host .qh-striplbl{font-weight:700;white-space:nowrap}
+.quiz-host .qh-summary{margin-left:auto;color:#2f6b45;font-size:12px;text-align:right}
+.quiz-host .qh-typesbody{margin-top:8px}
+.quiz-host .qh-typesbody[hidden]{display:none}
+
+/* QUIZ MODE (save to site / quick attempt in chat) — append at the END of style.css */
+.quiz-host .qh-modes{display:flex;flex-direction:column;gap:6px;margin:4px 0 4px}
+.quiz-host .qh-mode{display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1px solid #e1e7e3;border-radius:8px;background:#fff;cursor:pointer;font:12px/1.5 Arial,sans-serif;color:#46554d}
+.quiz-host .qh-mode:has(input:checked){border-color:#9bb8a6;background:#f2f8f4}
+.quiz-host .qh-mode input{margin-top:3px}
+.quiz-host .qh-mode strong{color:#2f3d35}
