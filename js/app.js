@@ -2103,6 +2103,23 @@ function __contentPromptSelfCheck() {
 }
 window.__contentPromptSelfCheck = __contentPromptSelfCheck;
 
+const CONTENT_PROMPT_EXTRA_KEY = "alphaContentPromptExtra";
+
+function getContentPromptExtra() {
+    const box = document.getElementById("content-prompt-extra");
+    if (box) return box.value;
+    try { return localStorage.getItem(CONTENT_PROMPT_EXTRA_KEY) || ""; } catch (_) { return ""; }
+}
+
+function saveContentPromptExtra(box) {
+    try { localStorage.setItem(CONTENT_PROMPT_EXTRA_KEY, box.value); } catch (_) { /* private mode */ }
+}
+
+function clearContentPromptExtra() {
+    const box = document.getElementById("content-prompt-extra");
+    if (box) box.value = "";
+    try { localStorage.removeItem(CONTENT_PROMPT_EXTRA_KEY); } catch (_) { /* private mode */ }
+}
 
 function openAddContentLink() {
     if (!selectedTopicNode) return;
@@ -2156,6 +2173,11 @@ function openAddContentLink() {
                             </div>
                         </div>
                     </div>
+                    <div class="prompt-extra-box" style="margin:10px 0;">
+                        <label for="content-prompt-extra" style="display:block;font-weight:600;font-size:13px;margin-bottom:4px;">Extra instructions for this topic <span class="field-optional">(optional)</span></label>
+                        <textarea id="content-prompt-extra" rows="3" style="width:100%;box-sizing:border-box;" placeholder="e.g. Is topic me pictorial zyada rakho, maps/diagrams ke saath. Ya: yahan stats ke formulas aayenge, step-by-step solved example do." oninput="saveContentPromptExtra(this)">${(() => { try { return escapeHtml(localStorage.getItem("alphaContentPromptExtra") || ""); } catch (_) { return ""; } })()}</textarea>
+                        <button type="button" class="content-action" style="margin-top:4px;" onclick="clearContentPromptExtra()">Clear</button>
+                    </div>
                     <p class="prompt-block-desc"><strong>What it does:</strong> copies a ready-made prompt for this topic (its name and place in the hierarchy are already filled in). The AI turns your source material into a study package: <code>content.md</code> with the versions ticked above (English, Hindi, AI-explainer), plus any images. Untick a version to leave it out — the prompt gets shorter too.</p>
                     <p class="prompt-block-desc"><strong>What to do:</strong> paste it into an AI that can create files (Claude, or ChatGPT with code execution), attach your notes or PDF, download the ZIP it returns, unzip it, and drag the files into this topic's Drive folder. Then paste the folder link below.</p>
 
@@ -2177,6 +2199,25 @@ function openAddContentLink() {
                     <p class="prompt-block-desc"><strong>What it does:</strong> copies a prompt that already contains this topic's English and Hindi text. The AI writes 5 to 20 bilingual revision cards (English / हिंदी) that reuse the content's own wording.</p>
                     <p class="prompt-block-desc"><strong>What to do:</strong> use it once the content is live. Paste it into any AI, save the cards it returns as <code>flashcards.md</code> in the same Drive folder, then reload the topic. Tick "EN only" for a shorter paste.</p>
                 </div>
+
+                <div class="prompt-block">
+                    <div class="prompt-block-row">
+                        <button type="button" class="content-action" id="copy-infographic-prompt-btn" onclick="copyInfographicPrompt()">🖼 Copy Infographic Prompt</button>
+                        <label class="flashcard-enonly"><input type="checkbox" id="infographic-en-only" checked> English labels only (safer)</label>
+                    </div>
+
+                    ${buildInfographicSectionPicker()}
+                    <p class="prompt-block-desc"><strong>What it does:</strong> copies a prompt with this topic's text inside. An AI with image generation (e.g. ChatGPT) makes 1 to 2 summary infographics and gives you a ready "Paste block".</p>
+                    <p class="prompt-block-desc"><strong>What to do:</strong></p>
+                    <ol class="prompt-block-desc">
+                        <li>Paste the prompt into ChatGPT and download the images (<code>infographic-1.png</code>, ...).</li>
+                        <li>Put the images in this topic's Drive folder, next to <code>content.md</code>.</li>
+                        <li>Open <code>content.md</code> and, right below each <code>&lt;!-- ===LANG:EN=== --&gt;</code> line (also HI and AI), paste the "Paste block" the AI gave.</li>
+                        <li>Save <code>content.md</code> back in the same Drive folder (only one .md file there), then reload this site.</li>
+                    </ol>
+                </div>
+
+
 
                 <div class="prompt-block">
                     <div class="prompt-block" id="quiz-section-host"></div>
@@ -2288,7 +2329,7 @@ function copyContentLinkAiPrompt() {
     // Function replacers, so "$"-sequences inside a title can't be misread.
     const langs = getSelectedContentPromptLangs();
     const rawPrompt = window.NotebookPrompt
-        ? window.NotebookPrompt.build(langs, getSelectedContentPromptStyle())
+        ? window.NotebookPrompt.build(langs, getSelectedContentPromptStyle(), getContentPromptExtra())
         : buildContentPrompt(langs, getSelectedContentPromptStyle());
     const prompt = rawPrompt
         .replace("<PUT HIERARCHY PATH HERE>", () => breadcrumb)
@@ -2364,6 +2405,64 @@ function cleanContentForPrompt(text) {
         .trim();
 }
 
+const SECTION_FENCE = "\u0060\u0060\u0060";
+
+// Splits a content block at its "## " headings. "0" = text before the first heading.
+function splitContentIntoSections(text) {
+    const sections = [{ key: "0", title: "", text: "" }];
+    let inFence = false;
+    String(text || "").split(/\r?\n/).forEach(line => {
+        if (line.trim().startsWith(SECTION_FENCE)) inFence = !inFence;
+        const m = !inFence && line.match(/^ {0,3}(#{1,2})\s+(.*)$/);
+        const title = m ? m[2].trim() : "";
+        const num = title.match(/^(\d+)[.):]/);
+        // a section starts at every "##" heading, or at a single "#" heading that is numbered ("# 1. Title")
+        if (m && (m[1].length === 2 || num)) {
+            sections.push({ key: num ? num[1] : "t" + sections.length, title, text: line });
+        } else {
+            const cur = sections[sections.length - 1];
+            cur.text += (cur.text ? "\n" : "") + line;
+        }
+    });
+    return sections;
+}
+
+// The "Choose sections" checklist shown inside the Add Content popup.
+function buildInfographicSectionPicker() {
+    const split = currentLanguageSplit;
+    const base = split && (split.en || split.hi || split.ai);
+    if (!base) return "";
+    const secs = splitContentIntoSections(base).filter(s => s.key !== "0");
+    if (secs.length < 2) return "";
+    return `<details class="content-link-guide" style="margin:6px 0;">
+        <summary>Choose sections (optional, all are ticked by default)</summary>
+        <div style="margin:6px 0;">
+            <button type="button" class="content-action" onclick="setInfographicSections(true)">Tick all</button>
+            <button type="button" class="content-action" onclick="setInfographicSections(false)">Untick all</button>
+        </div>
+        <div id="infographic-sections" style="max-height:180px;overflow:auto;">
+            ${secs.map(s => `<label style="display:block;margin:2px 0;"><input type="checkbox" data-info-section="${escapeHtml(s.key)}" checked> ${escapeHtml(s.title)}</label>`).join("")}
+        </div>
+    </details>`;
+}
+
+function setInfographicSections(state) {
+    document.querySelectorAll("#add-content-link-modal [data-info-section]").forEach(b => { b.checked = state; });
+}
+
+// Returns the loaded content with only the ticked sections (infographic only).
+function filterSplitForKind(kind, split) {
+    if (kind !== "infographic" || !split) return split;
+    const boxes = [...document.querySelectorAll("#add-content-link-modal [data-info-section]")];
+    if (!boxes.length) return split;
+    const keep = new Set(boxes.filter(b => b.checked).map(b => b.dataset.infoSection));
+    if (keep.size === boxes.length) return split;   // everything ticked = untouched
+    const cut = text => text
+        ? splitContentIntoSections(text).filter(s => s.key === "0" || keep.has(s.key)).map(s => s.text).join("\n\n")
+        : text;
+    return { ...split, en: cut(split.en), hi: cut(split.hi), ai: cut(split.ai) };
+}
+
 const TOPIC_PROMPT_KINDS = {
     flashcard: {
         template: FLASHCARD_AI_PROMPT,
@@ -2371,6 +2470,13 @@ const TOPIC_PROMPT_KINDS = {
         enOnlyId: "flashcard-en-only",
         name: "Flashcard prompt",
         next: "Paste it into any AI, then save its output as flashcards.md in this topic's Drive folder."
+    },
+    infographic: {
+        get template() { return (window.NotebookPrompt && window.NotebookPrompt.infographic) || ""; },
+        buttonId: "copy-infographic-prompt-btn",
+        enOnlyId: "infographic-en-only",
+        name: "Infographic prompt",
+        next: "1) Paste it into ChatGPT and download the images.\n2) Put them in this topic's Drive folder next to content.md.\n3) In content.md, paste the Paste block the AI gives right below each <!-- ===LANG:XX=== --> line.\n4) Save content.md back in Drive and reload the site."
     },
 };
 
@@ -2383,7 +2489,7 @@ function copyTopicContentPrompt(kind) {
         return;
     }
     // Which versions this topic's file actually has (a file may hold only some of EN / HI / AI).
-    const split = currentLanguageSplit;
+        const split = filterSplitForKind(kind, currentLanguageSplit);
     const hasEn = !!(split && String(split.en || "").trim());
     const hasHi = !!(split && String(split.hi || "").trim());
     const hasAi = !!(split && String(split.ai || "").trim());
@@ -2411,6 +2517,14 @@ function copyTopicContentPrompt(kind) {
         contentBlock = "NOTE: This topic only has the AI-explainer version, written in conversational Hinglish (Devanagari for Hindi words, Roman script for technical English terms). There is no separate English or Hindi version, so write both the English side and the Hindi side yourself in standard UGC NET terminology, taking every idea and fact only from this text and keeping its technical terms exactly as written.\n\n" +
             "=== CONTENT (AI EXPLAINER — HINGLISH) ===\n" + cleanContentForPrompt(split.ai);
         included = "AI-explainer version only — the AI will write both the English and Hindi sides";
+    }
+
+    if (kind === "infographic") {
+        included = (hasEn && hasHi && !enOnly)
+            ? "English + Hindi content included, labels will be bilingual"
+            : (!hasEn && hasHi)
+                ? "Hindi content included, labels will be in Hindi"
+                : "content included, labels will be English only";
     }
 
     const topicTitle = selectedTopicNode.title || "";
@@ -2461,7 +2575,14 @@ function copyTopicContentPrompt(kind) {
 }
 
 function copyFlashcardPrompt() { copyTopicContentPrompt("flashcard"); }
-
+function copyInfographicPrompt() {
+    const boxes = [...document.querySelectorAll("#add-content-link-modal [data-info-section]")];
+    if (boxes.length && !boxes.some(b => b.checked)) {
+        alert("Please tick at least one section.");
+        return;
+    }
+    copyTopicContentPrompt("infographic");
+}
 
 function fallbackCopyText(text, onSuccess, onFailure) {
     const ta = document.createElement("textarea");

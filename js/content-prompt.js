@@ -286,7 +286,7 @@ Web research is allowed only to improve explanations, examples, analogies, or mn
 - Preserve important terminology, names, numbers, headings, and ordering. Do not silently swap source terminology for general-knowledge terms.
 - If a figure, table, or diagram holds important information, represent it faithfully in Markdown, Mermaid, a chart, or a clearly specified asset.
 - Any explanatory analogy must be clearly educational and not presented as a source fact.
-- Voice: write as the author of these notes, stating every fact directly and confidently, in any language. A reader should never be able to tell a source document existed, so no sentence mentions where the information came from.`;
+- Write as direct study material. Do not use phrases like "according to the source", "as per the material", "the author states", "in the provided PDF", unless that wording is itself part of the source.`;
     }
 
     /* ---------- 10. FINAL OUTPUT + CHECKLIST ---------- */
@@ -299,7 +299,7 @@ Web research is allowed only to improve explanations, examples, analogies, or mn
             "every Mermaid block follows the MERMAID rules (no \";\", quoted flowchart labels, each timeline year written once)",
             "chart JSON is valid",
             "{{}} is used only for genuine glossary-worthy terms, once per language block" + (n > 1 ? ", consistently across " + L.join("/") : ""),
-            (c.src.length ? c.srcSlash + " content" : "the content") + " states facts directly, with no mention of a source or material anywhere",
+            (c.src.length ? c.srcSlash + " content" : "the content") + " has no \"according to the source\" style phrasing",
             ...(c.hasAI ? ["the AI Learning Version teaches rather than paraphrases, uses real-life examples purposefully, and " +
                 (c.first ? "keeps its headings and numbering mapped to " + c.srcSlash : "keeps its headings in the source's order without dropping any source content")] : []),
             "every PNG was opened and checked: " + (c.needsDevanagari ? "no empty boxes or broken Devanagari, bilingual (English / हिन्दी) labels" : "no overlap or clipping")
@@ -321,9 +321,9 @@ Create the complete Notebook Alpha study-content ZIP package for the topic and s
     }
 
     /* ---------- ASSEMBLY ---------- */
-    function build(langs, style) {
+    function build(langs, style, extra) {
         const c = ctx(langs, style);
-        return [
+        const base = [
             header(),
             pkg(),
             markdown(c),
@@ -335,6 +335,14 @@ Create the complete Notebook Alpha study-content ZIP package for the topic and s
             fidelity(c),
             finish(c)
         ].filter(Boolean).join("\n\n");
+
+        const extraText = String(extra || "").trim();
+        if (!extraText) return base;
+
+        return base + "\n\n" +
+            banner("EXTRA INSTRUCTIONS FOR THIS TOPIC — HIGHEST PRIORITY") + "\n" +
+            extraText + "\n\n" +
+            "These instructions override any conflicting default above. Still keep the LANG markers, heading numbering, Mermaid rules, and package rules exactly as specified. Now create the package.";
     }
 
     function preview(langs, style) {
@@ -344,7 +352,58 @@ Create the complete Notebook Alpha study-content ZIP package for the topic and s
         return p;
     }
 
-    const api = { build, preview };
+    /* =========================================================
+       INFOGRAPHIC PROMPT — used by the "Copy Infographic Prompt"
+       button. app.js fills the three placeholders below
+       (topic name, hierarchy path, the topic's own text).
+       ========================================================= */
+    const INFOGRAPHIC_PROMPT = `You are designing study infographics for Notebook Alpha, an exam-preparation website.
+
+TOPIC: <PUT TOPIC NAME HERE>
+PATH: <PUT HIERARCHY PATH HERE>
+
+TASK
+Create 1 to 3 infographic IMAGES (PNG) that summarise the study content at the bottom. Use your built-in image-generation tool if you have one; otherwise draw them with code (HTML+CSS screenshotted in headless Chromium). Reply with the finished images and the "Paste block" described under DELIVERY, nothing else.
+
+HOW MANY AND WHAT
+- Default is 1 or 2 infographics. Make a 3rd only if the topic clearly has three separate big ideas. Never make filler.
+- Each infographic explains ONE clear idea in the form the content naturally calls for: a process or sequence, a classification or hierarchy, a comparison, a timeline, cause and effect, or a map.
+- Do not repeat what another infographic already shows.
+
+CONTENT RULES (this is exam content, so accuracy matters more than beauty)
+- Use only facts, terms, names, dates, and numbers that appear in the content below, spelled exactly as written there. Add no new fact and no outside example.
+- Image text must be short: a title, labels, and short phrases. No paragraphs.
+- After generating each image, read every word in it. If any word is misspelled, any date or number is wrong, or anything is cut off, regenerate it. Fix it before delivering.
+
+DESIGN RULES
+- One clear title. 4 to 8 sections at most. Use arrows or numbers where order matters.
+- Square or landscape (about 3:2) layout, readable on a phone: large text, high contrast, light background, one consistent colour scheme.
+- No decorative clutter, no watermark, no logos, no QR code, no mention of any source.
+
+LANGUAGE OF THE IMAGE TEXT
+- If the content below has both a "=== CONTENT (ENGLISH) ===" part and a "=== CONTENT (हिंदी) ===" part: every label reads "English / हिन्दी" (short labels only). Check every Devanagari word for broken or detached vowel signs and empty boxes. If any Hindi text is not perfectly clean, regenerate that image with English-only labels instead and tell me.
+- If only a "=== CONTENT (हिंदी) ===" part is given: write the labels in Hindi (Devanagari) only, and run the same check for broken vowel signs and empty boxes. If it cannot be made clean, use English-only labels instead and tell me.
+- If only an English part, or only an "AI EXPLAINER" part, is given: English labels only.
+- Dates and numbers always in Roman digits.
+
+DELIVERY
+- Give each image as a downloadable PNG named exactly infographic-1.png, infographic-2.png, infographic-3.png (lowercase, with hyphen).
+- If you can only display images and cannot offer downloads, say so in one line.
+- Then output this "Paste block" exactly once, inside a code block, with one line per image (a short English caption) and filenames matching the images you made:
+
+${BT}
+![Short caption for infographic 1](infographic-1.png)
+
+![Short caption for infographic 2](infographic-2.png)
+${BT}
+
+- Add nothing else: no long explanation, no HTML.
+
+STUDY CONTENT
+
+<PASTE CONTENT HERE>`;
+
+    const api = { build, preview, infographic: INFOGRAPHIC_PROMPT };
     global.NotebookPrompt = api;
     if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);
