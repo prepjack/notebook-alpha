@@ -1556,6 +1556,16 @@ Use substantially more visual support than a minimal notes file would need — b
 Before creating any visual, ask: "Will this help the learner understand, remember, distinguish, connect, or recall the concept?" If yes, create it. If no, skip it. Prefer one large, clear, readable visual over several small cluttered ones. Avoid visual clutter — do not add a visual just because the topic could technically support one. Use simple lowercase-hyphenated filenames such as information-lifecycle.png. Every referenced image must actually exist in the final package and must work when the folder/ZIP is linked to the website.
 
 ====================================================
+IMAGE TEXT RENDERING — NO BOXES — CRITICAL
+====================================================
+Every PNG is code-rendered. Hindi becomes empty boxes or broken vowel signs unless you do ALL of this:
+1. Before drawing, find a real Devanagari font (Noto Sans Devanagari / Mukta / Hind / Lohit; check fc-list :lang=hi, install fonts-noto-core if missing) and confirm with fontTools that अ क ् ा ि ं are in its cmap. Never use the default font or a web-font URL.
+2. Render with HTML+CSS (@font-face to the local font file) screenshotted via headless Chromium. Alternative: Pillow with Layout.RAQM (check features.check("raqm")). Never use matplotlib text or Pillow basic layout for Hindi.
+3. Every label inside an image is bilingual: "English / हिन्दी". Dates and numbers stay in Roman digits. Keep image text short.
+4. After saving, check all characters against the font cmap, then actually open each PNG and look for boxes, detached matras, overlap, clipping. Fix and re-render until clean.
+5. If no working font/shaping is possible, never ship boxes: use English-only labels (mark it in the manifest) or a Mermaid diagram/Markdown table instead.
+   
+====================================================
 SCOPE AND EDUCATIONAL QUALITY
 ====================================================
 Using the hierarchy above, calibrate depth and scope to this exact topic. Stay within this topic's boundaries and avoid repeating content that belongs primarily to sibling or parent topics.
@@ -1695,7 +1705,7 @@ Before finishing, verify:
 - {{}} is used only for genuine glossary-worthy terms, once per language block, consistently across EN/HI/AI
 - EN/HI content contains no unnecessary "according to the source"-style phrasing
 - the AI Learning Version teaches rather than merely paraphrasing, uses real-life examples purposefully, and keeps its headings/numbering mapped to EN/HI
-- the ZIP is complete and self-contained
+- every PNG was visually inspected, has no empty boxes or broken Devanagari, and uses bilingual (English / हिन्दी) labels
 
 Create the complete Notebook Alpha study-content ZIP package for the topic and source material provided.`;
 
@@ -2020,11 +2030,66 @@ function buildContentPromptFromRules(langs) {
     return p;
 }
 
-// The prompt for the chosen versions. All three ticked = the original text, untouched.
-function buildContentPrompt(langs) {
+/* =========================================================
+   CONTENT PROMPT STYLE — Detailed / Exam Notes
+   ========================================================= */
+const CONTENT_PROMPT_STYLE_KEY = "alphaContentPromptStyle";
+
+function loadContentPromptStyle() {
+    try { return localStorage.getItem(CONTENT_PROMPT_STYLE_KEY) === "notes" ? "notes" : "detailed"; }
+    catch (_) { return "detailed"; }
+}
+
+function getSelectedContentPromptStyle() {
+    const r = document.querySelector("#add-content-link-modal [data-content-style]:checked");
+    return r && r.dataset.contentStyle === "notes" ? "notes" : (r ? "detailed" : loadContentPromptStyle());
+}
+
+function onContentPromptStyleChange(radio) {
+    try { localStorage.setItem(CONTENT_PROMPT_STYLE_KEY, radio.dataset.contentStyle === "notes" ? "notes" : "detailed"); } catch (_) { /* private mode */ }
+}
+
+function applyContentPromptStyle(p, style, langs) {
+    if (style !== "notes") return p;
     const L = normalizeContentPromptLangs(langs);
-    if (L.length === CONTENT_PROMPT_LANGS.length) return CONTENT_LINK_AI_PROMPT;
-    return buildContentPromptFromRules(L);
+    const src = L.filter(l => l !== "AI");
+    const applyTo = src.length
+        ? "the " + joinPromptList(src, "and") + " block" + (src.length > 1 ? "s" : "") +
+          (L.includes("AI") ? " (the AI block keeps its teaching style — see AI LEARNING VERSION below)" : "")
+        : "the AI block (keep its teaching techniques, but write them as compact points, not paragraphs)";
+
+    const scope = promptBanner("SCOPE AND NOTES STYLE — CRITICAL") +
+`Using the hierarchy above, calibrate depth and scope to this exact topic. Stay within this topic's boundaries and avoid repeating content that belongs primarily to sibling or parent topics.
+
+Write ${applyTo} as compact pointwise exam notes, the way a top-scoring student condenses a PDF for revision:
+- Short bullets, one idea per line. No long paragraphs; at most a one-line lead-in under a heading.
+- Bold every key term, name, date, number, and keyword an examiner could ask.
+- Definitions in one line: **Term**: meaning.
+- Put comparisons, classifications, types, features, merits/demerits, and timelines in tables or arrow chains (A → B → C); use Mermaid for processes and hierarchies.
+- Keep the source's sequence, numbering, and terminology.
+- Add short memory aids (mnemonic, acronym, pattern) and one-line "Exam Trap" or "Common Confusion" callouts (as > blockquotes) only where accurate and useful.
+- End each ## section with 2-4 "Quick Revision" bullets of its must-remember points.
+- Compress wording, never content: every exam-relevant fact, term, name, number, date, classification, and example in the source must still appear. Never drop a point just because it is short.
+- No filler, motivational language, decorative sections, or repetition.
+
+`;
+    p = replacePromptSection(p, "SCOPE AND EDUCATIONAL QUALITY", scope);
+
+    p = promptSub(p, /IMAGES — GENEROUS BUT PURPOSEFUL:[\s\S]*?(?=\n={20,}\n)/,
+`VISUALS — FEWER, ONLY WHEN THEY BEAT BULLETS:
+Prefer Markdown tables, arrow chains, and Mermaid diagrams (the website renders them with its own fonts). Create a PNG only when a real diagram, map, labelled figure, or timeline would teach faster than any table or Mermaid can — typically 0 to 3 per topic. Before creating one ask: "Will this help the learner understand, remember, or distinguish the concept?" If not, skip it. Use simple lowercase-hyphenated filenames such as information-lifecycle.png. All PNG text must follow IMAGE TEXT RENDERING below.
+`);
+
+    p = promptSub(p, "- Explain concepts clearly rather than listing keywords.",
+        "- Write as compact pointwise exam notes (see SCOPE AND NOTES STYLE), not as paragraphs.");
+    return p;
+}
+
+// The prompt for the chosen versions. All three ticked = the original text, untouched.
+function buildContentPrompt(langs, style) {
+    const L = normalizeContentPromptLangs(langs);
+    const base = L.length === CONTENT_PROMPT_LANGS.length ? CONTENT_LINK_AI_PROMPT : buildContentPromptFromRules(L);
+    return applyContentPromptStyle(base, style, L);
 }
 
 // Console helper: rebuilds the FULL prompt from the rules above and compares it
@@ -2067,6 +2132,15 @@ function openAddContentLink() {
                                 const savedLangs = loadContentPromptLangs();
                                 return CONTENT_PROMPT_LANGS.map(l =>
                                     `<label class="flashcard-enonly"><input type="checkbox" data-content-lang="${l}" ${savedLangs.includes(l) ? "checked" : ""} onchange="onContentPromptLangChange(this)"> ${l}</label>`
+                                ).join("");
+                            })()}
+                        </span>
+                        <span class="prompt-lang-picker" role="group" aria-label="Notes style">
+                            <span class="prompt-lang-label">Style:</span>
+                            ${(() => {
+                                const savedStyle = loadContentPromptStyle();
+                                return [["detailed", "Detailed"], ["notes", "Exam Notes"]].map(([v, label]) =>
+                                    `<label class="flashcard-enonly"><input type="radio" name="content-prompt-style" data-content-style="${v}" ${savedStyle === v ? "checked" : ""} onchange="onContentPromptStyleChange(this)"> ${label}</label>`
                                 ).join("");
                             })()}
                         </span>
@@ -2213,7 +2287,10 @@ function copyContentLinkAiPrompt() {
     const breadcrumb = buildTopicBreadcrumb(selectedTopicNode);
     // Function replacers, so "$"-sequences inside a title can't be misread.
     const langs = getSelectedContentPromptLangs();
-    const prompt = buildContentPrompt(langs)
+    const rawPrompt = window.NotebookPrompt
+        ? window.NotebookPrompt.build(langs, getSelectedContentPromptStyle())
+        : buildContentPrompt(langs, getSelectedContentPromptStyle());
+    const prompt = rawPrompt
         .replace("<PUT HIERARCHY PATH HERE>", () => breadcrumb)
         .replace("<PUT TOPIC NAME HERE>", () => topicTitle);
 
