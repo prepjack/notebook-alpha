@@ -2191,6 +2191,7 @@ function openAddContentLink() {
                     </div>
                 </div>
 
+                ${buildInfographicSectionPicker()}
                 <div class="prompt-block">
                     <div class="prompt-block-row">
                         <button type="button" class="content-action" id="copy-flashcard-prompt-btn" onclick="copyFlashcardPrompt()">🃏 Copy Flashcard Prompt</button>
@@ -2206,7 +2207,6 @@ function openAddContentLink() {
                         <label class="flashcard-enonly"><input type="checkbox" id="infographic-en-only" checked> English labels only (safer)</label>
                     </div>
 
-                    ${buildInfographicSectionPicker()}
                     <p class="prompt-block-desc"><strong>What it does:</strong> copies a prompt with this topic's text inside. An AI with image generation (e.g. ChatGPT) makes 1 to 2 summary infographics and gives you a ready "Paste block".</p>
                     <p class="prompt-block-desc"><strong>What to do:</strong></p>
                     <ol class="prompt-block-desc">
@@ -2217,7 +2217,9 @@ function openAddContentLink() {
                     </ol>
                 </div>
 
-
+                <div class="prompt-block">
+                    <div class="prompt-block" id="visual-aids-host"></div>
+                </div>
 
                 <div class="prompt-block">
                     <div class="prompt-block" id="quiz-section-host"></div>
@@ -2254,6 +2256,20 @@ All local filenames above must exist in the same linked folder.</pre>
         </div>`;
     document.body.appendChild(modal);
 
+    const vaHost = document.getElementById("visual-aids-host");
+    if (vaHost && window.VisualAids) {
+        window.VisualAids.mount(vaHost, {
+            topic: selectedTopicNode.title || "",
+            breadcrumb: buildTopicBreadcrumb(selectedTopicNode),
+            getSplit: () => filterSplitForKind("visual", currentLanguageSplit),
+            noSectionTicked: () => {
+                const boxes = [...document.querySelectorAll("#add-content-link-modal [data-info-section]")];
+                return boxes.length > 0 && !boxes.some(b => b.checked);
+            },
+            clean: cleanContentForPrompt
+        });
+    }
+
     const quizHost = document.getElementById("quiz-section-host");
     if (quizHost && window.QuizPrompt) {
         window.QuizPrompt.mount(quizHost, {
@@ -2262,7 +2278,7 @@ All local filenames above must exist in the same linked folder.</pre>
             topic: selectedTopicNode.title || "",
             subject: String(buildTopicBreadcrumb(selectedTopicNode) || "").split(" → ")[0],
             parent: (function () { const p = String(buildTopicBreadcrumb(selectedTopicNode) || "").split(" → "); return p.length > 1 ? p[p.length - 2] : ""; })(),
-            getSplit: () => currentLanguageSplit,
+            getSplit: () => filterSplitForKind("quiz", currentLanguageSplit),
             clean: cleanContentForPrompt
         });
     }
@@ -2435,7 +2451,7 @@ function buildInfographicSectionPicker() {
     const secs = splitContentIntoSections(base).filter(s => s.key !== "0");
     if (secs.length < 2) return "";
     return `<details class="content-link-guide" style="margin:6px 0;">
-        <summary>Choose sections (optional, all are ticked by default)</summary>
+        <summary>Choose sections for the prompts below (optional, all ticked by default)</summary>
         <div style="margin:6px 0;">
             <button type="button" class="content-action" onclick="setInfographicSections(true)">Tick all</button>
             <button type="button" class="content-action" onclick="setInfographicSections(false)">Untick all</button>
@@ -2452,7 +2468,7 @@ function setInfographicSections(state) {
 
 // Returns the loaded content with only the ticked sections (infographic only).
 function filterSplitForKind(kind, split) {
-    if (kind !== "infographic" || !split) return split;
+    if (!split) return split;
     const boxes = [...document.querySelectorAll("#add-content-link-modal [data-info-section]")];
     if (!boxes.length) return split;
     const keep = new Set(boxes.filter(b => b.checked).map(b => b.dataset.infoSection));
@@ -2489,7 +2505,12 @@ function copyTopicContentPrompt(kind) {
         return;
     }
     // Which versions this topic's file actually has (a file may hold only some of EN / HI / AI).
-        const split = filterSplitForKind(kind, currentLanguageSplit);
+        const pickBoxes = [...document.querySelectorAll("#add-content-link-modal [data-info-section]")];
+    if (pickBoxes.length && !pickBoxes.some(b => b.checked)) {
+        alert("Please tick at least one section.");
+        return;
+    }
+    const split = filterSplitForKind(kind, currentLanguageSplit);
     const hasEn = !!(split && String(split.en || "").trim());
     const hasHi = !!(split && String(split.hi || "").trim());
     const hasAi = !!(split && String(split.ai || "").trim());
