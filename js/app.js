@@ -2216,6 +2216,11 @@ function openAddContentLink() {
                 </details>
 
                 <details class="content-link-guide">
+                    <summary>🔬 Research &amp; PYQ</summary>
+                    <div class="prompt-block" id="research-pyq-host"></div>
+                </details>
+
+                <details class="content-link-guide">
                     <summary>Supported content formats</summary>
                     <pre class="content-link-guide-body">## Heading
 **bold**  *italic*
@@ -2256,6 +2261,16 @@ All local filenames above must exist in the same linked folder.</pre>
                 const boxes = [...document.querySelectorAll("#add-content-link-modal [data-info-section]")];
                 return boxes.length > 0 && !boxes.some(b => b.checked);
             },
+            clean: cleanContentForPrompt
+        });
+    }
+
+    const rpHost = document.getElementById("research-pyq-host");
+    if (rpHost && window.ResearchPYQ) {
+        window.ResearchPYQ.mount(rpHost, {
+            topic: selectedTopicNode.title || "",
+            breadcrumb: buildTopicBreadcrumb(selectedTopicNode),
+            getSplit: () => filterSplitForKind("visual", currentLanguageSplit),
             clean: cleanContentForPrompt
         });
     }

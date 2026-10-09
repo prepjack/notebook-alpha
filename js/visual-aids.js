@@ -16,9 +16,9 @@
          clean(text)       -> the page's cleanContentForPrompt()
        }
 
-   TWO SMALL LISTS drive everything:
-     TYPES    = what to make   (infographic, memory picture, ...)
-     METHODS  = how to draw it (AI picture, code, Mermaid/table, AI chooses)
+   TWO SMALL LISTS drive everything. EVERY choice produces IMAGES.
+     TYPES    = what to make   (infographic, diagram, memory picture, mnemonic card, ...)
+     METHODS  = how to draw it (AI picture, code, AI chooses)
    Each kind says which methods suit it (TYPES[].methods, first = default).
    To add a kind or a method, add one entry; the dropdowns and the prompt
    follow automatically.
@@ -31,25 +31,32 @@
     var LS_EN = "visualAids:enOnly";
     var BT = "\u0060\u0060\u0060";
 
-    /* ---------- HOW to draw ---------- */
+    /* ---------- HOW to draw (all of them make images) ---------- */
     var METHODS = {
-        ai_picture: { label: "AI picture", fileOnly: false },
-        code:       { label: "Code (exact text)", fileOnly: false },
-        mermaid:    { label: "Mermaid / table (no image)", fileOnly: true },
-        auto:       { label: "Let the AI choose the best tool", fileOnly: false }
+        ai_picture: { label: "AI picture" },
+        code:       { label: "Code (exact text)" },
+        auto:       { label: "Let the AI choose the best tool" }
     };
 
     function methodDesc(methodId, type) {
+        if (type.mnemonic && methodId === "code") {
+            return "The AI makes a clean card with code: the mnemonic in big text, each part lined up with its exact term. Plain look, but every word is exact. Best choice for mnemonics.";
+        }
+        if (type.mnemonic && methodId === "ai_picture") {
+            return "The AI's image tool makes a more colourful card. It lists every term it put on the card under \"Text in image\", so you can check the spelling and dates.";
+        }
         if (methodId === "ai_picture") {
+            if (type.replica) {
+                return "The AI's image tool redraws your reference image. It lists every label it put in the new image, so you can compare it with the original in seconds.";
+            }
             return type.numbersOnly
                 ? "The AI's image tool draws the scene. Only numbers go inside the picture. What each number means is written as a text legend that you paste with it, so spelling and dates cannot go wrong, and Hindi is safe."
                 : "The AI's image tool draws it with short labels copied from the content. The AI also lists every date and name it put in the picture, so you can check them in seconds.";
         }
         if (methodId === "code") {
-            return "The AI draws with code (Python), so every word is exactly what the content says. The look is plainer. Hindi needs a font, so English-only labels are safer.";
-        }
-        if (methodId === "mermaid") {
-            return "No image. The AI gives a Mermaid diagram or a table to paste into content.md. Safest for Hindi and dates, because the site draws it itself. Only for Save to site.";
+            return type.replica
+                ? "The AI rebuilds the reference with code (Python or SVG), so the text is exact. Works well for diagrams, charts and tables. A reference with real drawings may come out simpler."
+                : "The AI draws with code (Python or SVG), so every word is exactly what the content says. The look is plainer. Hindi needs a font, so English-only labels are safer.";
         }
         return "The AI picks the most reliable method for each image and tells you which one it used.";
     }
@@ -58,6 +65,7 @@
     // base     = start of the PNG file name        count   = default number
     // methods  = allowed drawing methods, first is the default
     // numbersOnly = picture holds only numbers; meanings go in a text legend
+    // replica  = redraw a reference image the user attaches
     // place    = where the Paste block goes in content.md (shown in the steps)
     var TYPES = [
         {
@@ -69,6 +77,17 @@
                 "Each infographic explains ONE clear idea in the form the content naturally calls for: a process or sequence, a classification or hierarchy, a comparison, or cause and effect.",
                 "One clear title, 4 to 8 sections, arrows or numbers where order matters.",
                 "Do not repeat what another infographic already shows."
+            ]
+        },
+        {
+            id: "diagram", label: "Diagram (flow / cycle / hierarchy)", base: "diagram", count: 1,
+            methods: ["code", "ai_picture", "auto"], numbersOnly: false,
+            place: "under the heading of the section it belongs to, in every LANG block",
+            brief: [
+                "Create a clean DIAGRAM of a process, cycle, flow, or hierarchy from this content.",
+                "Pick the 1 to 3 sequences or structures in the content that are easiest to understand as a diagram.",
+                "Use boxes and arrows (or a tree for a hierarchy). Number the steps where order matters, show the direction of every arrow, and mark the start and the end clearly.",
+                "At most 8 boxes per diagram; use a second diagram if there are more. Box order follows the content's order."
             ]
         },
         {
@@ -84,6 +103,12 @@
             ]
         },
         {
+            id: "mnemonic", label: "Mnemonic card (acronym / sentence / rhyme / story)", base: "mnemonic", count: 1,
+            methods: ["code", "ai_picture", "auto"], numbersOnly: false, mnemonic: true,
+            place: "under the heading of the section it belongs to, in every LANG block",
+            brief: []   // built per request, see briefFor()
+        },
+        {
             id: "pictorial", label: "Pictorial scene (picture-led explanation)", base: "pictorial", count: 1,
             methods: ["ai_picture"], numbersOnly: true,
             place: "under the heading of the section it belongs to, in every LANG block",
@@ -96,7 +121,7 @@
         },
         {
             id: "compare", label: "Compare chart (confusing terms)", base: "compare", count: 1,
-            methods: ["code", "mermaid", "ai_picture", "auto"], numbersOnly: false,
+            methods: ["code", "ai_picture", "auto"], numbersOnly: false,
             place: "under the heading of the section it belongs to, in every LANG block",
             brief: [
                 "Create a COMPARE CHART for the terms, concepts, or items in this content that students confuse with each other.",
@@ -107,7 +132,7 @@
         },
         {
             id: "mindmap", label: "Mind map", base: "mindmap", count: 1,
-            methods: ["code", "mermaid", "ai_picture", "auto"], numbersOnly: false,
+            methods: ["code", "ai_picture", "auto"], numbersOnly: false,
             place: "right below each <!-- ===LANG:XX=== --> line (EN, HI and AI)",
             brief: [
                 "Create a MIND MAP of this content.",
@@ -117,7 +142,7 @@
         },
         {
             id: "timeline", label: "Timeline (dates and events)", base: "timeline", count: 1,
-            methods: ["code", "mermaid", "ai_picture", "auto"], numbersOnly: false,
+            methods: ["code", "ai_picture", "auto"], numbersOnly: false,
             place: "right below each <!-- ===LANG:XX=== --> line (EN, HI and AI)",
             brief: [
                 "Create a TIMELINE for the dates and events in this content: one line in chronological order, each event with its date (Roman digits) and a few words.",
@@ -125,14 +150,56 @@
                 "At most 10 events per timeline; make a second one if there are more.",
                 "If the content has fewer than 3 dates, say so in one line and make a process or sequence diagram instead."
             ]
+        },
+        {
+            id: "replica", label: "Replica of an image I give you", base: "replica", count: 1,
+            methods: ["ai_picture", "code", "auto"], numbersOnly: false, replica: true,
+            place: "under the heading of the section it belongs to, in every LANG block",
+            brief: []   // built per request, see briefFor()
         }
     ];
 
     function typeById(id) {
         return TYPES.filter(function (t) { return t.id === id; })[0] || TYPES[0];
     }
-    function methodsFor(type, mode) {
-        return type.methods.filter(function (m) { return !(mode === "chat" && METHODS[m].fileOnly); });
+
+    // replicaText: "reference" = copy the reference image's own text exactly,
+    //              "content"   = take the text from the topic content
+    var MNEMONIC_STYLES = {
+        choose:   { label: "Let the AI choose the most natural", text: "Choose the most natural style for each item yourself (acronym, sentence, rhyme, story, or date hook) and say which one you used." },
+        acronym:  { label: "Acronym (a word from the first letters)", text: "ACRONYM: a pronounceable word or name made from the first letters of the items, in order." },
+        sentence: { label: "Sentence (each word starts with the item's letter)", text: "SENTENCE: a catchy sentence, the sillier the better, where each word starts with the first letter of the matching item, in order." },
+        rhyme:    { label: "Rhyme or jingle", text: "RHYME OR JINGLE: a short rhyme of 2 to 4 lines that says the items in order." },
+        story:    { label: "Story chain", text: "STORY CHAIN: a very short, vivid story where each item appears as a character or object, in order." },
+        datehook: { label: "Date or number hook", text: "DATE HOOK: for dates and numbers, a memorable hook that encodes the digits exactly (for example split a year into two-digit chunks and link each chunk to a vivid image or phrase). Write the decoding line that proves the digits are right." }
+    };
+
+    function briefFor(type, o) {
+        if (type.mnemonic) {
+            var st = MNEMONIC_STYLES[o.mnemonicStyle] || MNEMONIC_STYLES.choose;
+            return [
+                "Create MNEMONIC CARD(s): memory tricks for the parts of this content that are hardest to remember (lists, ordered steps, classifications, groups of similar terms, or key dates).",
+                "First pick the 1 to 3 most forgettable items or groups from the content yourself. One card per item or group.",
+                "MNEMONIC STYLE. " + st.text,
+                "Rules: use the items in the content's exact order, each exactly once. Never change, merge, drop, or invent an item, and never bend a term's spelling, to make the mnemonic work. If no natural mnemonic exists for something, say so in one line instead of forcing a bad one.",
+                "Card layout: the mnemonic in large text at the top; below it, each part of the mnemonic lined up with the exact term it stands for, in order, with the first letter or key part of each term highlighted."
+            ];
+        }
+        if (!type.replica) return type.brief;
+        var n = o.count;
+        var head = "I have attached " + n + " REFERENCE image" + (n > 1 ? "s" : "") + " (from the internet or a book) to this message. Create one new image for each reference image, redrawn from scratch.";
+        if (o.replicaText === "content") {
+            return [
+                head,
+                "Use the reference only for its layout, structure, and visual style. The text in the new image comes from the STUDY CONTENT below, not from the reference.",
+                "Keep the same kind of elements (boxes, arrows, labels, groups) in the same arrangement, with the content's own terms in them."
+            ];
+        }
+        return [
+            head,
+            "The new image must look like the reference: the same layout, the same structure, the same elements and arrows, the same labels. It should be a clean, sharp, correctly spelled version of it.",
+            "If the reference is blurry or small, read it carefully and rebuild it larger and cleaner."
+        ];
     }
 
     /* ---------- small helpers ---------- */
@@ -190,7 +257,12 @@
     }
 
     /* ---------- prompt pieces ---------- */
-    function methodBlock(methodId, type, mode) {
+    function isRefMode(o) { return !!o.type.replica && o.replicaText !== "content"; }
+
+    function methodBlock(o) {
+        var type = o.type, methodId = o.method;
+        var source = isRefMode(o) ? "the reference image" : "the content";
+
         if (methodId === "ai_picture") {
             if (type.numbersOnly) {
                 return [
@@ -203,37 +275,29 @@
             return [
                 "DRAWING METHOD: AI PICTURE WITH SHORT LABELS",
                 "- Use your built-in image-generation tool.",
-                "- Labels inside the picture must be short (a few words) and copied exactly from the content.",
-                "- FACT LOCK: before drawing, list every date, name, and number you will put in the picture, copied from the content. After drawing, read the picture and compare each label with that list; regenerate if anything differs.",
+                "- Labels inside the picture must be short (a few words) and copied exactly from " + source + ".",
+                "- FACT LOCK: before drawing, list every date, name, and number you will put in the picture, copied from " + source + ". After drawing, read the picture and compare each label with that list; regenerate if anything differs.",
                 "- In your reply include that list under the heading \"Text in image:\" so I can verify it in seconds."
             ];
         }
         if (methodId === "code") {
-            return [
+            var lines = [
                 "DRAWING METHOD: CODE (EXACT TEXT)",
-                "- Draw with code, not with the image-generation tool: Python (Pillow or matplotlib), or SVG converted to PNG. Every word is then exactly what the content says.",
+                "- Draw with code, not with the image-generation tool: Python (Pillow or matplotlib), or SVG converted to PNG. Every word is then exactly what " + source + " says.",
                 "- Use a clear, large font and a consistent palette. A plain but clean look is fine.",
                 "- If any label contains Hindi, use a real Devanagari font (Noto Sans Devanagari, Mukta, or Hind) and check that every character shows correctly. If that is not possible, use English-only labels and tell me."
             ];
+            if (type.replica) lines.push("- If the reference is mostly drawings that code cannot reproduce, say so in one line and use the image-generation tool for that image instead.");
+            return lines;
         }
-        if (methodId === "mermaid") {
-            return [
-                "DRAWING METHOD: MERMAID / TABLE (NO IMAGE)",
-                "- Do not generate any image.",
-                "- Use a timeline diagram for dates, a mindmap for a mind map, a Markdown table for a compare chart, and a flowchart for a process.",
-                "- Mermaid rules (one syntax error breaks the site's diagram): never write \";\" anywhere; put every flowchart node label in double quotes, including Hindi; in a timeline write each year once, with its events as separate \": event\" lines in date order; each diagram in its own fenced block."
-            ];
-        }
-        var lines = [
+        return [
             "DRAWING METHOD: YOU CHOOSE",
             "- For each image choose the most reliable method yourself:",
             "  * code (Python or SVG, exact text) for anything with dates, lists, or many labels;",
-            "  * the image-generation tool for scenes, with only numbers inside the picture and a numbered LEGEND written as text;"
+            "  * the image-generation tool for scenes or illustrations, with only numbers inside the picture and a numbered LEGEND written as text.",
+            "- Whatever you choose, copy every date, name, and number exactly from " + source + ". If you use the image tool with labels, list them under \"Text in image:\".",
+            "- Tell me in one line, per image, which method you used and why."
         ];
-        if (mode !== "chat") lines.push("  * a Mermaid diagram or Markdown table (no image) if Hindi text is needed.");
-        lines.push("- Whatever you choose, copy every date, name, and number exactly from the content. If you use the image tool with labels, list them under \"Text in image:\".");
-        lines.push("- Tell me in one line, per image, which method you used and why.");
-        return lines;
     }
 
     // which legend language(s) the Paste block needs
@@ -243,12 +307,16 @@
         return "en";
     }
 
-    function pasteBlockText(names, withLegend, lang) {
+    function pasteBlockText(names, withLegend, lang, type) {
         var cap = lang === "hi" ? "Short Hindi caption" : "Short English caption";
         var term = lang === "hi" ? "exact Hindi term from the Hindi content" : "exact term from the content";
         return names.map(function (f, i) {
             var img = "![" + cap + " for image " + (i + 1) + "](" + f + ")";
             if (!withLegend) return img;
+            if (type && type.mnemonic) {
+                return img + "\n\n**Mnemonic:** the mnemonic itself, as text" + (lang === "hi" ? " (a separate Hindi one, built from the Hindi terms)" : "") +
+                    "\n1. part of the mnemonic = " + term + "\n2. ...";
+            }
             return img + "\n\n**Legend**\n1. what the object or callout shows = " + term + "\n2. ...";
         }).join("\n\n");
     }
@@ -256,25 +324,17 @@
     function deliveryBlock(o) {
         var type = o.type, method = o.method, n = o.count;
         var names = fileNames(type, o.tag, n);
-        var legendNeeded = (method === "ai_picture" && type.numbersOnly) || method === "auto";
+        var legendNeeded = (method === "ai_picture" && type.numbersOnly) || method === "auto" || !!type.mnemonic;
 
         if (o.mode === "chat") {
             var chat = [
                 "DELIVERY (MODE: QUICK VIEW IN CHAT)",
                 "- Show the finished image(s) here in the chat so I can study them now. Nothing will be saved, so no file names and no Markdown paste block."
             ];
-            if (legendNeeded) chat.push("- Under each image write its numbered LEGEND (what each number stands for, with the content's exact terms).");
+            if (type.mnemonic) chat.push("- Under each card write the mnemonic as text, and what each part of it stands for (the content's exact terms).");
+            else if (legendNeeded) chat.push("- Under each image that uses numbered callouts, write its numbered LEGEND (what each number stands for, with the content's exact terms).");
             chat.push("- Add nothing else except what the task asks for in the reply.");
             return chat;
-        }
-
-        if (method === "mermaid") {
-            return [
-                "DELIVERY (MODE: SAVE TO SITE)",
-                "- Give each diagram or table in its own code block (a " + BT + "mermaid block, or a Markdown table), with a one-line title above it.",
-                "- If both English and Hindi content are given, give an English version and a Hindi version of each, with the same structure and the same number of items. Copy the Hindi terms from the Hindi content.",
-                "- Add nothing else."
-            ];
         }
 
         var out = [
@@ -285,17 +345,17 @@
         var langsMode = legendNeeded ? legendLangs(o.langs) : null;
         if (langsMode === "both") {
             out.push("- Then output TWO \"Paste block\" code blocks, exactly once each. The English one is for the EN block of content.md; the Hindi one (same numbering) is for the HI block.");
-            out.push("", "English Paste block:", BT, pasteBlockText(names, true, "en"), BT);
-            out.push("", "Hindi Paste block:", BT, pasteBlockText(names, true, "hi"), BT);
+            out.push("", "English Paste block:", BT, pasteBlockText(names, true, "en", type), BT);
+            out.push("", "Hindi Paste block:", BT, pasteBlockText(names, true, "hi", type), BT);
         } else if (langsMode) {
             out.push("- Then output this \"Paste block\" exactly once, inside a code block:");
-            out.push("", BT, pasteBlockText(names, true, langsMode), BT);
+            out.push("", BT, pasteBlockText(names, true, langsMode, type), BT);
         } else {
             out.push("- Then output this \"Paste block\" exactly once, inside a code block, one line per image with a short English caption:");
-            out.push("", BT, pasteBlockText(names, false, "en"), BT);
+            out.push("", BT, pasteBlockText(names, false, "en", type), BT);
         }
-        if (method === "auto") {
-            out.push("- If you used Mermaid or a table for an item instead of an image, give it in its own code block and put it in the Paste block as it is.");
+        if (method === "auto" && !type.mnemonic) {
+            out.push("- Keep the Legend lines only under images that use numbered callouts; delete them for the other images.");
         }
         out.push("- Add nothing else except what the task asks for in the reply. No HTML.");
         return out;
@@ -303,11 +363,24 @@
 
     function languageBlock(o) {
         var type = o.type, method = o.method, langs = o.langs;
-        if (method === "mermaid") {
+        if (type.mnemonic) {
+            var hindiToo = legendLangs(langs) === "both";
             return [
                 "LANGUAGE",
-                "- If both English and Hindi content are given, write English and Hindi versions; Hindi text is copied from the Hindi content, not translated afresh.",
+                "- Build the mnemonic from the content's own terms. The image is in English only (the mnemonic and short term labels).",
+                hindiToo
+                    ? "- The Hindi content is also given: write a SEPARATE Hindi mnemonic built from the Hindi terms, as text only in the Hindi Paste block. Do not translate the English one (an acronym cannot be translated). If no good Hindi mnemonic exists, say so in one line."
+                    : (legendLangs(langs) === "hi"
+                        ? "- Only Hindi content is given: build the mnemonic from the Hindi terms and write it as text. The image may carry the mnemonic only if the Devanagari renders perfectly; otherwise give the text only."
+                        : "- Only English content is given: English only."),
                 "- Dates and numbers always in Roman digits."
+            ];
+        }
+        if (isRefMode(o)) {
+            return [
+                "LANGUAGE OF THE IMAGE TEXT",
+                "- Keep the language of the text in the reference image. If it has Hindi (Devanagari), check every word for broken or detached vowel signs and empty boxes. If a Hindi label cannot be made clean, redo that image with English labels taken from the English content below and tell me.",
+                "- Dates and numbers stay exactly as in the reference."
             ];
         }
         if (method === "ai_picture" && type.numbersOnly) {
@@ -332,44 +405,70 @@
         ];
     }
 
+    function contentRules(o) {
+        var head = "CONTENT RULES (this is exam content, so accuracy matters more than beauty)";
+        var maps = "- Never draw maps, borders, or coastlines (AI-drawn maps get them wrong). If the " + (o.type.replica ? "reference or content" : "content") + " needs a map, say so in one line and skip it.";
+        if (isRefMode(o)) {
+            return [
+                head,
+                "- The text in the new image is copied exactly from the reference image: same spelling, same dates, same numbers. Read each label slowly. If a label is unreadable, leave it out and tell me.",
+                "- The STUDY CONTENT below is only for checking. If a label in the reference disagrees with it, do not change the label silently; list each case under \"Differences:\" in your reply.",
+                "- Never round, convert, or \"correct\" a date or number.",
+                maps,
+                "- Do not copy watermarks, logos, website names, or credit lines. Redraw everything from scratch; do not trace or paste the reference.",
+                "- After making each image, compare it with the reference label by label and redo it if anything differs or is cut off."
+            ];
+        }
+        var lines = [
+            head,
+            "- Use only facts, terms, names, dates, and numbers that appear in the content below, spelled exactly as written there. Add no new fact and no outside example.",
+            "- Never round, convert, translate, or \"correct\" a date or number. If you are not sure of something, leave it out.",
+            maps,
+            "- Keep any text short: titles, labels, short phrases. No paragraphs.",
+            "- After making each image, read it back and check every word, date, and number against the content. Redo it if anything is wrong or cut off."
+        ];
+        if (o.type.mnemonic) {
+            lines.push("- The mnemonic itself (acronym, sentence, rhyme, or story) is the only thing you may invent. Every term, name, date, and number it stands for must be exactly as in the content.");
+        }
+        if (o.type.replica) {
+            lines.push("- Do not copy the reference's text, watermarks, logos, website names, or credit lines. Redraw everything from scratch; do not trace or paste the reference.");
+        }
+        return lines;
+    }
+
     // o: { type, method, mode ("file"|"chat"), count, tag, topic, breadcrumb,
-    //      content, langs:{en,hi}, extra }
+    //      content, langs:{en,hi}, extra, replicaText }
     function buildPrompt(o) {
         var type = o.type;
-        var method = o.method;
-        var unit = method === "mermaid" ? "diagram(s) or table(s)" : "image(s)";
         var parts = [
             "You are creating study visuals for Notebook Alpha, an exam-preparation website.",
             "",
             "TOPIC: " + o.topic,
             "PATH: " + o.breadcrumb,
             "KIND OF VISUAL: " + type.label,
-            "NUMBER OF " + unit.toUpperCase() + ": " + o.count + " (fewer is fine if the content cannot support that many good ones; never make filler)",
+            type.replica
+                ? "NUMBER OF IMAGES: " + o.count + " (one new image per attached reference image)"
+                : "NUMBER OF IMAGES: " + o.count + " (fewer is fine if the content cannot support that many good ones; never make filler)",
             "",
             "TASK",
-            type.brief.join("\n"),
+            briefFor(type, o).join("\n"),
             "",
-            methodBlock(method, type, o.mode).join("\n"),
+            methodBlock(o).join("\n"),
             "",
-            "CONTENT RULES (this is exam content, so accuracy matters more than beauty)",
-            "- Use only facts, terms, names, dates, and numbers that appear in the content below, spelled exactly as written there. Add no new fact and no outside example.",
-            "- Never round, convert, translate, or \"correct\" a date or number. If you are not sure of something, leave it out.",
-            "- Never draw maps, borders, or coastlines (AI-drawn maps get them wrong). If the content needs a map, say so in one line and skip it.",
-            "- Keep any text short: titles, labels, short phrases. No paragraphs.",
-            "- After making each visual, read it back and check every word, date, and number against the content. Redo it if anything is wrong or cut off.",
+            contentRules(o).join("\n"),
+            "",
+            "STYLE (make it attractive AND readable)",
+            "- A friendly flat-illustration look with one consistent palette of at most 4 colours. Give each colour a meaning (for example green = definition, red = exam trap, blue = process) and use small icons where they help." +
+                (isRefMode(o) ? " Where the reference has its own colours, you may keep its colour logic." : ""),
+            "- The most important thing is the largest. At most 7 main elements per image" + (type.replica ? " (more only if the reference has more)." : "."),
+            "- Readable on a phone: large elements, high contrast, light background.",
+            "- No watermark, logo, QR code, or mention of any source. Beauty never comes before accuracy or readability.",
+            "",
+            languageBlock(o).join("\n"),
+            "",
+            deliveryBlock(o).join("\n"),
             ""
         ];
-        if (method !== "mermaid") {
-            parts.push(
-                "STYLE (make it attractive AND readable)",
-                "- A friendly flat-illustration look with one consistent palette of at most 4 colours. Give each colour a meaning (for example green = definition, red = exam trap, blue = process) and use small icons where they help.",
-                "- The most important thing is the largest. At most 7 main elements per image.",
-                "- Readable on a phone: large elements, high contrast, light background.",
-                "- No watermark, logo, QR code, or mention of any source. Beauty never comes before accuracy or readability.",
-                ""
-            );
-        }
-        parts.push(languageBlock(o).join("\n"), "", deliveryBlock(o).join("\n"), "");
         if (o.extra) {
             parts.push(
                 "EXTRA INSTRUCTIONS FROM ME (follow these for style and focus; they never override the CONTENT RULES above)",
@@ -391,20 +490,33 @@
 
         host.innerHTML =
             '<div class="prompt-block-row"><strong>🖼 Visual aids for this topic</strong></div>' +
-            '<p class="prompt-block-desc">Pick what to make and how to draw it, then copy the prompt. This topic\'s text (only the sections ticked in "Choose sections" above) is already inside. Paste it into an AI that can make images, e.g. ChatGPT.</p>' +
+            '<p class="prompt-block-desc">Pick what to make and how to draw it, then copy the prompt. This topic\'s text (only the sections ticked in "Choose sections" above) is already inside. Paste it into an AI that can make images, e.g. ChatGPT. Every choice here gives images.</p>' +
             '<label class="quiz-lbl">What to make</label>' +
             '<select class="va-type">' + TYPES.map(function (t) {
                 return '<option value="' + esc(t.id) + '"' + (t.id === savedType.id ? " selected" : "") + ">" + esc(t.label) + "</option>";
             }).join("") + "</select>" +
+            '<div class="va-mnemonicrow" hidden>' +
+            '<label class="quiz-lbl">Style of mnemonic</label>' +
+            '<select class="va-mnemonicstyle">' + Object.keys(MNEMONIC_STYLES).map(function (k) {
+                return '<option value="' + k + '">' + esc(MNEMONIC_STYLES[k].label) + "</option>";
+            }).join("") + "</select>" +
+            '</div>' +
+            '<div class="va-replicarow" hidden>' +
+            '<label class="quiz-lbl">Text in the new image</label>' +
+            '<select class="va-replicatext">' +
+            '<option value="reference">Keep the reference image\'s text exactly (a clean copy)</option>' +
+            '<option value="content">Take the text from my topic content (reference is only for layout and style)</option>' +
+            '</select>' +
+            '</div>' +
             '<label class="quiz-lbl">How to draw it</label>' +
             '<select class="va-method"></select>' +
             '<p class="prompt-block-desc va-methoddesc"></p>' +
-            '<label class="quiz-lbl">How many</label>' +
+            '<label class="quiz-lbl va-countlbl">How many</label>' +
             '<select class="va-count">' + [1, 2, 3].map(function (k) {
                 return '<option value="' + k + '"' + (k === savedType.count ? " selected" : "") + ">" + k + "</option>";
             }).join("") + "</select>" +
             '<label class="quiz-lbl">What do you want?</label>' +
-            '<label style="display:block;margin:2px 0;"><input type="radio" name="vamode" value="file"' + (savedMode === "file" ? " checked" : "") + '> <strong>Save to site</strong> (files or diagrams you add to this topic)</label>' +
+            '<label style="display:block;margin:2px 0;"><input type="radio" name="vamode" value="file"' + (savedMode === "file" ? " checked" : "") + '> <strong>Save to site</strong> (image files you add to this topic)</label>' +
             '<label style="display:block;margin:2px 0;"><input type="radio" name="vamode" value="chat"' + (savedMode === "chat" ? " checked" : "") + '> <strong>Quick view in chat</strong> (just look at it now, nothing saved)</label>' +
             '<div class="va-tagrow">' +
             '<label class="quiz-lbl">File tag <span class="field-optional">(optional, e.g. s2 for section 2. Keeps file names from clashing)</span></label>' +
@@ -421,7 +533,9 @@
 
         function $(sel) { return host.querySelector(sel); }
         var typeEl = $(".va-type"), methodEl = $(".va-method"), methodDescEl = $(".va-methoddesc");
-        var countEl = $(".va-count"), tagEl = $(".va-tag"), tagRow = $(".va-tagrow"), extraEl = $(".va-extra");
+        var countEl = $(".va-count"), countLbl = $(".va-countlbl"), tagEl = $(".va-tag"), tagRow = $(".va-tagrow");
+        var extraEl = $(".va-extra"), replicaRow = $(".va-replicarow"), replicaEl = $(".va-replicatext");
+        var mnemonicRow = $(".va-mnemonicrow"), mnemonicEl = $(".va-mnemonicstyle");
         var enOnlyEl = $(".va-enonly"), copyEl = $(".va-copy"), statusEl = $(".va-status"), stepsEl = $(".va-steps");
 
         function mode() {
@@ -433,10 +547,10 @@
             statusEl.className = "quiz-add-preview va-status" + (kind ? " " + kind : "");
         }
 
-        // Rebuilds the "How to draw it" list for the chosen kind and mode.
+        // Rebuilds the "How to draw it" list for the chosen kind.
         function fillMethods(keepCurrent) {
             var type = typeById(typeEl.value);
-            var allowed = methodsFor(type, mode());
+            var allowed = type.methods;
             var current = keepCurrent && allowed.indexOf(methodEl.value) >= 0 ? methodEl.value : allowed[0];
             methodEl.innerHTML = allowed.map(function (m) {
                 return '<option value="' + m + '"' + (m === current ? " selected" : "") + ">" + esc(METHODS[m].label) + "</option>";
@@ -449,28 +563,28 @@
             var tag = slugTag(tagEl.value);
             var n = parseInt(countEl.value, 10) || 1;
             var m = mode();
-            var isText = method === "mermaid";
 
             methodDescEl.textContent = methodDesc(method, type);
-            tagRow.hidden = m === "chat" || isText;
+            replicaRow.hidden = !type.replica;
+            mnemonicRow.hidden = !type.mnemonic;
+            countLbl.textContent = type.replica ? "How many reference images you will attach" : "How many";
+            tagRow.hidden = m === "chat";
+
+            var attach = type.replica
+                ? "<li><strong>Attach your reference image" + (n > 1 ? "s" : "") + " to the same message</strong> in ChatGPT, together with the prompt.</li>"
+                : "";
 
             if (m === "chat") {
-                status("Quick view: the AI shows the result in the chat. Nothing to save.");
-                stepsEl.innerHTML = "<ol>" +
+                status(type.replica
+                    ? "Quick view: attach the reference image to the same message. Nothing is saved."
+                    : "Quick view: the AI shows the result in the chat. Nothing to save.");
+                stepsEl.innerHTML = "<ol>" + attach +
                     "<li>Paste the prompt into ChatGPT (image generation on).</li>" +
-                    "<li>Read every word, date and number in the result. If anything is wrong, ask it to redo that one.</li>" +
-                    "</ol>";
-            } else if (isText) {
-                status("The AI gives diagram or table text. No files to name.");
-                stepsEl.innerHTML = "<ol>" +
-                    "<li>Paste the prompt into any AI (image generation is not needed).</li>" +
-                    "<li>Check the dates and names in what it gives.</li>" +
-                    "<li>Open <code>content.md</code> and paste each diagram or table " + esc(type.place) + ". Use the English one in the EN block and the Hindi one in the HI block.</li>" +
-                    "<li>Save <code>content.md</code> back in the same Drive folder (only one .md file there), then reload the site.</li>" +
+                    "<li>Read every word, date and number in the result" + (type.replica ? " and compare with your original" : "") + ". If anything is wrong, ask it to redo that one.</li>" +
                     "</ol>";
             } else {
-                status("Files will be named: " + fileNames(type, tag, n).join(", "));
-                stepsEl.innerHTML = "<ol>" +
+                status("Files will be named: " + fileNames(type, tag, n).join(", ") + (type.replica ? ". Attach the reference image to the same message." : ""));
+                stepsEl.innerHTML = "<ol>" + attach +
                     "<li>Paste the prompt into ChatGPT (image generation on) and download the image(s).</li>" +
                     "<li>Check every word, date and number in the image(s) (and the \"Text in image\" list, if it gives one). Redo any that are wrong.</li>" +
                     "<li>Put the image(s) in this topic's Drive folder next to <code>content.md</code>. Keep the exact file names.</li>" +
@@ -491,7 +605,7 @@
         tagEl.addEventListener("input", refresh);
         enOnlyEl.addEventListener("change", function () { lsSet(LS_EN, enOnlyEl.checked ? "1" : "0"); });
         host.querySelectorAll('input[name="vamode"]').forEach(function (r) {
-            r.addEventListener("change", function () { lsSet(LS_MODE, mode()); fillMethods(true); refresh(); });
+            r.addEventListener("change", function () { lsSet(LS_MODE, mode()); refresh(); });
         });
 
         copyEl.addEventListener("click", function () {
@@ -516,7 +630,9 @@
                 breadcrumb: ctx.breadcrumb || "",
                 content: cb.text,
                 langs: { en: cb.hasEn, hi: cb.hasHi },
-                extra: extraEl.value.trim()
+                extra: extraEl.value.trim(),
+                replicaText: replicaEl.value === "content" ? "content" : "reference",
+                mnemonicStyle: mnemonicEl.value
             });
             var original = copyEl.innerHTML;
             copyText(prompt, function () {
@@ -524,7 +640,8 @@
                 copyEl.disabled = true;
                 setTimeout(function () { copyEl.innerHTML = original; copyEl.disabled = false; }, 1800);
                 var big = prompt.length > 30000 ? " Long paste (" + Math.round(prompt.length / 1000) + "k characters): untick some sections and copy again if your AI app cuts it." : "";
-                status("✓ Copied (" + (cb.bilingual ? "English + Hindi" : "single-language") + " content)." + big, "ok");
+                var attachNote = type.replica ? " Now attach your reference image to the same message." : "";
+                status("✓ Copied (" + (cb.bilingual ? "English + Hindi" : "single-language") + " content)." + attachNote + big, "ok");
             }, function () {
                 status("Automatic copy was blocked by the browser. Try again, or allow clipboard access for this site.", "err");
             });
@@ -536,7 +653,7 @@
 
     window.VisualAids = {
         mount: mount,
-        __test: { buildPrompt: buildPrompt, buildContentBlock: buildContentBlock, TYPES: TYPES, METHODS: METHODS,
-                  methodsFor: methodsFor, fileNames: fileNames, slugTag: slugTag }
+        __test: { buildPrompt: buildPrompt, buildContentBlock: buildContentBlock, TYPES: TYPES, METHODS: METHODS, MNEMONIC_STYLES: MNEMONIC_STYLES,
+                  fileNames: fileNames, slugTag: slugTag }
     };
 })();

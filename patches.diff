@@ -1,0 +1,60 @@
+diff --git a/css/style.css b/css/style.css
+index 3949c8c..c429709 100644
+--- a/css/style.css
++++ b/css/style.css
+@@ -5630,3 +5630,14 @@ a.bottom-strip-btn.practice-open{
+ .quiz-host .qh-mode:has(input:checked){border-color:#9bb8a6;background:#f2f8f4}
+ .quiz-host .qh-mode input{margin-top:3px}
+-.quiz-host .qh-mode strong{color:#2f3d35}
+\ No newline at end of file
++.quiz-host .qh-mode strong{color:#2f3d35}
++/* ===== Research & PYQ section ===== */
++.rp-chips{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 6px;min-height:26px}
++.rp-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 4px 3px 10px;border:1px solid #cfd8d2;border-radius:999px;background:#f2f6f3;font:12px/1.3 Arial,sans-serif}
++.rp-chip button{border:0;background:transparent;cursor:pointer;font-size:15px;line-height:1;padding:0 5px;color:#68736b}
++.rp-chip button:hover{color:#b3261e}
++.rp-empty{font:12px/1.4 Arial,sans-serif;color:var(--muted)}
++.rp-add{width:100%;box-sizing:border-box}
++.rp-customrow{display:flex;gap:6px;margin-top:6px}
++.rp-customrow input{flex:1;min-width:0;box-sizing:border-box}
++.rp-skiprow{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;margin:2px 0}
++.rp-skiplbl{font:700 12px Arial,sans-serif;color:#68736b;min-width:62px}
+diff --git a/index.html b/index.html
+index f79be73..39370d5 100644
+--- a/index.html
++++ b/index.html
+@@ -309,4 +309,5 @@
+ <script src="js/quiz-prompt.js"></script>
+ <script src="js/visual-aids.js"></script>
++<script src="js/research-pyq.js"></script>
+ <script src="js/content-prompt.js"></script>
+ <script src="js/app.js"></script>
+diff --git a/js/app.js b/js/app.js
+index 3c6aff2..e738ad6 100644
+--- a/js/app.js
++++ b/js/app.js
+@@ -2216,4 +2216,9 @@ function openAddContentLink() {
+                 </details>
+ 
++                <details class="content-link-guide">
++                    <summary>🔬 Research &amp; PYQ</summary>
++                    <div class="prompt-block" id="research-pyq-host"></div>
++                </details>
++
+                 <details class="content-link-guide">
+                     <summary>Supported content formats</summary>
+@@ -2261,4 +2266,14 @@ All local filenames above must exist in the same linked folder.</pre>
+     }
+ 
++    const rpHost = document.getElementById("research-pyq-host");
++    if (rpHost && window.ResearchPYQ) {
++        window.ResearchPYQ.mount(rpHost, {
++            topic: selectedTopicNode.title || "",
++            breadcrumb: buildTopicBreadcrumb(selectedTopicNode),
++            getSplit: () => filterSplitForKind("visual", currentLanguageSplit),
++            clean: cleanContentForPrompt
++        });
++    }
++
+     const quizHost = document.getElementById("quiz-section-host");
+     if (quizHost && window.QuizPrompt) {
