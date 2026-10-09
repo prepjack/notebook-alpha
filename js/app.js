@@ -2192,38 +2192,28 @@ function openAddContentLink() {
                 </div>
 
                 ${buildInfographicSectionPicker()}
-                <div class="prompt-block">
-                    <div class="prompt-block-row">
-                        <button type="button" class="content-action" id="copy-flashcard-prompt-btn" onclick="copyFlashcardPrompt()">🃏 Copy Flashcard Prompt</button>
-                        <label class="flashcard-enonly"><input type="checkbox" id="flashcard-en-only"> EN only (shorter)</label>
+
+                <details class="content-link-guide">
+                    <summary>🃏 Flashcards</summary>
+                    <div class="prompt-block">
+                        <div class="prompt-block-row">
+                            <button type="button" class="content-action" id="copy-flashcard-prompt-btn" onclick="copyFlashcardPrompt()">🃏 Copy Flashcard Prompt</button>
+                            <label class="flashcard-enonly"><input type="checkbox" id="flashcard-en-only"> EN only (shorter)</label>
+                        </div>
+                        <p class="prompt-block-desc"><strong>What it does:</strong> copies a prompt that already contains this topic's English and Hindi text. The AI writes 5 to 20 bilingual revision cards (English / हिंदी) that reuse the content's own wording.</p>
+                        <p class="prompt-block-desc"><strong>What to do:</strong> use it once the content is live. Paste it into any AI, save the cards it returns as <code>flashcards.md</code> in the same Drive folder, then reload the topic. Tick "EN only" for a shorter paste.</p>
                     </div>
-                    <p class="prompt-block-desc"><strong>What it does:</strong> copies a prompt that already contains this topic's English and Hindi text. The AI writes 5 to 20 bilingual revision cards (English / हिंदी) that reuse the content's own wording.</p>
-                    <p class="prompt-block-desc"><strong>What to do:</strong> use it once the content is live. Paste it into any AI, save the cards it returns as <code>flashcards.md</code> in the same Drive folder, then reload the topic. Tick "EN only" for a shorter paste.</p>
-                </div>
+                </details>
 
-                <div class="prompt-block">
-                    <div class="prompt-block-row">
-                        <button type="button" class="content-action" id="copy-infographic-prompt-btn" onclick="copyInfographicPrompt()">🖼 Copy Infographic Prompt</button>
-                        <label class="flashcard-enonly"><input type="checkbox" id="infographic-en-only" checked> English labels only (safer)</label>
-                    </div>
-
-                    <p class="prompt-block-desc"><strong>What it does:</strong> copies a prompt with this topic's text inside. An AI with image generation (e.g. ChatGPT) makes 1 to 2 summary infographics and gives you a ready "Paste block".</p>
-                    <p class="prompt-block-desc"><strong>What to do:</strong></p>
-                    <ol class="prompt-block-desc">
-                        <li>Paste the prompt into ChatGPT and download the images (<code>infographic-1.png</code>, ...).</li>
-                        <li>Put the images in this topic's Drive folder, next to <code>content.md</code>.</li>
-                        <li>Open <code>content.md</code> and, right below each <code>&lt;!-- ===LANG:EN=== --&gt;</code> line (also HI and AI), paste the "Paste block" the AI gave.</li>
-                        <li>Save <code>content.md</code> back in the same Drive folder (only one .md file there), then reload this site.</li>
-                    </ol>
-                </div>
-
-                <div class="prompt-block">
+                <details class="content-link-guide">
+                    <summary>🖼 Visual aids</summary>
                     <div class="prompt-block" id="visual-aids-host"></div>
-                </div>
+                </details>
 
-                <div class="prompt-block">
+                <details class="content-link-guide">
+                    <summary>📝 Quiz</summary>
                     <div class="prompt-block" id="quiz-section-host"></div>
-                </div>
+                </details>
 
                 <details class="content-link-guide">
                     <summary>Supported content formats</summary>
@@ -2487,13 +2477,6 @@ const TOPIC_PROMPT_KINDS = {
         name: "Flashcard prompt",
         next: "Paste it into any AI, then save its output as flashcards.md in this topic's Drive folder."
     },
-    infographic: {
-        get template() { return (window.NotebookPrompt && window.NotebookPrompt.infographic) || ""; },
-        buttonId: "copy-infographic-prompt-btn",
-        enOnlyId: "infographic-en-only",
-        name: "Infographic prompt",
-        next: "1) Paste it into ChatGPT and download the images.\n2) Put them in this topic's Drive folder next to content.md.\n3) In content.md, paste the Paste block the AI gives right below each <!-- ===LANG:XX=== --> line.\n4) Save content.md back in Drive and reload the site."
-    },
 };
 
 function copyTopicContentPrompt(kind) {
@@ -2540,13 +2523,6 @@ function copyTopicContentPrompt(kind) {
         included = "AI-explainer version only — the AI will write both the English and Hindi sides";
     }
 
-    if (kind === "infographic") {
-        included = (hasEn && hasHi && !enOnly)
-            ? "English + Hindi content included, labels will be bilingual"
-            : (!hasEn && hasHi)
-                ? "Hindi content included, labels will be in Hindi"
-                : "content included, labels will be English only";
-    }
 
     const topicTitle = selectedTopicNode.title || "";
     const breadcrumb = buildTopicBreadcrumb(selectedTopicNode);
@@ -2596,14 +2572,7 @@ function copyTopicContentPrompt(kind) {
 }
 
 function copyFlashcardPrompt() { copyTopicContentPrompt("flashcard"); }
-function copyInfographicPrompt() {
-    const boxes = [...document.querySelectorAll("#add-content-link-modal [data-info-section]")];
-    if (boxes.length && !boxes.some(b => b.checked)) {
-        alert("Please tick at least one section.");
-        return;
-    }
-    copyTopicContentPrompt("infographic");
-}
+
 
 function fallbackCopyText(text, onSuccess, onFailure) {
     const ta = document.createElement("textarea");
