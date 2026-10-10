@@ -48,6 +48,14 @@
         ["custom", "Custom (my own limit)"]
     ];
 
+    var LANGS = [
+        ["english", "English"],
+        ["hindi", "हिंदी"],
+        ["hinglish", "Hinglish (Roman letters mein Hindi)"],
+        ["mixed", "Mixed (हिंदी + English)"]
+    ];
+    var DEFAULT_LANG = "mixed";
+
     var SKIP_RESEARCH = [
         ["mnemonics", "Mnemonics / tricks"],
         ["confusion", "Confusion pairs"],
@@ -60,7 +68,7 @@
 
     /* ---------- 2. small helpers ---------- */
     var K = { exams: "rp:exams", customExams: "rp:customExams", sources: "rp:sources", customSources: "rp:customSources",
-              length: "rp:length", customLen: "rp:customLen", skip: "rp:skip", note: "rp:note", enOnly: "rp:enOnly" };
+              length: "rp:length", lang: "rp:lang", customLen: "rp:customLen", skip: "rp:skip", note: "rp:note", enOnly: "rp:enOnly" };
 
     function esc(s) {
         return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -139,14 +147,23 @@
         return map[o.length] || map.standard;
     }
 
+    function languageBlock(o) {
+        var map = {
+            english: "Write your whole reply in simple, clear English.",
+            hindi: "Write your whole reply in Hindi (Devanagari script), in simple natural language. Keep proper names, URLs and the exact titles of documents and exams in their original form.",
+            hinglish: "Write your reply in simple Hinglish: Hindi language written in Roman letters, in a natural spoken style, keeping technical terms in English.",
+            mixed: "Write your reply in ONE natural, spoken-style Hindi + English mix. This is a single text, NOT two separate versions. Hindi words must be in Devanagari script and English words in English (Roman) letters, the way educated Indians naturally talk, e.g. \"ये topic UGC NET में बहुत important है।\" Keep technical terms, names, exam names and document titles in English. Do not write English words in Devanagari, and do not write Hindi words in Roman letters."
+        };
+        return "OUTPUT LANGUAGE: " + (map[o.lang] || map.mixed) + " Section headings and table column names may stay in English. Real PYQ questions must stay exactly in the language they were printed in. If my extra note asks for a different language, follow the note.";
+    }
+
     function honestyBlock() {
         return banner("NON-NEGOTIABLE HONESTY RULES") + "\n" +
             "1. USE LIVE WEB SEARCH. If you cannot search the web in this chat, say so in your FIRST line and stop; do not answer from memory pretending it is researched.\n" +
             "2. NEVER invent anything: no made-up chapters, page numbers, URLs, quotes, years or questions. If something cannot be verified, write \"Not verified\" or \"Not found\" instead of guessing.\n" +
             "3. Every source must carry a working URL you actually opened. Mark each as [Official], [University], [Textbook] or [Other] so I can judge trust.\n" +
             "4. Separate fact from inference. If sources disagree, show both and say which is more authoritative.\n" +
-            "5. Do not copy long passages from sources. Summarise in your own words and point me to the chapter / page / URL.\n" +
-            "6. Reply in simple Hinglish (Hindi in Roman script) with English technical terms, unless my extra note says otherwise.";
+            "5. Do not copy long passages from sources. Summarise in your own words and point me to the chapter / page / URL.";
     }
 
     function researchPrompt(o) {
@@ -160,6 +177,7 @@
         parts.push(focusBlock(o));
         parts.push(honestyBlock());
         parts.push(lengthBlock(o));
+        parts.push(languageBlock(o));
 
         var steps = [];
         steps.push("STEP 1 — Read my content below and list its key claims (definitions, names, dates, classifications, numbers).");
@@ -198,6 +216,7 @@
             "- Never present a question you made up or reworded as a PYQ. Real and predicted questions must never be mixed.\n" +
             "- It is fine and honest to return few rows, or none, if little can be verified.");
         parts.push(lengthBlock(o));
+        parts.push(languageBlock(o));
 
         var sec = [];
         sec.push(h("VERIFIED PYQ TABLE — columns: Exam | Year / Shift | Question | Options (if MCQ) | Correct answer | Source URL | Status (Verified / Uncertain). Group rows by exam."));
@@ -289,6 +308,8 @@
     function mount(host, ctx) {
         if (!host || !ctx) return;
         var savedLen = lsGet(K.length, "standard");
+        var savedLang = lsGet(K.lang, DEFAULT_LANG);
+        if (!LANGS.some(function (l) { return l[0] === savedLang; })) savedLang = DEFAULT_LANG;
         var savedSkip = lsGetList(K.skip);
 
         host.innerHTML =
@@ -301,6 +322,10 @@
                 return '<option value="' + l[0] + '"' + (l[0] === savedLen ? " selected" : "") + ">" + esc(l[1]) + "</option>";
             }).join("") + "</select>" +
             '<input type="text" class="rp-customlen" maxlength="160" placeholder="e.g. max 500 words, or: only give tables" style="width:100%;box-sizing:border-box;margin-top:6px;display:none;">' +
+            '<label class="quiz-lbl">Output language</label>' +
+            '<select class="rp-lang">' + LANGS.map(function (l) {
+                return '<option value="' + l[0] + '"' + (l[0] === savedLang ? " selected" : "") + ">" + esc(l[1]) + "</option>";
+            }).join("") + "</select>" +
             '<label class="quiz-lbl">Skip these sections <span class="field-optional">(optional)</span></label>' +
             '<div class="rp-skiprow"><span class="rp-skiplbl">Research:</span>' + SKIP_RESEARCH.map(function (s) {
                 return '<label class="flashcard-enonly"><input type="checkbox" data-skip="' + s[0] + '"' + (savedSkip.indexOf(s[0]) >= 0 ? " checked" : "") + "> " + esc(s[1]) + "</label>";
@@ -329,6 +354,8 @@
             placeholder: "Add a website / book / authority, press Enter", emptyText: "None chosen = AI picks authentic sources itself"
         });
 
+        var langEl = $(".rp-lang");
+        langEl.addEventListener("change", function () { lsSet(K.lang, langEl.value); });
         var lenEl = $(".rp-len"), customLenEl = $(".rp-customlen"), noteEl = $(".rp-note"), enOnlyEl = $(".rp-enonly"), statusEl = $(".rp-status");
         customLenEl.value = lsGet(K.customLen, "");
         noteEl.value = lsGet(K.note, "");
@@ -357,6 +384,7 @@
                 exams: exams.get(),
                 sources: sources.get(),
                 length: lenEl.value,
+                lang: langEl.value,
                 customLen: customLenEl.value.trim(),
                 note: noteEl.value.trim(),
                 skip: [].slice.call(host.querySelectorAll("input[data-skip]:checked")).map(function (x) { return x.getAttribute("data-skip"); })

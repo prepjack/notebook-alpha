@@ -161,6 +161,11 @@ function doGet(e) {
     return jsonResponse_(handleGetProgress_());
   }
 
+    // QUIZZES
+  if (action === "get_quizzes")   return jsonResponse_(handleGetQuizzes_(e.parameter));
+  if (action === "get_quiz_html") return jsonResponse_(handleGetQuizHtml_(e.parameter.quiz_id));
+  if (action === "preview_quiz")  return jsonResponse_(handlePreviewQuiz_(e.parameter.ref));
+
   const ss = SpreadsheetApp.getActiveSpreadsheet();
 
   const data = {
@@ -388,6 +393,14 @@ function doPost(e) {
     if (data.action === "save_progress") {
       return jsonResponse_(handleSaveProgress_(data.data));
     }
+
+        // QUIZZES
+    if (data.action === "save_quiz") {
+      if (!checkIndexWriteRateLimit_()) return jsonResponse_({ success: false, error: "Rate limit exceeded." });
+      return jsonResponse_(saveQuiz(data));
+    }
+    if (data.action === "update_quiz_meta") return jsonResponse_(updateQuizMeta(data));
+    if (data.action === "delete_quiz")      return jsonResponse_(deleteQuizRow(data));
 
     // Unknown / unhandled action - no legacy Community fallback anymore
     return ContentService
@@ -1343,6 +1356,9 @@ function driveHealthCheck() {
     const mcqsSheet = ss.getSheetByName("MCQs");
     if (mcqsSheet) mcqsFlagged = flagOrphanedRows_(mcqsSheet, "node_id", brokenSet, "drive_missing");
 
+    const quizSheet2 = ss.getSheetByName("Quizzes");
+    if (quizSheet2) flagOrphanedRows_(quizSheet2, "node_id", brokenSet, "drive_missing");
+
     indexResult = removeIndexLinksAndFlagOrphans_(brokenSet, "drive_missing");
   }
 
@@ -1358,6 +1374,8 @@ function driveHealthCheck() {
     index_terms_flagged_orphaned: indexResult.terms_flagged_orphaned,
     index_links_removed: indexResult.links_removed
   };
+
+  summary.quiz_files = quizFilesHealthCheck_();
 
   Logger.log("Drive health check: %s", JSON.stringify(summary));
   return summary;
@@ -1557,6 +1575,9 @@ function deleteStructureNodeRow(data) {
 
   const mcqsSheet = ss.getSheetByName("MCQs");
   const mcqsFlagged = mcqsSheet ? flagOrphanedRows_(mcqsSheet, "node_id", idsToDeleteSet, "topic_deleted") : 0;
+
+  const quizSheet = ss.getSheetByName("Quizzes");
+  if (quizSheet) flagOrphanedRows_(quizSheet, "node_id", idsToDeleteSet, "topic_deleted");
 
   const indexResult = removeIndexLinksAndFlagOrphans_(idsToDeleteSet, "topic_deleted");
 
@@ -1793,7 +1814,8 @@ function deleteMcqCollection(data) {
 // the content columns that function deliberately excludes.
 const MCQ_CONTENT_EDITABLE_COLUMNS = [
   "question", "option_a", "option_b", "option_c", "option_d",
-  "correct_option", "explanation"
+  "correct_option", "explanation",
+  "explanation_a", "explanation_b", "explanation_c", "explanation_d"
 ];
 
 function updateMcqContent(data) {
@@ -1825,7 +1847,7 @@ function updateMcqContent(data) {
     if (fields[col] === undefined) return;
     const colIndex = headers.indexOf(col);
     if (colIndex === -1) return;
-    const val = (col === "correct_option") ? normalizeCorrectOption_(fields[col]) : fields[col];
+    const val = (col === "correct_option") ? normalizeCorrectOption_(fields[col]) : safeSheetText_(fields[col]);
     sheet.getRange(targetRow, colIndex + 1).setValue(val);
     changed.push(col);
   });
@@ -2952,7 +2974,9 @@ const MCQ_BANK_NEW_COLUMNS_ = [
   // PHASE — language-linking: shared by 2+ rows that are translation/
   // variant pairs of the SAME question (see js/mcq-parse.js header for
   // how it's derived); blank for a standalone, ungrouped question.
-  "question_group_id"
+  "question_group_id",
+  // PER-OPTION EXPLANATIONS: why each option is right / wrong (option 1-4)
+  "explanation_a", "explanation_b", "explanation_c", "explanation_d"
 ];
 
 // Idempotent: adds any of MCQ_BANK_NEW_COLUMNS_ missing from row 1,
@@ -3178,14 +3202,17 @@ function saveMcqsBulk(data) {
 
     if (existingRow) {
       const oldRow = mcqValues[existingRow - 1];
-      const mergedRow = mcqHeaders.map(function(h, idx) {
-        return incoming[h] !== undefined ? incoming[h] : oldRow[idx];
+            const mergedRow = mcqHeaders.map(function(h, idx) {
+        const v = incoming[h] !== undefined ? incoming[h] : oldRow[idx];
+        return MCQ_TEXT_COLUMNS_.indexOf(h) !== -1 ? safeSheetText_(v) : v;
       });
       mcqSheet.getRange(existingRow, 1, 1, mcqHeaders.length).setValues([mergedRow]);
       results.push({ mcq_id: mcq.mcq_id, action: "updated" });
     } else {
-      const newRow = mcqHeaders.map(function(h) {
-        return h === "created_at" ? now : (incoming[h] !== undefined ? incoming[h] : "");
+            const newRow = mcqHeaders.map(function(h) {
+        if (h === "created_at") return now;
+        const v = incoming[h] !== undefined ? incoming[h] : "";
+        return MCQ_TEXT_COLUMNS_.indexOf(h) !== -1 ? safeSheetText_(v) : v;
       });
       toAppend.push(newRow);
       results.push({ mcq_id: mcq.mcq_id, action: "created" });
@@ -3694,4 +3721,412 @@ function handleSaveProgress_(incoming) {
   } catch (error) {
     return { success: false, error: error.message };
   }
+}
+
+// ONE-TIME HELPER — paste this at the VERY END of Code.gs (below the last
+// function). It changes nothing that already exists in Code.gs.
+//
+// WHY: Google Sheets treats a cell value that starts with "=", "+" or "-"
+// as a formula. A maths option like "-3", "+5" or "= 2x" would be
+// converted/broken when saveMcqsBulk() writes it. Setting these columns to
+// "Plain text" format makes the Sheet store them exactly as typed.
+//
+// HOW TO RUN: Apps Script editor -> select makeMcqTextColumnsPlain in the
+// function dropdown -> Run. Safe to run more than once. Existing cell
+// values are not modified; only the column format changes.
+function makeMcqTextColumnsPlain() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sh = ss.getSheetByName("MCQs");
+  if (!sh) throw new Error("MCQs sheet not found.");
+
+  const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
+  const targets = [
+    "question", "option_a", "option_b", "option_c", "option_d",
+    "explanation", "explanation_a", "explanation_b", "explanation_c", "explanation_d"
+  ];
+
+  const done = [];
+  const missing = [];
+
+  targets.forEach(function (name) {
+    const idx = headers.indexOf(name);
+    if (idx === -1) { missing.push(name); return; }
+    // Whole column (all grid rows) so rows added later are covered too.
+    sh.getRange(1, idx + 1, sh.getMaxRows(), 1).setNumberFormat("@");
+    done.push(name);
+  });
+
+  const summary = { success: true, formatted_columns: done, columns_not_found: missing };
+  Logger.log(JSON.stringify(summary));
+  return summary;
+}
+
+function testPlainTextWrite2() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sh = ss.insertSheet("_tmp_plain_test");
+  try {
+    const tests = ["=4", "+5", "-2", "= 5x"];
+    sh.getRange(1, 1, tests.length, 3).setNumberFormat("@");
+
+    tests.forEach(function (v, i) {
+      // A: seedha setValue (abhi jaisa backend karta hai)
+      sh.getRange(i + 1, 1).setValue(v);
+      // B: shuru mein apostrophe lagake
+      sh.getRange(i + 1, 2).setValue("'" + v);
+      // C: rich text ke roop mein (formula parse hi nahi hota)
+      sh.getRange(i + 1, 3).setRichTextValue(
+        SpreadsheetApp.newRichTextValue().setText(v).build()
+      );
+    });
+
+    const rng = sh.getRange(1, 1, tests.length, 3);
+    Logger.log(JSON.stringify({
+      values: rng.getValues(),
+      formulas: rng.getFormulas()
+    }));
+  } finally {
+    ss.deleteSheet(sh);
+  }
+}
+
+// Script se likhte waqt "=" se shuru hone wali string formula ban jaati hai,
+// plain-text column mein bhi. Shuru mein ek apostrophe lagane se woh text
+// rehti hai, aur Sheet apostrophe khud hata deta hai (test se confirm).
+const MCQ_TEXT_COLUMNS_ = [
+  "question", "option_a", "option_b", "option_c", "option_d",
+  "explanation", "explanation_a", "explanation_b", "explanation_c", "explanation_d"
+];
+
+function safeSheetText_(value) {
+  if (typeof value !== "string") return value;
+  return /^[=+\-]/.test(value) ? "'" + value : value;
+}
+
+
+/* =========================================================
+   QUIZZES — PHASE 1 (backend)
+   Paste this whole block at the VERY END of Code.gs, then do the
+   4 small edits listed in "WIRING" below. Nothing existing changes.
+
+   Sheet "Quizzes" (auto-created on first save):
+     quiz_id | node_id | title | drive_file_id | question_count |
+     exam | subject | language | created_at | updated_at |
+     orphaned_at | orphan_reason
+
+   One quiz = one topic (node_id). One topic = many quizzes.
+   Attempts/scores are NOT stored here (EventLog on the client).
+   ========================================================= */
+
+const QUIZ_COLUMNS_ = [
+  "quiz_id", "node_id", "title", "drive_file_id", "question_count",
+  "exam", "subject", "language", "created_at", "updated_at",
+  "orphaned_at", "orphan_reason"
+];
+const QUIZ_CACHE_TTL_SEC_ = 3600;       // 1 hour
+const QUIZ_CACHE_MAX_BYTES_ = 95000;    // CacheService hard limit is 100KB/entry
+
+function ensureQuizSheet_(ss) {
+  let sheet = ss.getSheetByName("Quizzes");
+  if (!sheet) {
+    sheet = ss.insertSheet("Quizzes");
+    sheet.appendRow(QUIZ_COLUMNS_);
+  } else {
+    QUIZ_COLUMNS_.forEach(function(c) { getOrAddColumn_(sheet, c); });
+  }
+  return sheet;
+}
+
+// Drive link / bare ID -> DriveApp File (or null).
+function getQuizDriveFile_(ref) {
+  const id = extractDriveFileId_(String(ref || "").trim());
+  if (!id) return null;
+  try { return DriveApp.getFileById(id); } catch (e) { return null; }
+}
+
+// Pulls <script type="application/json" id="quiz-meta"> and quiz-data out
+// of the HTML text. Never throws: returns what it could read.
+function parseQuizHtml_(html) {
+  function grab(id) {
+    const re = new RegExp('<script[^>]*id=["\']' + id + '["\'][^>]*>([\\s\\S]*?)<\\/script>', "i");
+    const m = String(html).match(re);
+    if (!m) return null;
+    try { return JSON.parse(m[1]); } catch (e) { return null; }
+  }
+  const meta = grab("quiz-meta") || {};
+  const data = grab("quiz-data");
+  const count = Array.isArray(data) ? data.length : (Number(meta.total) || 0);
+  return {
+    has_meta: !!grab("quiz-meta"),
+    has_data: Array.isArray(data),
+    title: String(meta.title || ""),
+    exam: String(meta.exam || ""),
+    subject: String(meta.subject || ""),
+    language: String(meta.language || ""),
+    question_count: count
+  };
+}
+
+// GET ?action=preview_quiz&ref=<drive link>
+// Used by the Add Quiz popup to auto-fill title / count after paste.
+// Returns ONLY the parsed meta, never the HTML.
+function handlePreviewQuiz_(ref) {
+  try {
+    const file = getQuizDriveFile_(ref);
+    if (!file) return { ok: false, error: "Could not open this file. Check the link." };
+    const name = file.getName();
+    if (!/\.html?$/i.test(name) && String(file.getMimeType()) !== "text/html") {
+      return { ok: false, error: "This is not an .html file: " + name };
+    }
+    const html = file.getBlob().getDataAsString("UTF-8");
+    const info = parseQuizHtml_(html);
+    info.file_name = name;
+    info.drive_file_id = file.getId();
+    if (!info.title) info.title = name.replace(/\.html?$/i, "");
+    return { ok: true, info: info };
+  } catch (error) {
+    return { ok: false, error: "Unexpected error: " + error.message };
+  }
+}
+
+// POST { action:"save_quiz", node_id, ref (Drive link), title?, quiz_id? }
+// Same (node_id + file) pair is updated, never duplicated.
+function saveQuiz(data) {
+  if (!data || !data.node_id) throw new Error("node_id is required.");
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  const nodes = getSheetData(ss, "Nodes");
+  if (!nodes.some(function(n) { return String(n.node_id) === String(data.node_id); })) {
+    throw new Error("Node not found: " + data.node_id);
+  }
+
+  const file = getQuizDriveFile_(data.ref);
+  if (!file) throw new Error("Could not open this Drive file. Check the link.");
+  const html = file.getBlob().getDataAsString("UTF-8");
+  const info = parseQuizHtml_(html);
+  if (!info.has_data) throw new Error("quiz-data block not found in this HTML. Regenerate with the quiz prompt.");
+
+  const fileId = file.getId();
+  const title = String(data.title || info.title || file.getName().replace(/\.html?$/i, "")).trim();
+
+  const sheet = ensureQuizSheet_(ss);
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0].map(String);
+  const col = function(n) { return headers.indexOf(n); };
+
+  let existingRow = -1;
+  for (let i = 1; i < values.length; i++) {
+    const sameId = data.quiz_id && String(values[i][col("quiz_id")]) === String(data.quiz_id);
+    const samePair = String(values[i][col("node_id")]) === String(data.node_id) &&
+                     String(values[i][col("drive_file_id")]) === fileId;
+    if (sameId || samePair) { existingRow = i + 1; break; }
+  }
+
+  const now = new Date();
+  const incoming = {
+    node_id: data.node_id,
+    title: safeSheetText_(title),
+    drive_file_id: fileId,
+    question_count: info.question_count,
+    exam: info.exam,
+    subject: info.subject,
+    language: info.language,
+    updated_at: now,
+    orphaned_at: "",
+    orphan_reason: ""
+  };
+
+  let quizId;
+  if (existingRow !== -1) {
+    const oldRow = values[existingRow - 1];
+    quizId = String(oldRow[col("quiz_id")]);
+    incoming.quiz_id = quizId;
+    const row = headers.map(function(h, idx) {
+      return incoming[h] !== undefined ? incoming[h] : oldRow[idx];
+    });
+    sheet.getRange(existingRow, 1, 1, headers.length).setValues([row]);
+  } else {
+    quizId = "quiz_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
+    incoming.quiz_id = quizId;
+    incoming.created_at = now;
+    const row = headers.map(function(h) { return incoming[h] !== undefined ? incoming[h] : ""; });
+    sheet.appendRow(row);
+  }
+
+  CacheService.getScriptCache().remove("quizhtml_" + fileId);
+  return { success: true, action: existingRow !== -1 ? "updated" : "created",
+           quiz_id: quizId, node_id: data.node_id, question_count: info.question_count };
+}
+
+// POST { action:"update_quiz_meta", quiz_id, fields:{ title } }
+const QUIZ_META_EDITABLE_COLUMNS_ = ["title", "node_id"];
+function updateQuizMeta(data) {
+  if (!data || !data.quiz_id) throw new Error("quiz_id is required.");
+  const sheet = ensureQuizSheet_(SpreadsheetApp.getActiveSpreadsheet());
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0].map(String);
+  const idCol = headers.indexOf("quiz_id");
+  const fields = data.fields || {};
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][idCol]) !== String(data.quiz_id)) continue;
+    const changed = [];
+    QUIZ_META_EDITABLE_COLUMNS_.forEach(function(c) {
+      if (fields[c] === undefined) return;
+      const ci = headers.indexOf(c);
+      if (ci === -1) return;
+      sheet.getRange(i + 1, ci + 1).setValue(c === "title" ? safeSheetText_(fields[c]) : fields[c]);
+      changed.push(c);
+    });
+    if (changed.length) sheet.getRange(i + 1, headers.indexOf("updated_at") + 1).setValue(new Date());
+    return { success: true, quiz_id: data.quiz_id, fields_changed: changed };
+  }
+  throw new Error("quiz_id not found: " + data.quiz_id);
+}
+
+// POST { action:"delete_quiz", quiz_id }  — removes the Sheet row only.
+// The Drive file is never touched.
+function deleteQuizRow(data) {
+  if (!data || !data.quiz_id) throw new Error("quiz_id is required.");
+  const sheet = ensureQuizSheet_(SpreadsheetApp.getActiveSpreadsheet());
+  const values = sheet.getDataRange().getValues();
+  const idCol = values[0].map(String).indexOf("quiz_id");
+  for (let i = values.length - 1; i >= 1; i--) {
+    if (String(values[i][idCol]) === String(data.quiz_id)) {
+      sheet.deleteRow(i + 1);
+      return { success: true, action: "deleted", quiz_id: data.quiz_id };
+    }
+  }
+  throw new Error("quiz_id not found: " + data.quiz_id);
+}
+
+// GET ?action=get_quizzes&node_id=..&include_descendants=1
+// Lazy, like get_mcqs. Orphaned rows are never returned.
+function handleGetQuizzes_(params) {
+  params = params || {};
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let quizzes = getSheetDataSafe_(ss, "Quizzes").filter(function(q) { return !q.orphaned_at; });
+  if (params.node_id) {
+    if (String(params.include_descendants) === "1") {
+      const ids = getDescendantNodeIds_(ss, params.node_id);
+      quizzes = quizzes.filter(function(q) { return ids.has(String(q.node_id)); });
+    } else {
+      quizzes = quizzes.filter(function(q) { return String(q.node_id) === String(params.node_id); });
+    }
+  }
+  return { success: true, quizzes: quizzes };
+}
+
+// GET ?action=get_quiz_html&quiz_id=..
+// Only files REGISTERED in the Quizzes sheet can be read this way, so
+// this endpoint can't be used to read arbitrary Drive files.
+function handleGetQuizHtml_(quizId) {
+  try {
+    if (!quizId) return { ok: false, error: "quiz_id is required." };
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const quiz = getSheetDataSafe_(ss, "Quizzes").filter(function(q) {
+      return String(q.quiz_id) === String(quizId) && !q.orphaned_at;
+    })[0];
+    if (!quiz) return { ok: false, error: "Quiz not found (or its file is missing)." };
+
+    const cache = CacheService.getScriptCache();
+    const key = "quizhtml_" + quiz.drive_file_id;
+    const hit = cache.get(key);
+    if (hit) return { ok: true, html: hit, title: quiz.title, cached: true };
+
+    let file;
+    try { file = DriveApp.getFileById(String(quiz.drive_file_id)); }
+    catch (e) { return { ok: false, error: "The Drive file for this quiz could not be opened." }; }
+
+    const html = file.getBlob().getDataAsString("UTF-8");
+    if (Utilities.newBlob(html).getBytes().length < QUIZ_CACHE_MAX_BYTES_) {
+      cache.put(key, html, QUIZ_CACHE_TTL_SEC_);
+    }
+    return { ok: true, html: html, title: quiz.title, cached: false };
+  } catch (error) {
+    return { ok: false, error: "Unexpected error: " + error.message };
+  }
+}
+
+// Called from driveHealthCheck(): flags quizzes whose Drive file is gone.
+// Self-heals (clears the flag) if the file comes back.
+function quizFilesHealthCheck_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Quizzes");
+  if (!sheet) return { quizzes_checked: 0, quizzes_flagged: 0, quizzes_restored: 0 };
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) return { quizzes_checked: 0, quizzes_flagged: 0, quizzes_restored: 0 };
+  const headers = values[0].map(String);
+  const fCol = headers.indexOf("drive_file_id");
+  const oCol = headers.indexOf("orphaned_at");
+  const rCol = headers.indexOf("orphan_reason");
+  let checked = 0, flagged = 0, restored = 0;
+  for (let i = 1; i < values.length; i++) {
+    if (!values[i][fCol]) continue;
+    // Rows already flagged because their TOPIC is gone stay flagged.
+    const reason = String(values[i][rCol] || "");
+    if (values[i][oCol] && reason !== "file_missing") continue;
+    checked++;
+    let ok = false;
+    try { ok = !DriveApp.getFileById(String(values[i][fCol])).isTrashed(); } catch (e) { ok = false; }
+    if (ok && values[i][oCol]) {
+      sheet.getRange(i + 1, oCol + 1).setValue("");
+      sheet.getRange(i + 1, rCol + 1).setValue("");
+      restored++;
+    } else if (!ok && !values[i][oCol]) {
+      sheet.getRange(i + 1, oCol + 1).setValue(new Date());
+      sheet.getRange(i + 1, rCol + 1).setValue("file_missing");
+      flagged++;
+    }
+  }
+  return { quizzes_checked: checked, quizzes_flagged: flagged, quizzes_restored: restored };
+}
+
+/* =========================================================
+   WIRING — 4 small edits in the EXISTING Code.gs
+
+   (1) doGet(): add these 3 blocks right before the line
+       `const ss = SpreadsheetApp.getActiveSpreadsheet();`
+       that sits just above the default `const data = {...}` dump:
+
+       if (action === "get_quizzes")   return jsonResponse_(handleGetQuizzes_(e.parameter));
+       if (action === "get_quiz_html") return jsonResponse_(handleGetQuizHtml_(e.parameter.quiz_id));
+       if (action === "preview_quiz")  return jsonResponse_(handlePreviewQuiz_(e.parameter.ref));
+
+   (2) doPost(): add before `// Unknown / unhandled action`:
+
+       if (data.action === "save_quiz") {
+         if (!checkIndexWriteRateLimit_()) return jsonResponse_({ success: false, error: "Rate limit exceeded." });
+         return jsonResponse_(saveQuiz(data));
+       }
+       if (data.action === "update_quiz_meta") return jsonResponse_(updateQuizMeta(data));
+       if (data.action === "delete_quiz")      return jsonResponse_(deleteQuizRow(data));
+
+   (3) deleteStructureNodeRow(): after the `mcqsFlagged` line add:
+
+       const quizSheet = ss.getSheetByName("Quizzes");
+       const quizzesFlagged = quizSheet ? flagOrphanedRows_(quizSheet, "node_id", idsToDeleteSet, "topic_deleted") : 0;
+
+       and add `quizzes_flagged_orphaned: quizzesFlagged,` to the return object.
+
+   (4) driveHealthCheck(): inside `if (brokenNodeIds.length) {` after the
+       mcqsSheet line add:
+
+       const quizSheet2 = ss.getSheetByName("Quizzes");
+       if (quizSheet2) flagOrphanedRows_(quizSheet2, "node_id", brokenSet, "drive_missing");
+
+       and just before `Logger.log("Drive health check...` add:
+
+       summary.quiz_files = quizFilesHealthCheck_();
+
+   THEN: Deploy -> Manage deployments -> Edit -> New version.
+   ========================================================= */
+
+// ---- Quick test: run from the editor after deploying ----
+// Put a real quiz .html file's Drive link and a real node_id below.
+function testSaveQuiz() {
+  const r = saveQuiz({
+    node_id: "PUT_REAL_NODE_ID_HERE",
+    ref: "PUT_DRIVE_LINK_HERE"
+  });
+  Logger.log(JSON.stringify(r));
+  Logger.log(JSON.stringify(handleGetQuizzes_({ node_id: "PUT_REAL_NODE_ID_HERE" })));
 }
