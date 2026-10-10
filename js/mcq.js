@@ -80,6 +80,8 @@ const MCQ_LANGUAGES = [
 let allLoadedMcqs = [];
 let selectedMcqTags = new Set();
 let selectedMcqLanguage = "";
+// ORIGIN filter: "" = all, otherwise one of pyq / old / book / ai.
+let selectedMcqOrigin = "";
 let currentCollectionView = null;
 let mcqPreviewRows = [];
 
@@ -168,6 +170,32 @@ function indexToCorrect(index) {
     return Number(index) + 1;
 }
 
+// ORIGIN — where a question really comes from.
+//   pyq  = copied from a real exam paper     book = book / coaching material
+//   ai   = written by an AI                  old  = existing, not checked yet
+// A blank / unknown origin in the sheet always counts as "old".
+const MCQ_ORIGINS = ["pyq", "old", "book", "ai"];
+const MCQ_ORIGIN_LABELS = { pyq: "Real PYQ", old: "Old bank", book: "Book", ai: "AI practice" };
+
+function normalizeMcqOrigin(value) {
+    const s = String(value ?? "").trim().toLowerCase();
+    return MCQ_ORIGINS.includes(s) ? s : "old";
+}
+
+// Small badge shown on a question. Real PYQ and Old questions show nothing
+// (they are the normal case); only book / AI-made ones are marked, so an AI
+// question can never be mistaken for a real exam question.
+function mcqOriginBadgeHtml(q) {
+    const origin = normalizeMcqOrigin(q?.origin);
+    if (origin === "ai") {
+        return `<div class="mcq-origin-badge ai">🤖 AI-made practice question${q.derived_from ? " — based on a real exam question" : ""}</div>`;
+    }
+    if (origin === "book") {
+        return `<div class="mcq-origin-badge book">📖 From a book — not an exam question</div>`;
+    }
+    return "";
+}
+
 function mapMcqRow(row) {
 
     const correctIndex = correctToIndex(row.correct_option);
@@ -208,6 +236,8 @@ function mapMcqRow(row) {
         node_id: row.node_id || "",
         question_group_id: row.question_group_id || "",
         passage_id: row.passage_id || "",
+        origin: normalizeMcqOrigin(row.origin),
+        derived_from: row.derived_from || "",
         warnings: row.warnings || []
     };
 }
@@ -465,7 +495,53 @@ function getMcqCollectionInfo(collectionId) {
     return (mcqApiData.collections || []).find(c => String(c.collection_id || "") === String(collectionId || "")) || null;
 }
 
+// Drops a stale origin selection (e.g. after switching to a topic that has no
+// AI questions) BEFORE filtering, so questions never vanish because of a
+// filter the person can no longer see.
+function syncMcqOriginSelection() {
+    const present = new Set((allLoadedMcqs || []).map(m => normalizeMcqOrigin(m.origin)));
+    if (present.size < 2 || !present.has(selectedMcqOrigin)) selectedMcqOrigin = "";
+}
+
+// Origin chips (All / Real PYQ / Old bank / Book / AI practice). Shown only
+// when the loaded questions really contain 2 or more kinds of origin, so
+// a topic that is all one kind stays exactly as clean as before.
+function renderMcqOriginFilterRow() {
+    const present = Array.from(new Set((allLoadedMcqs || []).map(m => normalizeMcqOrigin(m.origin))));
+    if (selectedMcqOrigin && !present.includes(selectedMcqOrigin)) selectedMcqOrigin = "";
+    let row = document.getElementById("mcq-origin-filter-row");
+
+    if (present.length < 2) {
+        selectedMcqOrigin = "";
+        row?.remove();
+        return;
+    }
+    if (!row) {
+        const anchor = document.getElementById("mcq-collection-notes");
+        if (!anchor) return;
+        row = document.createElement("div");
+        row.id = "mcq-origin-filter-row";
+        row.className = "mcq-tag-filter-row mcq-origin-filter-row";
+        anchor.insertAdjacentElement("beforebegin", row);
+    }
+
+    const chips = [["", "All"]].concat(
+        MCQ_ORIGINS.filter(o => present.includes(o)).map(o => [o, MCQ_ORIGIN_LABELS[o]])
+    );
+    row.innerHTML = `<span class="mcq-filter-label">Show:</span>` + chips.map(([value, label]) => `
+        <button type="button" class="mcq-filter-chip ${selectedMcqOrigin === value ? "active" : ""}" data-origin="${escapeHtml(value)}">${escapeHtml(label)}</button>
+    `).join("");
+    row.querySelectorAll(".mcq-filter-chip").forEach(button => {
+        button.addEventListener("click", () => {
+            selectedMcqOrigin = button.dataset.origin || "";
+            currentMcqIndex = 0;
+            applyMcqPracticeFilters();
+        });
+    });
+}
+
 function populateMcqPracticeFilters() {
+    renderMcqOriginFilterRow();
     const language = document.getElementById("mcq-language");
     const languageWrap = document.querySelector(".mcq-language-control");
     const languages = getMcqLanguages(allLoadedMcqs);
@@ -664,6 +740,7 @@ async function loadFullMcqCollection(collectionId) {
 }
 
 function applyMcqPracticeFilters() {
+    syncMcqOriginSelection();
     let slots = buildMcqSlots(allLoadedMcqs);
 
     // Tags — a slot passes if the UNION of tags across all its language
@@ -680,6 +757,14 @@ function applyMcqPracticeFilters() {
             });
             return Array.from(selectedMcqTags).every(tag => tagSet.has(tag.toLowerCase()));
         });
+    }
+
+    // Origin — a slot passes if no origin is selected, OR any of its
+    // language variants has that origin.
+    if (selectedMcqOrigin) {
+        slots = slots.filter(slot =>
+            slot.languages.some(lang => normalizeMcqOrigin(slot.variants[lang].origin) === selectedMcqOrigin)
+        );
     }
 
     // Language — a slot passes if selectedMcqLanguage is empty, OR it
@@ -770,6 +855,7 @@ function renderMcqView() {
                             <span>Question ${i + 1} of ${currentMcqs.length}</span>
                         </div>
                         ${mcqCrumbHtml(q.node_id)}
+                        ${mcqOriginBadgeHtml(q)}
                         ${q.languages.length > 1 ? `
                             <div class="mcq-lang-toggle" role="group" aria-label="Question language">
                                 ${q.languages.map(lang => `
@@ -858,6 +944,7 @@ function renderMcqView() {
                 <button type="button" class="mcq-edit-meta" id="mcq-edit-meta" title="Edit question metadata" aria-label="Edit question metadata">✏️</button>
             </div>
             ${mcqCrumbHtml(mcq.node_id)}
+            ${mcqOriginBadgeHtml(mcq)}
 
             ${mcqPassageHtml(mcq)}
             <div class="mcq-question-text">
@@ -1666,6 +1753,17 @@ function buildMcqAiPrompt() {
         lines.push("", `Add @language: ${languages[0]} to EACH question.`);
     }
 
+    const originChoice = document.getElementById("mcq-origin")?.value.trim() || "";
+    const ORIGIN_PROMPT_ = {
+        pyq: "Every question in this file is copied from a REAL exam paper. Put @origin: pyq on the FIRST question only (it carries forward). Keep each question and its options exactly as printed — do not rewrite, improve or shorten them. @correct must come from the official answer key in the source; never guess an answer.",
+        book: "Every question in this file comes from a book / coaching material, not from an exam paper. Put @origin: book on the FIRST question only (it carries forward).",
+        ai: "Every question in this file is written by you (the AI). Put @origin: ai on the FIRST question only (it carries forward). Never label a question you wrote yourself as pyq. If a question is based on a real exam question whose ID I gave you, add @derived_from: <that mcq_id> on that question.",
+        old: "Put @origin: old on the FIRST question only (it carries forward)."
+    };
+    if (ORIGIN_PROMPT_[originChoice]) {
+        lines.push("", "ORIGIN", ORIGIN_PROMPT_[originChoice]);
+    }
+
     if (tags.length) {
         lines.push("", `Add @tags: ${tags.join(", ")} to EACH question.`);
     }
@@ -1880,6 +1978,15 @@ function openAddMcqModal() {
                 <label for="mcq-collection" id="mcq-collection-label"><span class="mcq-field-num mcq-num-red" id="mcq-field-num-2">2.</span> Collection name *</label>
                 <input id="mcq-collection" type="text" placeholder="e.g. UGC NET 2025 Paper II" required>
 
+                <label for="mcq-origin"><span class="mcq-field-num mcq-num-red">2b.</span> Origin <small>(where do these questions really come from?)</small></label>
+                <select id="mcq-origin">
+                    <option value="">— Not set (will show as Old) —</option>
+                    <option value="pyq">Real PYQ — copied from a real exam paper</option>
+                    <option value="book">Book / coaching material</option>
+                    <option value="ai">AI-made practice questions</option>
+                    <option value="old">Old / not checked yet</option>
+                </select>
+
                 <label for="mcq-drive-link"><span class="mcq-field-num mcq-num-red">3.</span> Google Drive .md link *</label>
                 <input id="mcq-drive-link" type="url" placeholder="https://drive.google.com/file/d/.../view or a folder link">
                 <div class="content-action-row">
@@ -1940,6 +2047,8 @@ function openAddMcqModal() {
                 <details class="content-link-guide">
                     <summary>Tag format reference</summary>
                     <pre class="content-link-guide-body">${mcqEscapeHtml(`@collection: Collection Name
+@origin: pyq | book | ai | old (carries forward — put it once on the first question)
+@derived_from: mcq_id (optional — for AI-made questions: the real question it was based on)
 @question_no: 1
 @group: t20-q1 (optional — same value on this question's translation in another language block links them into one toggle-able question)
 @type: simple | assertion_reason
@@ -2150,8 +2259,16 @@ function applyMcqPopupDefaults(parsed) {
         ? selectedLanguages[0] : "";
     const topic = document.getElementById("mcq-study-topic")?.value.trim() || "";
     const tags = getMcqTagChips().join(", ");
+    const originDefault = document.getElementById("mcq-origin")?.value.trim() || "";
 
     parsed.mcqs.forEach(row => {
+        // A question's own @origin always wins; the form choice only fills
+        // the gaps. If neither is set the question is saved without an
+        // origin and shows as "Old" — flagged here so it is not a surprise.
+        if (!row.origin && originDefault) row.origin = originDefault;
+        if (!row.origin) {
+            row.warnings = (row.warnings || []).concat("no origin set (choose Origin in the form or add @origin:) — will show as Old");
+        }
         if (!row.collection_id_ref && collection) row.collection_id_ref = collection;
         if (!row.tags && tags) row.tags = tags;
         if (!row.language && language) row.language = language;
@@ -2561,6 +2678,13 @@ function openMcqMetaModal(mcq) {
                 <label for="mcq-meta-language">Language</label>
                 <input id="mcq-meta-language" type="text" value="${mcqEscapeHtml(mcq.language || "")}" placeholder="English / Hindi / Hinglish / Mixed / Other">
 
+                <label for="mcq-meta-origin">Origin (where this question really comes from)</label>
+                <select id="mcq-meta-origin">
+                    ${MCQ_ORIGINS.map(o => `<option value="${o}" ${normalizeMcqOrigin(mcq.origin) === o ? "selected" : ""}>${mcqEscapeHtml(MCQ_ORIGIN_LABELS[o])}</option>`).join("")}
+                </select>
+                <label for="mcq-meta-derived-from">Based on question ID <small>(only for AI practice questions — the real question it was based on)</small></label>
+                <input id="mcq-meta-derived-from" type="text" value="${mcqEscapeHtml(mcq.derived_from || "")}" placeholder="e.g. mcq_ab12cd34">
+
                 <label>Tags</label>
                 <div id="mcq-meta-tag-chips" class="mcq-tag-chip-wrap"></div>
                 <div style="position:relative">
@@ -2712,6 +2836,10 @@ async function saveMcqMeta(mcq) {
     });
     if (correctNumber !== indexToCorrect(mcq.answer ?? 0)) contentFields.correct_option = correctNumber;
     if (explanation !== String(mcq.explanation || "")) contentFields.explanation = explanation;
+    const originValue = document.getElementById("mcq-meta-origin")?.value || normalizeMcqOrigin(mcq.origin);
+    if (originValue !== normalizeMcqOrigin(mcq.origin)) contentFields.origin = originValue;
+    const derivedFromValue = document.getElementById("mcq-meta-derived-from")?.value.trim() || "";
+    if (derivedFromValue !== String(mcq.derived_from || "")) contentFields.derived_from = derivedFromValue;
     optionLetters.forEach((letter, i) => {
         const note = document.getElementById(`mcq-edit-why-${i + 1}`)?.value.trim() || "";
         if (note !== String(mcq.optionNotes?.[i] || "")) contentFields["explanation_" + letter] = note;

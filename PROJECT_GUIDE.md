@@ -136,6 +136,27 @@ A question has as many options as its source gives it: normally 4, sometimes
   (the front-end letters are listed in `mcq-parse.js` / `mcq.js`).
 - The Quiz feature (`js/quiz-prompt.js`) is separate and still uses 4 options.
 
+## MCQ origin (real PYQ vs book vs AI-made)
+Every question says where it really comes from, so the MCQ section can stay
+trustworthy: a question written by an AI must never look like a real exam question.
+- **Values** (`origin` column in `MCQs`): `pyq` = copied from a real exam paper,
+  `book` = book / coaching material, `ai` = written by an AI, `old` = existing and
+  not checked yet. A blank origin always counts as `old`.
+- `derived_from` (optional): for an `ai` question, the `mcq_id` of the real question
+  it was based on.
+- **Import (`.md`)**: `@origin: pyq` carries forward like `@collection:` (write it once
+  on the first question). `@derived_from: <mcq_id>` is per question. The Add MCQs form
+  also has an Origin dropdown: it fills questions that have no `@origin`, and adds the
+  matching rule to the AI prompt. A question's own `@origin` always wins.
+- **MCQ page**: chips (All / Real PYQ / Old bank / Book / AI practice) appear only when a
+  topic really has 2 or more kinds. Book and AI questions get a badge; pyq and old get none.
+- **Rule**: only mark `pyq` when the question comes from a real exam paper with its
+  official answer key. AI-written questions are never `pyq`.
+- **Sheet helpers** (Apps Script editor, safe to re-run): `listSuspectMcqs()` (read-only
+  check for test/broken/duplicate rows), `markLegacyMcqsAsOld()`, `promoteOldMcqsToPyq()`.
+  `setupMcqBankSheets()` adds the two columns and an origin dropdown.
+- Not built yet: AI-variant generator prompt, score/progress split by origin.
+
 ## MCQ interface
 The MCQ page has:
 - large question/options area on the left;

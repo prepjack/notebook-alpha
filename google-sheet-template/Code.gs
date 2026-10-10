@@ -620,6 +620,8 @@ function saveMcq(data) {
     option_d: data.option_d || "",
     option_e: data.option_e || "",
     option_f: data.option_f || "",
+    origin: normalizeMcqOrigin_(data.origin),
+    derived_from: data.derived_from || "",
     correct_option: data.correct_option !== undefined ? normalizeCorrectOption_(data.correct_option) : 1,
     explanation: data.explanation || "",
     status: data.status || "published",
@@ -1822,7 +1824,8 @@ const MCQ_CONTENT_EDITABLE_COLUMNS = [
   "question", "option_a", "option_b", "option_c", "option_d", "option_e", "option_f",
   "correct_option", "explanation",
   "explanation_a", "explanation_b", "explanation_c", "explanation_d",
-  "explanation_e", "explanation_f"
+  "explanation_e", "explanation_f",
+  "origin", "derived_from"
 ];
 
 function updateMcqContent(data) {
@@ -1854,7 +1857,9 @@ function updateMcqContent(data) {
     if (fields[col] === undefined) return;
     const colIndex = headers.indexOf(col);
     if (colIndex === -1) return;
-    const val = (col === "correct_option") ? normalizeCorrectOption_(fields[col]) : safeSheetText_(fields[col]);
+    const val = (col === "correct_option") ? normalizeCorrectOption_(fields[col])
+      : (col === "origin") ? normalizeMcqOrigin_(fields[col])
+      : safeSheetText_(fields[col]);
     sheet.getRange(targetRow, colIndex + 1).setValue(val);
     changed.push(col);
   });
@@ -2985,7 +2990,11 @@ const MCQ_BANK_NEW_COLUMNS_ = [
   // PER-OPTION EXPLANATIONS: why each option is right / wrong (option 1-6)
   "explanation_a", "explanation_b", "explanation_c", "explanation_d",
   // 5th and 6th options (only used by questions that really have them)
-  "option_e", "option_f", "explanation_e", "explanation_f"
+  "option_e", "option_f", "explanation_e", "explanation_f",
+  // ORIGIN: where the question really comes from — pyq (real exam paper),
+  // book, ai (written by an AI) or old (existing/unchecked). derived_from =
+  // mcq_id of the real question an AI practice question was based on.
+  "origin", "derived_from"
 ];
 
 // Idempotent: adds any of MCQ_BANK_NEW_COLUMNS_ missing from row 1,
@@ -3038,8 +3047,130 @@ function setupMcqBankSheets() {
     throw new Error("MCQs sheet not found.");
   }
   ensureMcqColumns_(mcqSheet);
+  applyMcqOriginValidation_(mcqSheet);
 
   Logger.log("MCQ Bank schema ready: MCQs columns extended, Collections + MCQ_Passages sheets present.");
+}
+
+/* =========================================================
+   MCQ ORIGIN — where a question really comes from
+   ---------------------------------------------------------
+     pyq  = copied from a real exam paper (authentic previous-year question)
+     book = from a book / coaching material
+     ai   = written by an AI (optionally "derived_from" a real question)
+     old  = existing question not checked/labelled yet (blank = old)
+
+   After setupMcqBankSheets() adds the "origin" + "derived_from"
+   columns, run these from the Apps Script editor (function dropdown -> Run):
+
+     1. listSuspectMcqs()        READ-ONLY. Logs rows that look like test /
+                                 broken / duplicate questions. Nothing is changed.
+     2. markLegacyMcqsAsOld()    fills origin = "old" ONLY where it is blank.
+     3. (fix or delete the test rows by hand in the sheet)
+     4. promoteOldMcqsToPyq()    turns every "old" into "pyq" once you are
+                                 sure the remaining questions are real PYQs.
+   All three are safe to re-run.
+   ========================================================= */
+const MCQ_ORIGINS_ = ["pyq", "book", "ai", "old"];
+
+function normalizeMcqOrigin_(v) {
+  const s = String(v === undefined || v === null ? "" : v).trim().toLowerCase();
+  return MCQ_ORIGINS_.indexOf(s) !== -1 ? s : "";
+}
+
+// Dropdown (pyq / book / ai / old) on the whole origin column, so
+// hand-editing the sheet can never leave a typo like "pyqs".
+function applyMcqOriginValidation_(sheet) {
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+  const col = headers.indexOf("origin");
+  if (col === -1) return;
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(MCQ_ORIGINS_, true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(2, col + 1, Math.max(sheet.getMaxRows() - 1, 1), 1).setDataValidation(rule);
+}
+
+// Shared by the three helpers below: { sheet, headers, rows } for MCQs.
+function readMcqSheetForOrigin_() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("MCQs");
+  if (!sheet) throw new Error("MCQs sheet not found.");
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0].map(String);
+  if (headers.indexOf("origin") === -1) {
+    throw new Error('The "origin" column is missing. Run setupMcqBankSheets() first.');
+  }
+  return { sheet: sheet, headers: headers, rows: values.slice(1) };
+}
+
+function markLegacyMcqsAsOld() {
+  const d = readMcqSheetForOrigin_();
+  const oc = d.headers.indexOf("origin");
+  const qc = d.headers.indexOf("question");
+  let changed = 0;
+  const out = d.rows.map(function(r) {
+    const hasQuestion = String(r[qc]).trim() !== "";
+    if (hasQuestion && String(r[oc]).trim() === "") { changed++; return ["old"]; }
+    return [r[oc]];
+  });
+  if (out.length) d.sheet.getRange(2, oc + 1, out.length, 1).setValues(out);
+  Logger.log('markLegacyMcqsAsOld: ' + changed + ' question(s) marked "old" (rows that already had an origin were left alone).');
+  return changed;
+}
+
+function promoteOldMcqsToPyq() {
+  const d = readMcqSheetForOrigin_();
+  const oc = d.headers.indexOf("origin");
+  let changed = 0;
+  const out = d.rows.map(function(r) {
+    if (String(r[oc]).trim().toLowerCase() === "old") { changed++; return ["pyq"]; }
+    return [r[oc]];
+  });
+  if (out.length) d.sheet.getRange(2, oc + 1, out.length, 1).setValues(out);
+  Logger.log('promoteOldMcqsToPyq: ' + changed + ' question(s) changed from "old" to "pyq".');
+  return changed;
+}
+
+// READ-ONLY — changes nothing. Open View -> Logs / Execution log afterwards.
+function listSuspectMcqs() {
+  const d = readMcqSheetForOrigin_();
+  const H = d.headers;
+  const idx = function(name) { return H.indexOf(name); };
+  const get = function(r, name) { const i = idx(name); return i === -1 ? "" : String(r[i] === undefined ? "" : r[i]).trim(); };
+  const snippet = function(t) { t = String(t).replace(/\s+/g, " "); return t.length > 70 ? t.slice(0, 70) + "..." : t; };
+  const TEST_WORDS = /\b(test|testing|demo|dummy|sample|lorem|asdf|xxx)\b/i;
+
+  const strong = [];
+  const noProvenance = [];
+  const seen = {};
+
+  d.rows.forEach(function(r, i) {
+    const question = get(r, "question");
+    if (!question) return; // empty row
+    const rowNo = i + 2;
+    const id = get(r, "mcq_id");
+    const reasons = [];
+
+    const opts = ["option_a", "option_b", "option_c", "option_d", "option_e", "option_f"].map(function(n) { return get(r, n); });
+    let count = opts.length;
+    while (count > 0 && !opts[count - 1]) count--;
+
+    if (TEST_WORDS.test(question) || opts.some(function(o) { return TEST_WORDS.test(o); })) reasons.push('has a word like "test/demo/sample"');
+    if (count < 4) reasons.push("fewer than 4 options (" + count + ")");
+    if (opts.slice(0, count).some(function(o) { return !o; })) reasons.push("an option is empty in the middle");
+    const correct = normalizeCorrectOption_(get(r, "correct_option"));
+    if (correct === "" || correct > count) reasons.push("correct_option is missing or points at an empty option");
+
+    const key = question.toLowerCase().replace(/\s+/g, " ");
+    if (seen[key]) reasons.push("same question text as row " + seen[key]); else seen[key] = rowNo;
+
+    if (reasons.length) strong.push("Row " + rowNo + " | " + id + " | " + reasons.join("; ") + " | " + snippet(question));
+    if (!get(r, "exam") && !get(r, "year") && !get(r, "source")) noProvenance.push("Row " + rowNo + " | " + id + " | " + snippet(question));
+  });
+
+  Logger.log("=== LIKELY PROBLEMS: " + strong.length + " row(s) ===\n" + (strong.length ? strong.join("\n") : "none found"));
+  Logger.log("=== NO exam / year / source filled: " + noProvenance.length + " row(s)" + (noProvenance.length > 40 ? " (first 40 shown)" : "") + " ===\n" + (noProvenance.length ? noProvenance.slice(0, 40).join("\n") : "none"));
+  return { problems: strong.length, noProvenance: noProvenance.length };
 }
 
 /* =========================================================
@@ -3205,6 +3336,12 @@ function saveMcqsBulk(data) {
 
         if (incoming.correct_option !== undefined) {
       incoming.correct_option = normalizeCorrectOption_(incoming.correct_option);
+    }
+    // origin: only a valid value is ever written; an invalid/blank one is
+    // dropped so a re-import never wipes an origin already set in the sheet.
+    if (incoming.origin !== undefined) {
+      const o = normalizeMcqOrigin_(incoming.origin);
+      if (o) incoming.origin = o; else delete incoming.origin;
     }
 
     const existingRow = existingRowByEntity[mcq.mcq_id];
@@ -3752,7 +3889,7 @@ function makeMcqTextColumnsPlain() {
   const targets = [
     "question", "option_a", "option_b", "option_c", "option_d", "option_e", "option_f",
     "explanation", "explanation_a", "explanation_b", "explanation_c", "explanation_d",
-    "explanation_e", "explanation_f"
+    "explanation_e", "explanation_f", "derived_from"
   ];
 
   const done = [];
@@ -3805,7 +3942,7 @@ function testPlainTextWrite2() {
 const MCQ_TEXT_COLUMNS_ = [
   "question", "option_a", "option_b", "option_c", "option_d", "option_e", "option_f",
   "explanation", "explanation_a", "explanation_b", "explanation_c", "explanation_d",
-  "explanation_e", "explanation_f"
+  "explanation_e", "explanation_f", "derived_from"
 ];
 
 function safeSheetText_(value) {

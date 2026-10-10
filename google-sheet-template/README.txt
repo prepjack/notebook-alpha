@@ -375,3 +375,31 @@ Maximum number of options is the constant MCQ_MAX_OPTIONS_ in Code.gs.
 KEEP CODE.GS IN SYNC: the live Code.gs in the Apps Script editor is what really
 runs. Whenever it is changed there, paste the same file here and commit it, so
 this copy never goes stale.
+
+
+11. ALPHA-PLUS — MCQ ORIGIN (REAL PYQ / BOOK / AI-MADE / OLD)
+-------------------------------------------------------------
+Every MCQ says where it really comes from, in the "origin" column:
+
+    pyq   copied from a real exam paper (with its official answer key)
+    book  from a book / coaching material
+    ai    written by an AI
+    old   existing question, not checked yet  (a blank cell counts as old)
+
+Extra column "derived_from": for an "ai" question, the mcq_id of the real
+question it was based on (optional).
+
+SETUP / CLEAN-UP (Apps Script editor: pick the function, press Run):
+  1. setupMcqBankSheets()    adds the origin + derived_from columns and a
+                             dropdown (pyq / book / ai / old) on the origin column.
+  2. listSuspectMcqs()       READ-ONLY. Open the Execution log afterwards: it lists
+                             rows that look like test / broken / duplicate questions.
+                             Fix or delete those rows by hand in the sheet.
+  3. markLegacyMcqsAsOld()   fills origin = "old" where it is blank.
+  4. promoteOldMcqsToPyq()   once you are sure the remaining questions are real
+                             previous-year questions, turns every "old" into "pyq".
+  Then Deploy -> Manage deployments -> pencil -> New version -> Deploy.
+
+In the .md import file: "@origin: pyq" (carries forward, write it once at the top)
+and optionally "@derived_from: <mcq_id>". Only mark "pyq" when the question really
+is from an exam paper; AI-written questions are always "ai".

@@ -16,6 +16,7 @@
                          collection_id_ref, question_no, question,
                          option_a, option_b, option_c, option_d,
                          option_e, option_f,   (5th/6th: only if the question has them)
+                         origin, derived_from, (only when @origin / @derived_from is given)
                          correct_option, explanation, difficulty,
                          language, tags, description, exam, year,
                          session, source, source_question_no,
@@ -66,6 +67,16 @@
 
    Question block:
      @collection: <title>         (optional — carries forward, see below)
+     @origin: pyq | book | ai | old
+                                  (optional — carries forward like @collection:
+                                    set it once and every following question
+                                    inherits it; an empty "@origin:" clears it.
+                                    pyq  = copied from a real exam paper
+                                    book = from a book / coaching material
+                                    ai   = written by an AI
+                                    old  = existing, not checked yet)
+     @derived_from: <mcq_id>      (optional — for origin ai: the real question
+                                    this AI question was based on)
      @question_no: <number>       (optional — auto-assigned if absent)
      @group: <id>                 (optional — links this question to its
                                     translation/variant in another language,
@@ -221,6 +232,9 @@
         D: "A is false, but R is true"
     };
 
+    // Where a question comes from. Blank/absent is shown on the site as "old".
+    const KNOWN_ORIGINS_ = ["pyq", "book", "ai", "old"];
+
     // Standard: sheet stores 1-6 (1 = first option). Legacy A-F is still accepted.
     const CORRECT_TO_NUMBER_ = { "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, A: 1, B: 2, C: 3, D: 4, E: 5, F: 6 };
 
@@ -279,6 +293,22 @@
             state.currentCollectionRef = rawCollection || null;
         }
         const collectionRef = state.currentCollectionRef;
+
+        // @origin: carry-forward, exactly like @collection. A block with no
+        // @origin tag inherits the running value; an explicit empty
+        // "@origin:" clears it; an unknown value is flagged and ignored.
+        if (hasTag_(fields, "origin")) {
+            const rawOrigin = getField_(fields, "origin").trim().toLowerCase();
+            if (!rawOrigin) {
+                state.currentOrigin = "";
+            } else if (KNOWN_ORIGINS_.indexOf(rawOrigin) !== -1) {
+                state.currentOrigin = rawOrigin;
+            } else {
+                state.currentOrigin = "";
+                warnings.push("unknown @origin '" + rawOrigin + "' (use pyq, book, ai or old) — origin not set");
+            }
+        }
+        const originValue = state.currentOrigin;
 
         const rawType = getField_(fields, "type");
         const type = rawType || "simple";
@@ -444,6 +474,12 @@
             warnings: warnings
         };
 
+        // Origin is only added when known, so re-importing an older .md that
+        // has no @origin never blanks an origin already set in the sheet.
+        if (originValue) built.origin = originValue;
+        const derivedFrom = getField_(fields, "derived_from");
+        if (derivedFrom) built.derived_from = derivedFrom;
+
         // Per-option explanations (@why_1..@why_6 -> explanation_a..f).
         // Only added when the tag is present and non-empty, so re-importing
         // an older .md (or one without @why tags) never blanks notes that
@@ -466,6 +502,7 @@
 
         const state = {
             currentCollectionRef: null,
+            currentOrigin: "",             // @origin carry-forward (same idea as the collection)
             questionNoCounters: new Map(), // counterKey -> count
             collectionsMap: new Map()      // title -> collection object
         };
