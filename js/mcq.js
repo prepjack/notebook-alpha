@@ -19,7 +19,7 @@ let mcqLastScrollKey = "";
 
 // ALPHA-PLUS — main practice-panel display mode. "single" is the
 // original one-question-at-a-time view; "all" is a scrollable list
-// showing every question with its full options (question + 4 options),
+// showing every question with its full options (question + all its options),
 // for scanning through the set. Clicking a question in "all" mode jumps
 // back to "single" mode on that question — answering still only
 // happens in single mode, so there's one answer-handling code path.
@@ -153,15 +153,15 @@ async function loadMcqsForTopic(topicId) {
 // Row -> practice-view MCQ object. Extracted out of the old
 // "Attach MCQs" loop so both loadMcqsForTopic() and the refresh path
 // in confirmSaveMcqs() share one mapping.
-// STANDARD (2026-09): the sheet stores correct_option as 1-4 (1 = first
-// option). Inside the app, `answer` stays a 0-based index so that
+// STANDARD (2026-09): the sheet stores correct_option as 1-6 (1 = first
+// option; a question has 4, 5 or 6 options depending on its source). Inside the app, `answer` stays a 0-based index so that
 // options[answer] and every `selected === mcq.answer` check keep working.
 // These two helpers are the ONLY place that converts between the two.
-// Legacy A-D letters are still read (as 1-4) so an old cell never breaks.
+// Legacy A-F letters are still read (as 1-6) so an old cell never breaks.
 function correctToIndex(value) {
     const s = String(value ?? "").trim().toUpperCase();
-    if (/^[1-4]$/.test(s)) return Number(s) - 1;
-    const i = "ABCD".indexOf(s);
+    if (/^[1-6]$/.test(s)) return Number(s) - 1;
+    const i = "ABCDEF".indexOf(s);
     return (s.length === 1 && i >= 0) ? i : 0;
 }
 function indexToCorrect(index) {
@@ -172,23 +172,30 @@ function mapMcqRow(row) {
 
     const correctIndex = correctToIndex(row.correct_option);
 
+    // A question has as many options as its source gives it (4, 5 or 6).
+    // Empty trailing options (e.g. option_e / option_f on a normal 4-option
+    // question) are dropped, so only real options are ever shown.
+    const rawOptions = [
+        row.option_a, row.option_b, row.option_c,
+        row.option_d, row.option_e, row.option_f
+    ].map(o => (o === undefined || o === null) ? "" : String(o));
+    let optionCount = rawOptions.length;
+    while (optionCount > 1 && !rawOptions[optionCount - 1]) optionCount--;
+
     return {
         id: row.mcq_id,
         question: row.question || "",
-        options: [
-            row.option_a || "",
-            row.option_b || "",
-            row.option_c || "",
-            row.option_d || ""
-        ],
+        options: rawOptions.slice(0, optionCount),
         answer: correctIndex ?? 0,
         explanation: row.explanation || "",
         optionNotes: [
             row.explanation_a || "",
             row.explanation_b || "",
             row.explanation_c || "",
-            row.explanation_d || ""
-        ],
+            row.explanation_d || "",
+            row.explanation_e || "",
+            row.explanation_f || ""
+        ].slice(0, optionCount),
         tags: row.tags || "",
         language: row.language || "",
         description: row.description || "",
@@ -343,7 +350,7 @@ function mcqFeedbackBodyHtml(q, sel) {
     html += item(q.answer, sel === q.answer ? "Your choice · Correct — " : "Correct answer — ");
     shown.add(q.answer);
 
-    const rest = [0, 1, 2, 3].filter(i => !shown.has(i)).map(i => item(i, "")).join("");
+    const rest = (q.options || []).map((_, i) => i).filter(i => !shown.has(i)).map(i => item(i, "")).join("");
     if (rest.trim()) {
         html += `<details style="margin-top:8px;"><summary style="cursor:pointer;">Other options</summary>${rest}</details>`;
     }
@@ -1325,12 +1332,16 @@ For each simple MCQ, use:
 2) <option 2>
 3) <option 3>
 4) <option 4>
-@correct: 1|2|3|4
+5) <option 5 — ONLY if the source question really has a 5th option, e.g. "None of these">
+6) <option 6 — ONLY if the source question really has a 6th option>
+@correct: <number of the correct option: 1-4 normally, up to 5 or 6 if the question has that many options>
 @explanation: <2-3 sentences: the concept and why the correct option is right>
 @why_1: <why option 1 is right, or why it is wrong and what it actually refers to>
 @why_2: <same for option 2>
 @why_3: <same for option 3>
 @why_4: <same for option 4>
+@why_5: <same for option 5 — only if option 5 exists>
+@why_6: <same for option 6 — only if option 6 exists>
 @end`,
 
     assertion_reason: `ASSERTION–REASONING FORMAT
@@ -1367,12 +1378,16 @@ Then create each question as a normal question block and reference that passage:
 2) <option 2>
 3) <option 3>
 4) <option 4>
-@correct: 1|2|3|4
+5) <option 5 — ONLY if the source question really has a 5th option, e.g. "None of these">
+6) <option 6 — ONLY if the source question really has a 6th option>
+@correct: <number of the correct option: 1-4 normally, up to 5 or 6 if the question has that many options>
 @explanation: <2-3 sentences: the concept and why the correct option is right>
 @why_1: <why option 1 is right, or why it is wrong and what it actually refers to>
 @why_2: <same for option 2>
 @why_3: <same for option 3>
 @why_4: <same for option 4>
+@why_5: <same for option 5 — only if option 5 exists>
+@why_6: <same for option 6 — only if option 6 exists>
 @end`,
 
     table: `TABLE / DI FORMAT
@@ -1386,12 +1401,16 @@ When a question depends on a table or data interpretation, keep the table/data i
 2) <option 2>
 3) <option 3>
 4) <option 4>
-@correct: 1|2|3|4
+5) <option 5 — ONLY if the source question really has a 5th option, e.g. "None of these">
+6) <option 6 — ONLY if the source question really has a 6th option>
+@correct: <number of the correct option: 1-4 normally, up to 5 or 6 if the question has that many options>
 @explanation: <brief calculation/reasoning: how the correct option is reached>
 @why_1: <why option 1 is right, or the mistake that leads to it>
 @why_2: <same for option 2>
 @why_3: <same for option 3>
 @why_4: <same for option 4>
+@why_5: <same for option 5 — only if option 5 exists>
+@why_6: <same for option 6 — only if option 6 exists>
 @end`
 };
 
@@ -1661,8 +1680,9 @@ function buildMcqAiPrompt() {
         "- Every question must end with @end.",
         "- A genuinely required field must not be guessed. If source material does not support it, leave it out rather than fabricating it.",
         "- Keep question, option, correct answer, and explanation content faithful to the supplied source.",
-        "- @why_1 to @why_4 must each explain THAT specific option: why it is correct, or why it is wrong and what it actually refers to. Keep each to 1-2 sentences.",
-        "- Write @explanation and @why_1..@why_4 in the SAME language as the question.",
+        "- Number of options: normally 4. If the source question itself has 5 or 6 options (for example a 5th option \"None of these\"), keep exactly that many (5) and 6) lines) and give @why_5 / @why_6 too. Never invent extra options to pad a question, and never drop an option the source has.",
+        "- @why_1 to @why_4 (and @why_5 / @why_6 when those options exist) must each explain THAT specific option: why it is correct, or why it is wrong and what it actually refers to. Keep each to 1-2 sentences.",
+        "- Write @explanation and every @why_ note in the SAME language as the question.",
         "",
         "---",
         "FILE NAMING INSTRUCTION (for you, the human — not for the AI tool):",
@@ -1933,12 +1953,16 @@ function openAddMcqModal() {
 2) Option 2
 3) Option 3
 4) Option 4
-@correct: 1
+5) Option 5 (optional — only if the question has a 5th option)
+6) Option 6 (optional — only if the question has a 6th option)
+@correct: 1 (1 to 6 = number of the correct option)
 @explanation: Explanation
 @why_1: Why option 1 is right/wrong
 @why_2: Why option 2 is right/wrong
 @why_3: Why option 3 is right/wrong
 @why_4: Why option 4 is right/wrong
+@why_5: Why option 5 is right/wrong (optional)
+@why_6: Why option 6 is right/wrong (optional)
 @difficulty: easy | medium | hard
 @language: en | hi | Hinglish | Mixed
 @tags: tag1, tag2
@@ -2092,8 +2116,18 @@ async function fetchMcqSourceFiles(ref) {
 function isMcqFatal(row) {
     const warnings = row.warnings || [];
     const text = warnings.join(" | ").toLowerCase();
-    return !row.question || !row.option_a || !row.option_b || !row.option_c || !row.option_d ||
-        !/^[1-4]$/.test(String(row.correct_option)) ||
+    // 2 to 6 options are allowed, but they must be continuous (no empty
+    // option in the middle) and @correct must point at one of them.
+    const optList = [
+        row.option_a, row.option_b, row.option_c,
+        row.option_d, row.option_e, row.option_f
+    ].map(o => String(o || "").trim());
+    let optCount = optList.length;
+    while (optCount > 0 && !optList[optCount - 1]) optCount--;
+    const optGap = optList.slice(0, optCount).some(o => !o);
+    return !row.question || optCount < 2 || optGap ||
+        !/^[1-6]$/.test(String(row.correct_option)) ||
+        Number(row.correct_option) > optCount ||
         text.includes("missing @question") ||
         text.includes("missing @options") ||
         text.includes("missing @correct");
@@ -2468,6 +2502,10 @@ function openMcqMetaModal(mcq) {
     const topicOptions = getMcqMetaTopicOptions(mcq.node_id || currentMcqTopic?.id || "");
     const tags = String(mcq.tags || "").split(",").map(t => t.trim()).filter(Boolean);
 
+    // How many option rows to show: at least 4, or as many as this question
+    // already has (up to 6). "+ Add option" reveals the rest.
+    const shownOptionCount = Math.min(6, Math.max(4, mcq.options?.length || 0));
+
     const modal = document.createElement("div");
     modal.id = "mcq-meta-modal";
     modal.innerHTML = `
@@ -2480,18 +2518,19 @@ function openMcqMetaModal(mcq) {
                 <label for="mcq-edit-question">Question</label>
                 <textarea id="mcq-edit-question" rows="3">${mcqEscapeHtml(mcq.question || "")}</textarea>
 
-                <label for="mcq-edit-option-a">Option 1</label>
-                <input id="mcq-edit-option-a" type="text" value="${mcqEscapeHtml(mcq.options?.[0] || "")}">
-                <label for="mcq-edit-option-b">Option 2</label>
-                <input id="mcq-edit-option-b" type="text" value="${mcqEscapeHtml(mcq.options?.[1] || "")}">
-                <label for="mcq-edit-option-c">Option 3</label>
-                <input id="mcq-edit-option-c" type="text" value="${mcqEscapeHtml(mcq.options?.[2] || "")}">
-                <label for="mcq-edit-option-d">Option 4</label>
-                <input id="mcq-edit-option-d" type="text" value="${mcqEscapeHtml(mcq.options?.[3] || "")}">
+                ${[1, 2, 3, 4, 5, 6].map(n => {
+                    const letter = "abcdef"[n - 1];
+                    const val = mcq.options?.[n - 1] || "";
+                    const hide = n > shownOptionCount ? ' style="display:none"' : "";
+                    return `
+                <label for="mcq-edit-option-${letter}" data-opt-n="${n}"${hide}>Option ${n}</label>
+                <input id="mcq-edit-option-${letter}" data-opt-n="${n}" type="text" value="${mcqEscapeHtml(val)}"${hide}>`;
+                }).join("")}
+                <button type="button" id="mcq-edit-add-option" class="content-action"${shownOptionCount >= 6 ? ' style="display:none"' : ""}>+ Add option</button>
 
                 <label for="mcq-edit-correct">Correct Option</label>
                 <select id="mcq-edit-correct">
-                    ${[1, 2, 3, 4].map((num, i) =>
+                    ${Array.from({ length: shownOptionCount }, (_, i) => i + 1).map((num, i) =>
                         `<option value="${num}" ${mcq.answer === i ? "selected" : ""}>${num}</option>`
                     ).join("")}
                 </select>
@@ -2499,9 +2538,12 @@ function openMcqMetaModal(mcq) {
                 <label for="mcq-edit-explanation">Explanation</label>
                 <textarea id="mcq-edit-explanation" rows="3">${mcqEscapeHtml(mcq.explanation || "")}</textarea>
 
-                ${[1, 2, 3, 4].map(n => `
-                <label for="mcq-edit-why-${n}">Option ${n} — why right / wrong</label>
-                <textarea id="mcq-edit-why-${n}" rows="2">${mcqEscapeHtml(mcq.optionNotes?.[n - 1] || "")}</textarea>`).join("")}
+                ${[1, 2, 3, 4, 5, 6].map(n => {
+                    const hide = n > shownOptionCount ? ' style="display:none"' : "";
+                    return `
+                <label for="mcq-edit-why-${n}" data-opt-n="${n}"${hide}>Option ${n} — why right / wrong</label>
+                <textarea id="mcq-edit-why-${n}" data-opt-n="${n}" rows="2"${hide}>${mcqEscapeHtml(mcq.optionNotes?.[n - 1] || "")}</textarea>`;
+                }).join("")}
 
                 <hr>
 
@@ -2565,6 +2607,23 @@ function openMcqMetaModal(mcq) {
     });
     document.getElementById("mcq-meta-save")?.addEventListener("click", () => saveMcqMeta(mcq));
     document.getElementById("mcq-meta-delete")?.addEventListener("click", () => deleteMcqPermanently(mcq));
+
+    // "+ Add option": reveals the next hidden option row (5th, then 6th),
+    // its "why" box, and the matching number in the Correct Option list.
+    let visibleOptionCount = shownOptionCount;
+    document.getElementById("mcq-edit-add-option")?.addEventListener("click", e => {
+        if (visibleOptionCount >= 6) return;
+        visibleOptionCount++;
+        modal.querySelectorAll(`[data-opt-n="${visibleOptionCount}"]`).forEach(el => { el.style.display = ""; });
+        const sel = document.getElementById("mcq-edit-correct");
+        if (sel) {
+            const opt = document.createElement("option");
+            opt.value = String(visibleOptionCount);
+            opt.textContent = String(visibleOptionCount);
+            sel.appendChild(opt);
+        }
+        if (visibleOptionCount >= 6) e.currentTarget.style.display = "none";
+    });
 }
 
 // ALPHA-PLUS — real permanent delete, distinct from the "Archived"
@@ -2628,22 +2687,32 @@ async function saveMcqMeta(mcq) {
     // update_mcq_meta's allow-list deliberately excludes these), so they
     // need their own diff/payload here, sent as a second request below.
     const question = document.getElementById("mcq-edit-question")?.value.trim() || "";
-    const optionA = document.getElementById("mcq-edit-option-a")?.value.trim() || "";
-    const optionB = document.getElementById("mcq-edit-option-b")?.value.trim() || "";
-    const optionC = document.getElementById("mcq-edit-option-c")?.value.trim() || "";
-    const optionD = document.getElementById("mcq-edit-option-d")?.value.trim() || "";
+    const optionLetters = ["a", "b", "c", "d", "e", "f"];
+    const optionVals = optionLetters.map(l => document.getElementById("mcq-edit-option-" + l)?.value.trim() || "");
     const correctNumber = Number(document.getElementById("mcq-edit-correct")?.value) || 1;
     const explanation = document.getElementById("mcq-edit-explanation")?.value.trim() || "";
 
+    // A question may have 2 to 6 options, filled in order with no empty one
+    // in between, and the correct option must be one of them.
+    let filledCount = optionVals.length;
+    while (filledCount > 0 && !optionVals[filledCount - 1]) filledCount--;
+    if (filledCount < 2 || optionVals.slice(0, filledCount).some(v => !v)) {
+        alert("Fill the options in order (Option 1, 2, 3 ...) with no empty option in between. At least 2 options are needed.");
+        return;
+    }
+    if (correctNumber > filledCount) {
+        alert("Correct Option " + correctNumber + " is empty. Pick one of the filled options (1 to " + filledCount + ").");
+        return;
+    }
+
     const contentFields = {};
     if (question !== String(mcq.question || "")) contentFields.question = question;
-    if (optionA !== String(mcq.options?.[0] || "")) contentFields.option_a = optionA;
-    if (optionB !== String(mcq.options?.[1] || "")) contentFields.option_b = optionB;
-    if (optionC !== String(mcq.options?.[2] || "")) contentFields.option_c = optionC;
-    if (optionD !== String(mcq.options?.[3] || "")) contentFields.option_d = optionD;
+    optionLetters.forEach((letter, i) => {
+        if (optionVals[i] !== String(mcq.options?.[i] || "")) contentFields["option_" + letter] = optionVals[i];
+    });
     if (correctNumber !== indexToCorrect(mcq.answer ?? 0)) contentFields.correct_option = correctNumber;
     if (explanation !== String(mcq.explanation || "")) contentFields.explanation = explanation;
-    ["a", "b", "c", "d"].forEach((letter, i) => {
+    optionLetters.forEach((letter, i) => {
         const note = document.getElementById(`mcq-edit-why-${i + 1}`)?.value.trim() || "";
         if (note !== String(mcq.optionNotes?.[i] || "")) contentFields["explanation_" + letter] = note;
     });

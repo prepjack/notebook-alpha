@@ -119,6 +119,23 @@ rationale. Summary:
   `link_index_term` actions) is ready for them, per the spec's phased
   approach.
 
+## MCQ options (4, 5 or 6 per question)
+A question has as many options as its source gives it: normally 4, sometimes
+5 (e.g. a 5th "None of these") or 6. Maximum is 6.
+- **Sheet (`MCQs`)**: `option_a` to `option_f`, `explanation_a` to `explanation_f`.
+  `option_e`/`option_f` stay empty on normal 4-option questions.
+  `correct_option` is 1-6 (1 = first option). New columns are added by running
+  `setupMcqBankSheets()` once; run `makeMcqTextColumnsPlain()` once after that.
+- **Markdown import (`js/mcq-parse.js`)**: `1)` to `6)` option lines, `@correct: 1`
+  to `6`, `@why_1` to `@why_6`. Options must be continuous (no missing number).
+  Fewer than 4 options gives a warning; `@correct` pointing at a missing option
+  is a fatal row error in the preview.
+- **Practice page (`js/mcq.js`)**: shows only the options the question really has.
+  Edit modal shows 4 rows and a "+ Add option" button (up to 6).
+- **Max is one constant on each side**: `MCQ_MAX_OPTIONS_` in `Code.gs`
+  (the front-end letters are listed in `mcq-parse.js` / `mcq.js`).
+- The Quiz feature (`js/quiz-prompt.js`) is separate and still uses 4 options.
+
 ## MCQ interface
 The MCQ page has:
 - large question/options area on the left;

@@ -555,14 +555,18 @@ function flagContentRemoved(data) {
   return { success: true, node_id: nodeId, content_core_flagged_orphaned: flagged };
 }
 
-// Standard: sheet mein correct_option hamesha 1-4 (1 = pehla option).
-// Letters (A-D) bhi accept karta hai, par 1-4 mein badalkar likhta hai.
+// Ek sawal mein maximum kitne options ho sakte hain. Sheet mein option_a..option_f
+// (aur explanation_a..explanation_f) columns isi ke hisaab se hain.
+const MCQ_MAX_OPTIONS_ = 6;
+
+// Standard: sheet mein correct_option hamesha 1-6 (1 = pehla option).
+// Letters (A-F) bhi accept karta hai, par 1-6 mein badalkar likhta hai.
 // Invalid/0 ko "" bana deta hai, taaki galat data chupke se na baithe.
 function normalizeCorrectOption_(v) {
   const s = String(v === undefined || v === null ? "" : v).trim().toUpperCase();
-  if (/^[1-4]$/.test(s)) return Number(s);
-  const i = "ABCD".indexOf(s);
-  if (s.length === 1 && i >= 0) return i + 1;
+  if (/^[1-9]$/.test(s) && Number(s) <= MCQ_MAX_OPTIONS_) return Number(s);
+  const i = "ABCDEF".indexOf(s);
+  if (s.length === 1 && i >= 0 && i < MCQ_MAX_OPTIONS_) return i + 1;
   return "";
 }
 
@@ -614,6 +618,8 @@ function saveMcq(data) {
     option_b: data.option_b || "",
     option_c: data.option_c || "",
     option_d: data.option_d || "",
+    option_e: data.option_e || "",
+    option_f: data.option_f || "",
     correct_option: data.correct_option !== undefined ? normalizeCorrectOption_(data.correct_option) : 1,
     explanation: data.explanation || "",
     status: data.status || "published",
@@ -1813,9 +1819,10 @@ function deleteMcqCollection(data) {
 // Mirrors updateMcqMeta()'s fixed-allow-list shape exactly, just with
 // the content columns that function deliberately excludes.
 const MCQ_CONTENT_EDITABLE_COLUMNS = [
-  "question", "option_a", "option_b", "option_c", "option_d",
+  "question", "option_a", "option_b", "option_c", "option_d", "option_e", "option_f",
   "correct_option", "explanation",
-  "explanation_a", "explanation_b", "explanation_c", "explanation_d"
+  "explanation_a", "explanation_b", "explanation_c", "explanation_d",
+  "explanation_e", "explanation_f"
 ];
 
 function updateMcqContent(data) {
@@ -2975,8 +2982,10 @@ const MCQ_BANK_NEW_COLUMNS_ = [
   // variant pairs of the SAME question (see js/mcq-parse.js header for
   // how it's derived); blank for a standalone, ungrouped question.
   "question_group_id",
-  // PER-OPTION EXPLANATIONS: why each option is right / wrong (option 1-4)
-  "explanation_a", "explanation_b", "explanation_c", "explanation_d"
+  // PER-OPTION EXPLANATIONS: why each option is right / wrong (option 1-6)
+  "explanation_a", "explanation_b", "explanation_c", "explanation_d",
+  // 5th and 6th options (only used by questions that really have them)
+  "option_e", "option_f", "explanation_e", "explanation_f"
 ];
 
 // Idempotent: adds any of MCQ_BANK_NEW_COLUMNS_ missing from row 1,
@@ -3741,8 +3750,9 @@ function makeMcqTextColumnsPlain() {
 
   const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
   const targets = [
-    "question", "option_a", "option_b", "option_c", "option_d",
-    "explanation", "explanation_a", "explanation_b", "explanation_c", "explanation_d"
+    "question", "option_a", "option_b", "option_c", "option_d", "option_e", "option_f",
+    "explanation", "explanation_a", "explanation_b", "explanation_c", "explanation_d",
+    "explanation_e", "explanation_f"
   ];
 
   const done = [];
@@ -3793,8 +3803,9 @@ function testPlainTextWrite2() {
 // plain-text column mein bhi. Shuru mein ek apostrophe lagane se woh text
 // rehti hai, aur Sheet apostrophe khud hata deta hai (test se confirm).
 const MCQ_TEXT_COLUMNS_ = [
-  "question", "option_a", "option_b", "option_c", "option_d",
-  "explanation", "explanation_a", "explanation_b", "explanation_c", "explanation_d"
+  "question", "option_a", "option_b", "option_c", "option_d", "option_e", "option_f",
+  "explanation", "explanation_a", "explanation_b", "explanation_c", "explanation_d",
+  "explanation_e", "explanation_f"
 ];
 
 function safeSheetText_(value) {

@@ -15,6 +15,7 @@
        mcqs:        [ { mcq_id, node_id, question_type, passage_id,
                          collection_id_ref, question_no, question,
                          option_a, option_b, option_c, option_d,
+                         option_e, option_f,   (5th/6th: only if the question has them)
                          correct_option, explanation, difficulty,
                          language, tags, description, exam, year,
                          session, source, source_question_no,
@@ -80,9 +81,11 @@
      2) <text>
      3) <text>
      4) <text>
-     @correct: 1|2|3|4            (required; legacy A-D also accepted)
+     5) <text>                    (optional — only if the question has a 5th option)
+     6) <text>                    (optional — only if the question has a 6th option)
+     @correct: 1|2|3|4|5|6        (required; legacy A-F also accepted)
      @explanation: <concept + why the correct option is right>
-     @why_1 .. @why_4: <why THAT option is right / wrong>   (optional)
+     @why_1 .. @why_6: <why THAT option is right / wrong>   (optional)
      @explanation / @difficulty / @language / @tags / @description /
      @exam / @year / @session / @source / @source_question_no  (all optional)
      @end
@@ -192,20 +195,20 @@
         return (hash >>> 0).toString(16).padStart(8, "0");
     }
 
-    // Parses "A) text" / "B) text" / "C) text" / "D) text" lines out
-    // of a raw options block. Letters not present are simply absent
-    // from the returned map (caller treats them as "").
+    // Parses "1) text" ... "6) text" (or legacy "A) text" ... "F) text")
+    // lines out of a raw options block. Letters not present are simply
+    // absent from the returned map (caller treats them as "").
     function parseOptionLines_(rawOptionsText) {
         const result = {};
         String(rawOptionsText || "")
             .split("\n")
             .forEach(function (line) {
                 // Accepts "1) text" (standard) and legacy "A) text".
-                // Result keys stay A-D internally (option_a..option_d).
-                const m = line.trim().match(/^([1-4A-Da-d])\)\s*(.*)$/);
+                // Result keys stay A-F internally (option_a..option_f).
+                const m = line.trim().match(/^([1-6A-Fa-f])\)\s*(.*)$/);
                 if (m) {
                     const k = m[1].toUpperCase();
-                    result["1234".indexOf(k) >= 0 ? "ABCD"["1234".indexOf(k)] : k] = m[2];
+                    result["123456".indexOf(k) >= 0 ? "ABCDEF"["123456".indexOf(k)] : k] = m[2];
                 }
             });
         return result;
@@ -218,8 +221,8 @@
         D: "A is false, but R is true"
     };
 
-    // Standard: sheet stores 1-4 (1 = first option). Legacy A-D is still accepted.
-    const CORRECT_TO_NUMBER_ = { "1": 1, "2": 2, "3": 3, "4": 4, A: 1, B: 2, C: 3, D: 4 };
+    // Standard: sheet stores 1-6 (1 = first option). Legacy A-F is still accepted.
+    const CORRECT_TO_NUMBER_ = { "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, A: 1, B: 2, C: 3, D: 4, E: 5, F: 6 };
 
     // Explicit @question_no values are kept as numbers when they
     // parse cleanly (matches how the rest of the app treats numeric
@@ -308,25 +311,39 @@
         }
 
         // options (explicit, or assertion_reason default, rule 5)
-        let optionA = "", optionB = "", optionC = "", optionD = "";
+        let optionA = "", optionB = "", optionC = "", optionD = "", optionE = "", optionF = "";
         if (hasTag_(fields, "options")) {
             const parsed = parseOptionLines_(fields.options ? getField_(fields, "options") : "");
             optionA = parsed.A || "";
             optionB = parsed.B || "";
             optionC = parsed.C || "";
             optionD = parsed.D || "";
+            optionE = parsed.E || "";
+            optionF = parsed.F || "";
         } else if (isAssertionReason) {
             optionA = AR_DEFAULT_OPTIONS_.A;
             optionB = AR_DEFAULT_OPTIONS_.B;
             optionC = AR_DEFAULT_OPTIONS_.C;
             optionD = AR_DEFAULT_OPTIONS_.D;
         }
-        if (!optionA && !optionB && !optionC && !optionD) {
+        if (!optionA && !optionB && !optionC && !optionD && !optionE && !optionF) {
             warnings.push("missing @options");
+        } else {
+            // A question has as many options as the source paper gives it
+            // (normally 4, sometimes 5 or 6). Count up to the last filled one
+            // and flag gaps / unusually short lists so a typo is not silent.
+            const optList = [optionA, optionB, optionC, optionD, optionE, optionF];
+            let optCount = optList.length;
+            while (optCount > 0 && !optList[optCount - 1]) optCount--;
+            if (optList.slice(0, optCount).some(function (o) { return !o; })) {
+                warnings.push("option numbering has a gap (1) 2) 3) ... must be continuous)");
+            } else if (optCount < 4) {
+                warnings.push("only " + optCount + " options found (expected 4 or more)");
+            }
         }
 
-        // correct option — stored as 1-4 (1 = first option). Accepts
-        // "1"-"4" (standard) or legacy "A"-"D" and always outputs 1-4.
+        // correct option — stored as 1-6 (1 = first option). Accepts
+        // "1"-"6" (standard) or legacy "A"-"F" and always outputs 1-6.
         const correctRaw = getField_(fields, "correct").toUpperCase();
         let correctOption = "";
         if (Object.prototype.hasOwnProperty.call(CORRECT_TO_NUMBER_, correctRaw)) {
@@ -411,6 +428,8 @@
             option_b: optionB,
             option_c: optionC,
             option_d: optionD,
+            option_e: optionE,
+            option_f: optionF,
             correct_option: correctOption,
             explanation: getField_(fields, "explanation"),
             difficulty: getField_(fields, "difficulty"),
@@ -425,11 +444,11 @@
             warnings: warnings
         };
 
-        // Per-option explanations (@why_1..@why_4 -> explanation_a..d).
+        // Per-option explanations (@why_1..@why_6 -> explanation_a..f).
         // Only added when the tag is present and non-empty, so re-importing
         // an older .md (or one without @why tags) never blanks notes that
         // were already saved/edited in the sheet.
-        ["a", "b", "c", "d"].forEach(function (letter, i) {
+        ["a", "b", "c", "d", "e", "f"].forEach(function (letter, i) {
             const note = getField_(fields, "why_" + (i + 1));
             if (note) built["explanation_" + letter] = note;
         });

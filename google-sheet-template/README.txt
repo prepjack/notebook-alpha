@@ -1,5 +1,8 @@
 ALPHA GOOGLE SHEET DATA CONTRACT
 
+FOR THE FULL PROJECT OVERVIEW read PROJECT_GUIDE.md in the repo root. This
+file is only the Google Sheet / Apps Script data contract.
+
 NOTE ON THIS FILE: Topics.csv / Resources.csv / MCQs.csv in this same
 folder are an early, illustrative template (they use "topic_id"). The
 site's actual live Apps Script contract — the one js/app.js really talks
@@ -19,12 +22,15 @@ resource_id | topic_id | title | type | source | url | page_ref | description | 
 
 3. MCQs
 mcq_id | topic_id | question | option_a | option_b | option_c | option_d | correct_option | explanation
+   (early template only. The live MCQs sheet has more columns, including
+   option_e, option_f and explanation_a..explanation_f. See section 10.)
 
 IMPORTANT:
 - topic_id is the stable connection between Topics, Resources and MCQs.
 - Do not use the visible topic title as the permanent identifier.
 - key_points uses " | " as the separator in the current CSV template.
-- correct_option is zero-based in the current JSON (0=A, 1=B, 2=C, 3=D).
+- correct_option is 1-based: 1 = first option, 2 = second ... up to 6.
+  (Older letters A-F are still read and converted. 0 is NOT valid.)
 - Resource URL is always a link. The website does not ask users to upload PDFs/images.\n- page_ref stores the relevant PDF page or page range for the topic (e.g. 23 or 23–27), or a video timestamp (e.g. 04:15–08:30).
 - Apps Script will later transform these rows into the JSON shape already consumed by the frontend.
 - MCQ attempts are NOT part of these public content tables in Alpha. Attempts remain browser/session-only.
@@ -338,3 +344,34 @@ changes the Drive quota used by DriveApp.
 The existing folder-mode Markdown reader remains unchanged: it detects a
 Drive folder link, selects content.md/index.md (or the first .md), and returns
 other files as filename-based assets.
+
+
+10. ALPHA-PLUS — MCQ OPTIONS (4, 5 OR 6 PER QUESTION)
+----------------------------------------------------
+A question has as many options as its source gives it: normally 4,
+sometimes 5 (for example a 5th option "None of these") or 6. Maximum 6.
+
+MCQs sheet columns involved:
+
+    option_a | option_b | option_c | option_d | option_e | option_f
+    explanation_a | explanation_b | ... | explanation_f   (why each option is right/wrong)
+    correct_option   (1-6; 1 = first option)
+
+- option_e / option_f (and explanation_e / explanation_f) are left empty on
+  normal 4-option questions. Empty trailing options are never shown on the site.
+- Options must be continuous: no empty option between filled ones.
+- correct_option must point at a filled option.
+
+TO TURN THIS ON (Apps Script editor, once each, safe to re-run):
+  1. setupMcqBankSheets()      adds the missing columns at the right end of MCQs.
+  2. makeMcqTextColumnsPlain() formats the option/explanation columns as plain
+                               text so values like "-3" or "= 2x" are not turned
+                               into formulas.
+  3. Deploy -> Manage deployments -> pencil -> New version -> Deploy
+     (do NOT create a "New deployment", it changes the web app URL).
+
+Maximum number of options is the constant MCQ_MAX_OPTIONS_ in Code.gs.
+
+KEEP CODE.GS IN SYNC: the live Code.gs in the Apps Script editor is what really
+runs. Whenever it is changed there, paste the same file here and commit it, so
+this copy never goes stale.
