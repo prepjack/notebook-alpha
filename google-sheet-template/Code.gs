@@ -3069,7 +3069,13 @@ function setupMcqBankSheets() {
      3. (fix or delete the test rows by hand in the sheet)
      4. promoteOldMcqsToPyq()    turns every "old" into "pyq" once you are
                                  sure the remaining questions are real PYQs.
-   All three are safe to re-run.
+        or (easier, no clean-up needed):
+        promoteCollectionMcqsToPyq()
+                                 turns "old" into "pyq" ONLY for questions that
+                                 belong to an imported paper (collection_id is
+                                 filled). Questions without a collection stay
+                                 "old" so you can check them later.
+   All of these are safe to re-run.
    ========================================================= */
 const MCQ_ORIGINS_ = ["pyq", "book", "ai", "old"];
 
@@ -3129,6 +3135,28 @@ function promoteOldMcqsToPyq() {
   if (out.length) d.sheet.getRange(2, oc + 1, out.length, 1).setValues(out);
   Logger.log('promoteOldMcqsToPyq: ' + changed + ' question(s) changed from "old" to "pyq".');
   return changed;
+}
+
+// Safer promotion: only "old" questions that belong to a collection (an imported
+// real paper) become "pyq". Hand-added / collection-less questions stay "old".
+function promoteCollectionMcqsToPyq() {
+  const d = readMcqSheetForOrigin_();
+  const oc = d.headers.indexOf("origin");
+  const cc = d.headers.indexOf("collection_id");
+  const ic = d.headers.indexOf("mcq_id");
+  if (cc === -1) throw new Error('The "collection_id" column was not found in MCQs.');
+  let changed = 0;
+  const leftOld = [];
+  const out = d.rows.map(function(r, i) {
+    if (String(r[oc]).trim().toLowerCase() !== "old") return [r[oc]];
+    if (String(r[cc]).trim() !== "") { changed++; return ["pyq"]; }
+    leftOld.push("Row " + (i + 2) + " | " + String(r[ic]));
+    return [r[oc]];
+  });
+  if (out.length) d.sheet.getRange(2, oc + 1, out.length, 1).setValues(out);
+  Logger.log('promoteCollectionMcqsToPyq: ' + changed + ' question(s) with a collection changed from "old" to "pyq".\n' +
+    leftOld.length + ' question(s) have no collection and stay "old":\n' + (leftOld.length ? leftOld.join("\n") : "none"));
+  return { promoted: changed, leftOld: leftOld.length };
 }
 
 // READ-ONLY — changes nothing. Open View -> Logs / Execution log afterwards.

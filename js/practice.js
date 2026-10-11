@@ -507,6 +507,10 @@ function aggregateFlashcardsPanelHtml(scope) {
 // network call (there is no local/synchronous source for it today), so
 // don't refetch it every re-render — only once per topic per page load.
 const mcqTotalCache = new Map(); // nodeId -> count, or null if unknown
+// nodeId -> Set of the question ids that exist in the sheet RIGHT NOW (not archived).
+// Used so attempts on questions that were later deleted / replaced never count
+// ("25 / 21 attempted"). Missing = not fetched yet -> nothing is filtered.
+const mcqIdsCache = new Map();
 
 async function fetchMcqTotalForTopic(nodeId) {
     if (mcqTotalCache.has(nodeId)) return mcqTotalCache.get(nodeId);
@@ -517,7 +521,10 @@ async function fetchMcqTotalForTopic(nodeId) {
         const data = await res.json();
         const rows = (data && data.mcqs) || [];
         // Same "hide archived" rule mcq.js applies when it loads a topic's MCQs.
-        total = rows.filter(r => String(r.status || "").trim().toLowerCase() !== "archived").length;
+        const live = rows.filter(r => String(r.status || "").trim().toLowerCase() !== "archived");
+        total = live.length;
+        const liveIds = live.map(r => String(r.mcq_id || "").trim()).filter(Boolean);
+        if (liveIds.length === live.length) mcqIdsCache.set(nodeId, new Set(liveIds));
     } catch (err) {
         console.warn("[Notebook Alpha] Could not fetch MCQ total for " + nodeId + ".", err);
         total = null; // unknown, not zero — the panel shows "—" rather than a false 0
@@ -532,8 +539,12 @@ async function fetchMcqTotalForTopic(nodeId) {
 // it *writes* these events on a changed answer) — so re-answering a
 // question doesn't inflate "attempted" or skew accuracy.
 function mcqEventStats(nodeId) {
+    // Only attempts on questions that still exist count (once the topic's live
+    // question ids are known); old history of deleted questions is ignored.
+    const liveIds = mcqIdsCache.get(nodeId);
     const events = (window.EventLog ? window.EventLog.readLog() : [])
-        .filter(e => e && e.type === "mcq" && e.topicId === nodeId);
+        .filter(e => e && e.type === "mcq" && e.topicId === nodeId)
+        .filter(e => !liveIds || liveIds.has(String(e.questionId)));
     const latestByQuestion = new Map();
     events.forEach(e => {
         const prev = latestByQuestion.get(e.questionId);
@@ -550,8 +561,8 @@ function mcqEventStats(nodeId) {
 async function renderMcqPanel(scope) {
     if (!scope || !scope.nodeId) return "";
     if (scope.isLeaf === false) return aggregateMcqPanelHtml(scope);
-    const stats = mcqEventStats(scope.nodeId);
     const total = await fetchMcqTotalForTopic(scope.nodeId);
+    const stats = mcqEventStats(scope.nodeId);   // after the fetch, so deleted questions are filtered out
     const totalLabel = total == null ? "—" : String(total);
     const accLabel = stats.accuracy == null ? "—" : Math.round(stats.accuracy * 100) + "%";
     return '<div class="tool-panel tool-panel-mcq" data-scope="' + escapeHtml(scope.nodeId) + '">' +
@@ -567,8 +578,8 @@ async function renderMcqPanel(scope) {
 // "Solve" button: there's no single topic id to hand mcq.html.
 async function aggregateMcqPanelHtml(scope) {
     const leafIds = scope.leafIds || getDescendantLeafIds(scope.nodeId);
-    const stats = aggregateMcqEventStats(leafIds);
     const totals = await Promise.all(leafIds.map(fetchMcqTotalForTopic));
+    const stats = aggregateMcqEventStats(leafIds);   // after the fetches, so deleted questions are filtered out
     const known = totals.filter(t => t != null);
     const totalLabel = known.length ? String(known.reduce((a, b) => a + b, 0)) : "—";
     const accLabel = stats.accuracy == null ? "—" : Math.round(stats.accuracy * 100) + "%";

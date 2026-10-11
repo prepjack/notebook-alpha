@@ -119,6 +119,23 @@ rationale. Summary:
   `link_index_term` actions) is ready for them, per the spec's phased
   approach.
 
+## Quiz source modes and options per MCQ (`js/quiz-prompt.js`)
+The Quiz box (Add Content Folder box) has a "Questions should come from" choice:
+- **This topic's content** (default): unchanged. With 4 options and the default settings the
+  copied prompt is byte-for-byte the same as before.
+- **My own text**: paste text from a PDF / book / notes; questions come only from it (same strict
+  "only from the content" rules, plus a note to ignore page numbers, headers and OCR junk).
+- **My own questions to quiz** (convert): paste ready-made questions with options and answers.
+  The AI only turns them into a quiz: no new questions, no changed wording, each question keeps
+  its own 4 / 5 / 6 options, the answer comes from the source, and a question whose answer is
+  missing is flagged `"unverified": true` (the quiz shows "AI's guess, verify"). Question type
+  counts are not used in this mode.
+- **No content**: topic name only, the AI's own knowledge. Less reliable: the prompt makes the AI
+  show a "verify the answers" banner, and the box shows a red warning.
+- **Options per MCQ** (4 / 5 / 6) applies to the three generating modes (not convert).
+- A pasted text over 30,000 characters shows a "paste one chapter at a time" warning.
+- The prompt is only text for the AI; saved quizzes (HTML in Drive, `Quizzes` sheet) are unchanged.
+
 ## MCQ options (4, 5 or 6 per question)
 A question has as many options as its source gives it: normally 4, sometimes
 5 (e.g. a 5th "None of these") or 6. Maximum is 6.
@@ -134,7 +151,7 @@ A question has as many options as its source gives it: normally 4, sometimes
   Edit modal shows 4 rows and a "+ Add option" button (up to 6).
 - **Max is one constant on each side**: `MCQ_MAX_OPTIONS_` in `Code.gs`
   (the front-end letters are listed in `mcq-parse.js` / `mcq.js`).
-- The Quiz feature (`js/quiz-prompt.js`) is separate and still uses 4 options.
+- The Quiz feature (`js/quiz-prompt.js`) is separate: it has its own "Options per MCQ" setting (see "Quiz source modes" above).
 
 ## MCQ origin (real PYQ vs book vs AI-made)
 Every question says where it really comes from, so the MCQ section can stay
@@ -155,6 +172,9 @@ trustworthy: a question written by an AI must never look like a real exam questi
 - **Sheet helpers** (Apps Script editor, safe to re-run): `listSuspectMcqs()` (read-only
   check for test/broken/duplicate rows), `markLegacyMcqsAsOld()`, `promoteOldMcqsToPyq()`.
   `setupMcqBankSheets()` adds the two columns and an origin dropdown.
+- `promoteCollectionMcqsToPyq()` (easier than the clean-up route): turns `old` into `pyq` only
+  for questions that belong to an imported paper (`collection_id` filled); collection-less
+  questions stay `old` and are listed in the log.
 - Not built yet: AI-variant generator prompt, score/progress split by origin.
 
 ## MCQ interface

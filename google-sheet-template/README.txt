@@ -398,6 +398,11 @@ SETUP / CLEAN-UP (Apps Script editor: pick the function, press Run):
   3. markLegacyMcqsAsOld()   fills origin = "old" where it is blank.
   4. promoteOldMcqsToPyq()   once you are sure the remaining questions are real
                              previous-year questions, turns every "old" into "pyq".
+     or promoteCollectionMcqsToPyq()
+                             (easier, no clean-up needed) turns "old" into "pyq" only
+                             for questions that belong to an imported paper
+                             (collection_id filled). The others stay "old" and are
+                             listed in the Execution log for a later check.
   Then Deploy -> Manage deployments -> pencil -> New version -> Deploy.
 
 In the .md import file: "@origin: pyq" (carries forward, write it once at the top)

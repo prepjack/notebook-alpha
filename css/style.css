@@ -5648,3 +5648,9 @@ a.bottom-strip-btn.practice-open{
 .mcq-origin-badge { display:inline-block; margin:6px 0 8px; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:600; }
 .mcq-origin-badge.ai { background:rgba(124,77,255,0.10); color:#5b3cc4; border:1px solid rgba(124,77,255,0.35); }
 .mcq-origin-badge.book { background:rgba(184,134,11,0.10); color:#8a6508; border:1px solid rgba(184,134,11,0.35); }
+
+/* QUIZ — source modes (own text / own questions / no content) */
+.quiz-host .qh-sources{margin-bottom:6px}
+.quiz-host .qh-srcbox{margin:6px 0 4px}
+.quiz-host .qh-srctext{width:100%;box-sizing:border-box;min-height:140px;padding:8px 10px;border:1px solid #cfd8d2;border-radius:8px;font:12px/1.5 Arial,sans-serif;color:#2f3d35;resize:vertical}
+.quiz-host .qh-optbox{margin:4px 0 6px}

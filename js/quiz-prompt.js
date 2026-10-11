@@ -12,6 +12,14 @@
        getSplit() -> { en, hi, ai } of the topic's currently loaded text
        clean(text) -> the page's own cleanContentForPrompt()
 
+   SOURCE MODES (what the questions come from) — chosen in the box:
+     topic   = this topic's content (default; already inside the prompt)
+     paste   = text the user pastes (PDF / book / notes); questions only from it
+     convert = ready-made questions the user pastes; the AI only turns them into
+               a quiz (no new questions, each keeps its own 4/5/6 options)
+     none    = no content, topic name only; the AI uses its own knowledge
+   "Options per MCQ" (4 / 5 / 6) applies to the three generating modes.
+
    QUESTION TYPES live in ONE registry (TYPE_REGISTRY below). The popup's
    counters and the prompt's "QUESTION TYPES" section are both generated
    from it, so adding a built-in type = adding one entry here.
@@ -26,6 +34,7 @@
     var LS_COUNTS = "quizPrompt:counts";
     var LS_CUSTOM = "quizPrompt:customTypes";
     var LS_MODE = "quizPrompt:mode";
+    var LS_OPTS = "quizPrompt:opts";
 
     var MAX_PER_TYPE = 20;   // one type
     var LONG_QUIZ = 20;      // total above this -> warn (output may get cut)
@@ -70,6 +79,14 @@
         { v: "compare & contrast", label: "Compare & contrast" },
         { v: "application & tricky options", label: "Application & tricky options" },
         { v: "quick revision", label: "Quick revision" }
+    ];
+
+    // Options per MCQ-style question (convert mode ignores this: each pasted
+    // question keeps its own 4 / 5 / 6 options).
+    var OPT_OPTIONS = [
+        { v: "4", label: "4 options (default)" },
+        { v: "5", label: "5 options" },
+        { v: "6", label: "6 options" }
     ];
 
     var LANG_OPTIONS = [
@@ -147,7 +164,10 @@
 
     // ---------- the prompt ----------
     // o: { lang, focus, exam, subject, topic, content, fileName,
-    //      types: [{id,label,spec,count}] (count > 0 only), count: total }
+    //      types: [{id,label,spec,count}] (count > 0 only), count: total,
+    //      source: "topic" (default) | "paste" | "convert" | "none",
+    //      optCount: 4 (default) | 5 | 6        (options per MCQ-style question),
+    //      allTypes: [{id,label,spec}]          (used by "convert" only) }
     function buildPrompt(o) {
         var exam = o.exam ? o.exam : "(not specified)";
         var types = o.types || [];
@@ -253,34 +273,103 @@
                null]
             : ["chhota practice quiz banana hai, jo ek single self-contained HTML file ho.",
                null];
-        return [
-            contract.join("\n"),
+        // ----- SOURCE MODE: what the questions come from -----
+        var src = (o.source === "paste" || o.source === "convert" || o.source === "none") ? o.source : "topic";
+        var optN = (Number(o.optCount) === 5 || Number(o.optCount) === 6) ? Number(o.optCount) : 4;
+        var convert = src === "convert";
+        var where = o.mode === "chat" ? "apni pehli chhoti line mein" : "quiz-meta ke \"notes\" mein";
+
+        var introLine = convert
+            ? "Tum ek careful exam question-setter ho. Neeche diye SOURCE QUESTIONS ko hi ek"
+            : src === "none"
+                ? "Tum ek experienced exam question-setter ho. Is TOPIC par (koi study content diya nahi gaya) ek"
+                : "Tum ek experienced exam question-setter ho. Neeche diye STUDY CONTENT se ek";
+        var focusLine = convert ? null : "FOCUS: " + (o.focus || "(none: balanced mix)");
+        var languageLine = convert
+            ? "LANGUAGE: " + o.lang + "    (agar source isse alag bhasha mein ho to sirf bhasha badlo, content aur answers nahi)"
+            : "LANGUAGE: " + o.lang + "    (en / hi / hinglish / bilingual: poora quiz isi mein)";
+        var questionsLine = convert
+            ? "QUESTIONS: jitne SOURCE QUESTIONS neeche diye hain utne hi (ek bhi kam ya zyada nahi)"
+            : "QUESTIONS: " + total + " (exactly)";
+        var contentLabel = convert ? "SOURCE QUESTIONS (user ke diye hue — inhe hi quiz banao):"
+            : src === "paste" ? "STUDY CONTENT (user ka paste kiya text):"
+            : src === "none" ? "STUDY CONTENT: (koi nahi diya gaya — sirf TOPIC upar likha hai)"
+            : "STUDY CONTENT:";
+        var contentBody = src === "none" ? null : o.content;
+
+        var convertRules = [
+            "== CONVERT RULES (sabse zaroori) ==",
+            "1. Quiz mein SIRF wahi sawal aayen jo SOURCE QUESTIONS mein diye hain. Ek bhi naya sawal",
+            "   mat banao, koi sawal hatao mat, kisi do sawal ko merge mat karo.",
+            "2. Sawal ka text, options aur unka order jaisa diya hai waisa hi rakho. Shabd, spelling ya",
+            "   facts mat badlo (sirf saaf typing galti theek kar sakte ho). OPTIONS ki ginti har sawal mein",
+            "   wahi rakho jo source mein hai (4, 5 ya 6): na badhao, na ghatao. \"None of these\" jaisa",
+            "   option bhi waisa hi rakho.",
+            "3. ANSWER sirf wahi lo jo source mein diya ho (answer key, \"Ans:\", bracket, tick). Source ka",
+            "   answer kabhi apne hisaab se mat badlo, chahe tumhe galat lage; shak ho to us sawal ka number",
+            "   " + where + " likh do. Agar kisi sawal ka answer source mein nahi hai, to sabse sahi andaza",
+            "   do aur us item mein \"unverified\": true rakho; renderer us sawal ke feedback par",
+            "   \"Answer source mein nahi tha — AI ka andaza, verify karo\" dikhaye.",
+            "4. Har sawal ko uska sabse sahi TYPE do (neeche list): NOT/EXCEPT wale mcq_negative,",
+            "   Statement I/II wale stmt, Assertion-Reason wale ar, \"kaun se kathan sahi hain\" wale",
+            "   multi_correct, jodi milane wale match, khali jagah wale fib, True/False wale tf, baaki mcq.",
+            "   Fields us type ke spec ke hisaab se bharo, par content source ka hi rahe.",
+            "5. explanation: har sawal ke liye 1-2 line (sahi answer kyun sahi). Pakka na pata ho to naya",
+            "   fact mat gadho, \"explanation source mein nahi di gayi\" likh do.",
+            "6. \"evidence\" mein bas \"Source Q<number>\" likho (number source mein jaisa ho; na ho to order ka).",
+            "7. Jo sawal adhura ya samajh na aane wala ho (kata text, OCR junk), use quiz mein mat daalo aur",
+            "   uska number " + where + " likh do.",
+            "8. Technical terms English mein hi rakho.",
+            "9. quiz-data ki ginti = source questions ki ginti (jo tumne chhode unhe hatake). quiz-meta ka",
+            "   \"total\" aur \"types\" asli ginti se match karein.",
+            bil,
+            ""
+        ];
+
+        var noContentRules = [
+            "== NO-CONTENT RULES (sabse zaroori) ==",
+            "1. Koi STUDY CONTENT nahi diya gaya, isliye apne knowledge se sawal banao. SIRF wahi facts",
+            "   use karo jo tumhe pakka maloom hain aur is exam level par standard aur widely accepted hain.",
+            "2. Saal, naam, number, section number, percentage jaisi details par tabhi sawal banao jab tum",
+            "   100% pakke ho. Zara bhi shak ho to wo sawal mat banao; uski jagah koi concept ka sawal banao.",
+            "3. Har question ke saath \"evidence\" do: wo standard concept ya idea (max 20 words) jis par",
+            "   sawal tika hai. Kisi book, website ya page number ka naam mat gadho.",
+            "4. Har question ki explanation do: sahi answer kyun sahi hai (1-2 line), aur galat options kyun",
+            "   galat hain (1 line).",
+            "5. Difficulty mix: ~40% easy (recall), ~40% medium (concept/compare), ~20% hard.",
+            "6. Distractors plausible hon (isi topic ke asli terms, near-miss). \"All of the above\" /",
+            "   \"None of the above\" avoid karo. Sahi answer ki position random rakho.",
+            "7. Koi question duplicate na ho, aur ek question dusre ka answer na de.",
+            "8. Technical terms English mein hi rakho, chahe LANGUAGE hindi/hinglish ho.",
+            "9. Quiz ke start screen par (chat mode mein apni pehli line mein) ye saaf warning dikhao:",
+            "   \"⚠ Ye quiz AI ke apne knowledge se bana hai, kisi content se nahi. Answers ek baar verify kar lein.\"",
+            "   Wahi line " + where + " bhi likho.",
+            bil,
+            ""
+        ];
+
+        var pasteNote = [
+            (bil ? "10." : "9.") + " STUDY CONTENT user ne PDF / book / notes se copy karke paste kiya hai: page numbers,",
+            "   header/footer, tooti lines, repeat hui lines aur OCR junk ignore karo. Jo hissa adhura ya",
+            "   samajh na aaye, uska question mat banao."
+        ];
+
+        var optLine = optN === 4 ? null :
+            "OPTIONS PER QUESTION: " + optN + ". Option-wale sawal (mcq, mcq_negative, odd_one_out, aur options wala fib) mein\n" +
+            "EXACTLY " + optN + " options do; upar type specs mein jahan \"4 options\" likha hai wahan " + optN + " samjho.\n" +
+            "answer = 0-based index hi rahe. stmt, ar, multi_correct ke standard coded options jaise hain waise rahenge.";
+
+        var convertTypes = [
+            "== QUESTION TYPES (har source question ke liye sabse sahi type chuno) ==",
+            (o.allTypes || o.types || []).map(function (t) { return "  " + t.id + "  (" + t.label + "): " + t.spec; }).join("\n"),
             "",
-            "Tum ek experienced exam question-setter ho. Neeche diye STUDY CONTENT se ek",
-            lead[0],
-            lead[1],
-            "",
-            "EXAM CONTEXT: " + exam,
-            "SUBJECT: " + (o.subject || "(not specified)"),
-            "TOPIC: " + o.topic,
-            "FOCUS: " + (o.focus || "(none: balanced mix)"),
-            "LANGUAGE: " + o.lang + "    (en / hi / hinglish / bilingual: poora quiz isi mein)",
-            "QUESTIONS: " + total + " (exactly)",
-            "",
-            "STUDY CONTENT:",
-            o.content,
-            "",
-            "== CONTEXT RULES ==",
-            "1. EXAM CONTEXT diya hai to usi exam ke question style, difficulty aur",
-            "   phrasing ke hisaab se likho. Khali hai to general competitive-exam",
-            "   style rakho, kisi khaas exam ka naam mat lo.",
-            "2. Question TYPES aur unki ginti neeche user ne khud tay ki hai. Unhe exam",
-            "   context ke naam par badlo mat; exam context sirf phrasing/difficulty ke liye hai.",
-            "3. Agar EXAM CONTEXT mein ek se zyada exam hain, to phrasing aisi rakho jo un",
-            "   sabme common ho, kisi ek exam ki khaas phrasing mat pakdo.",
-            "4. FOCUS diya hai to questions mainly usi angle se banao. Khali ho to",
-            "   poore content ka balanced mix rakho.",
-            "",
+            "- Specs mein jahan \"4 options\" likha hai, wahan har sawal ki options ki ginti wahi rakho jo source",
+            "  mein hai (4, 5 ya 6). stmt, ar, multi_correct ke standard coded options jaise hain waise rahenge.",
+            "- Jo sawal kisi special type mein fit na ho, use mcq banao.",
+            ""
+        ];
+
+        var contentRulesBlock = convert ? convertRules : src === "none" ? noContentRules : [
             "== CONTENT RULES (sabse zaroori) ==",
             "1. Har question SIRF STUDY CONTENT se bane. Bahar ke facts, naam, saal ya",
             "   definitions mat jodo. Content mein jo nahi hai, uska question mat banao.",
@@ -300,6 +389,12 @@
             "8. Technical terms English mein hi rakho, chahe LANGUAGE hindi/hinglish ho.",
             bil,
             "",
+        ];
+        if (src === "paste") {
+            // pasteNote goes right before the blank line that closes the content rules
+            contentRulesBlock = contentRulesBlock.slice(0, -1).concat(pasteNote, [""]);
+        }
+        var typesBlock = convert ? convertTypes : [
             "== QUESTION TYPES (exact distribution, total " + total + ") ==",
             typeLines.join("\n"),
             "",
@@ -313,10 +408,49 @@
                 ? "apni pehli chhoti line mein mujhe batao"
                 : "quiz-meta ke \"notes\" field mein ek line likho") + " ki kya badla aur kyun.",
             "",
+        ];
+        if (!convert && optLine) typesBlock = typesBlock.concat([optLine, ""]);
+
+        return [].concat(
+            [
+            contract.join("\n"),
+            "",
+            introLine,
+            lead[0],
+            lead[1],
+            "",
+            "EXAM CONTEXT: " + exam,
+            "SUBJECT: " + (o.subject || "(not specified)"),
+            "TOPIC: " + o.topic,
+            focusLine,
+            languageLine,
+            questionsLine,
+            "",
+            contentLabel,
+            contentBody,
+            "",
+        ],
+            convert ? [] : [
+            "== CONTEXT RULES ==",
+            "1. EXAM CONTEXT diya hai to usi exam ke question style, difficulty aur",
+            "   phrasing ke hisaab se likho. Khali hai to general competitive-exam",
+            "   style rakho, kisi khaas exam ka naam mat lo.",
+            "2. Question TYPES aur unki ginti neeche user ne khud tay ki hai. Unhe exam",
+            "   context ke naam par badlo mat; exam context sirf phrasing/difficulty ke liye hai.",
+            "3. Agar EXAM CONTEXT mein ek se zyada exam hain, to phrasing aisi rakho jo un",
+            "   sabme common ho, kisi ek exam ki khaas phrasing mat pakdo.",
+            "4. FOCUS diya hai to questions mainly usi angle se banao. Khali ho to",
+            "   poore content ka balanced mix rakho.",
+            "",
+        ],
+            contentRulesBlock,
+            typesBlock,
+            [
             tech.join("\n"),
             "",
             reminder
-        ].filter(function (x) { return x !== null; }).join("\n");
+        ]
+        ).filter(function (x) { return x !== null; }).join("\n");
     }
 
     // ---------- topic content as the model should see it ----------
@@ -382,6 +516,15 @@
             "</div>" +
             '<label class="quiz-lbl">Exam context (use one exam if this topic is for one)</label>' +
             '<input type="text" class="qh-exam" placeholder="e.g. UGC NET, SSC, BPSC" value="' + esc(lsGet(LS_EXAM, "")) + '">' +
+            '<label class="quiz-lbl">Questions should come from</label>' +
+            '<div class="qh-modes qh-sources">' +
+            '<label class="qh-mode"><input type="radio" name="qhsrc" value="topic" checked> <span><strong>This topic\'s content</strong> — already inside the prompt (default).</span></label>' +
+            '<label class="qh-mode"><input type="radio" name="qhsrc" value="paste"> <span><strong>My own text</strong> — paste text from a PDF, book or notes. Questions come only from it.</span></label>' +
+            '<label class="qh-mode"><input type="radio" name="qhsrc" value="convert"> <span><strong>My own questions → quiz</strong> — paste ready-made questions (with options and answers). The AI only turns them into a quiz; no new questions.</span></label>' +
+            '<label class="qh-mode"><input type="radio" name="qhsrc" value="none"> <span><strong>No content</strong> — only the topic name; the AI uses its own knowledge. Less reliable: verify the answers.</span></label>' +
+            "</div>" +
+            '<div class="qh-srcbox" style="display:none"><textarea class="qh-srctext" rows="8" spellcheck="false"></textarea><div class="quiz-add-preview qh-srcnote"></div></div>' +
+            '<div class="qh-optbox"><label class="quiz-lbl">Options per MCQ</label><select class="qh-opts">' + options(OPT_OPTIONS, ["4", "5", "6"].indexOf(lsGet(LS_OPTS, "4")) >= 0 ? lsGet(LS_OPTS, "4") : "4") + "</select></div>" +
             '<label class="quiz-lbl">What do you want?</label>' +
             '<div class="qh-modes">' +
             '<label class="qh-mode"><input type="radio" name="qhmode" value="file"' + (lsGet(LS_MODE, "file") !== "chat" ? " checked" : "") + '> <span><strong>Save to site</strong> — the AI gives an HTML file; add it below and it appears in Practice.</span></label>' +
@@ -423,6 +566,8 @@
         var listEl = $(".qh-list");
         var addBtn = $(".qh-addtype-btn"), addForm = $(".qh-addform");
         var ctName = $(".qh-ct-name"), ctDesc = $(".qh-ct-desc");
+        var srcBox = $(".qh-srcbox"), srcText = $(".qh-srctext"), srcNote = $(".qh-srcnote");
+        var optBox = $(".qh-optbox"), optsEl = $(".qh-opts"), enOnlyLbl = host.querySelector(".flashcard-enonly");
 
         function status(el, text, kind) {
             el.textContent = text;
@@ -431,6 +576,7 @@
         copyStatus.dataset.base = "qh-copystatus";
         prevEl.dataset.base = "qh-preview";
         totalNote.dataset.base = "qh-totalnote";
+        srcNote.dataset.base = "qh-srcnote";
 
         // ---- question types: counters ----
         function persistCounts() { lsSet(LS_COUNTS, JSON.stringify(counts)); }
@@ -523,6 +669,42 @@
             renderTypes();
         });
 
+        // ---- source mode: topic / paste / convert / none ----
+        function sourceValue() {
+            var r = host.querySelector('input[name="qhsrc"]:checked');
+            var v = r ? r.value : "topic";
+            return (v === "paste" || v === "convert" || v === "none") ? v : "topic";
+        }
+        function show(el, on) { el.style.display = on ? "" : "none"; }
+        function updateSrcNote() {
+            var s = sourceValue(), n = srcText.value.length;
+            if (!n) {
+                status(srcNote, s === "convert"
+                    ? "Paste the questions to convert (with options and, if you have it, the answer key)."
+                    : "Paste the text the questions should come from.");
+                return;
+            }
+            if (n > 30000) status(srcNote, "⚠ " + Math.round(n / 1000) + "k characters is long for one AI message. Paste one chapter or section at a time.", "err");
+            else status(srcNote, n + " characters", "ok");
+        }
+        function applySource() {
+            var s = sourceValue();
+            show(srcBox, s === "paste" || s === "convert");
+            srcText.placeholder = s === "convert"
+                ? "Paste your questions here, with options and (if you have it) the answer key.\ne.g.  1. Who wrote …?  (a) …  (b) …  (c) …  (d) …   Ans: b"
+                : "Paste the text here (from a PDF, book or notes). Page numbers and headings are fine — the AI ignores them.";
+            show(optBox, s !== "convert");            // convert keeps each question's own options
+            show(stripEl, s !== "convert");           // types / counts are not used when converting
+            if (s === "convert") { bodyEl.hidden = true; stripEl.setAttribute("aria-expanded", "false"); }
+            show(totalNote, s !== "convert");
+            if (enOnlyLbl) show(enOnlyLbl, s === "topic");   // "EN only" only shortens the topic's own text
+            updateSrcNote();
+            showName();
+        }
+        host.querySelectorAll('input[name="qhsrc"]').forEach(function (r) { r.addEventListener("change", applySource); });
+        srcText.addEventListener("input", updateSrcNote);
+        optsEl.addEventListener("change", function () { lsSet(LS_OPTS, optsEl.value); });
+
         // ---- prompt ----
         function current() {
             var types = allTypes(custom)
@@ -533,7 +715,10 @@
                 lang: langEl.value, focus: focusEl.value, exam: examEl.value.trim(),
                 subject: ctx.subject || "", topic: topic,
                 types: types,
-                count: types.reduce(function (s, t) { return s + t.count; }, 0)
+                count: types.reduce(function (s, t) { return s + t.count; }, 0),
+                source: sourceValue(),
+                optCount: optsEl.value,
+                allTypes: allTypes(custom).map(function (t) { return { id: t.id, label: t.label, spec: t.spec }; })
             };
         }
         function modeValue() {
@@ -542,11 +727,11 @@
         }
         function showName() {
             var o = current();
-            if (o.mode === "chat") {
-                status(copyStatus, "Quick attempt: the AI will open the quiz right in the chat. Nothing is saved to the site.");
-            } else {
-                status(copyStatus, "Suggested file name: " + fileNameFor(topic, nodeId, o.focus, o.lang, ctx.parent));
-            }
+            var msg = o.mode === "chat"
+                ? "Quick attempt: the AI will open the quiz right in the chat. Nothing is saved to the site."
+                : "Suggested file name: " + fileNameFor(topic, nodeId, o.focus, o.lang, ctx.parent);
+            if (o.source === "none") status(copyStatus, "⚠ No-content mode: the AI uses its own knowledge — less reliable, so verify the answers. " + msg, "err");
+            else status(copyStatus, msg);
         }
         host.querySelectorAll('input[name="qhmode"]').forEach(function (r) {
             r.addEventListener("change", function () { lsSet(LS_MODE, modeValue()); showName(); });
@@ -555,12 +740,26 @@
 
         copyEl.addEventListener("click", function () {
             var o = current();
-            if (!o.count) { status(copyStatus, "Pick at least one question type first.", "err"); return; }
-            var split = ctx.getSplit ? ctx.getSplit() : null;
-            var cb = buildContentBlock(split, ctx.clean, !!enOnlyEl.checked);
-            if (!cb) {
-                status(copyStatus, "This topic has no content loaded yet. Add and open its content first — the quiz prompt is built from that text.", "err");
-                return;
+            var cb;
+            if (o.source !== "convert" && !o.count) { status(copyStatus, "Pick at least one question type first.", "err"); return; }
+            if (o.source === "paste" || o.source === "convert") {
+                var typed = srcText.value.trim();
+                if (!typed) {
+                    status(copyStatus, o.source === "convert"
+                        ? "Paste the questions you want to turn into a quiz first."
+                        : "Paste the text the questions should come from first.", "err");
+                    return;
+                }
+                cb = { text: typed, included: o.source === "convert" ? "your pasted questions" : "your pasted text" };
+            } else if (o.source === "none") {
+                cb = { text: "", included: "no content — the AI's own knowledge" };
+            } else {
+                var split = ctx.getSplit ? ctx.getSplit() : null;
+                cb = buildContentBlock(split, ctx.clean, !!enOnlyEl.checked);
+                if (!cb) {
+                    status(copyStatus, "This topic has no content loaded yet. Add and open its content first — the quiz prompt is built from that text.", "err");
+                    return;
+                }
             }
             o.content = cb.text;
             o.fileName = fileNameFor(topic, nodeId, o.focus, o.lang, ctx.parent);
@@ -571,10 +770,12 @@
                 copyEl.innerHTML = "✓ Prompt Copied";
                 copyEl.disabled = true;
                 setTimeout(function () { copyEl.innerHTML = original; copyEl.disabled = false; }, 1800);
-                var big = prompt.length > 30000 ? " Long paste (" + Math.round(prompt.length / 1000) + "k characters) — tick \"EN only\" and copy again if your AI app cuts it." : "";
+                var shorten = o.source === "topic" ? "tick \"EN only\" and copy again" : "paste a smaller part of your text and copy again";
+                var big = prompt.length > 30000 ? " Long paste (" + Math.round(prompt.length / 1000) + "k characters) — " + shorten + " if your AI app cuts it." : "";
+                var what = o.source === "convert" ? "all your questions" : o.count + " questions";
                 status(copyStatus, o.mode === "chat"
-                    ? "✓ Copied (" + cb.included + ", " + o.count + " questions). Paste it in Gemini / ChatGPT / Claude and attempt right there. Not saved." + big
-                    : "✓ Copied (" + cb.included + ", " + o.count + " questions). Save the quiz as: " + o.fileName + "." + big, "ok");
+                    ? "✓ Copied (" + cb.included + ", " + what + "). Paste it in Gemini / ChatGPT / Claude and attempt right there. Not saved." + big
+                    : "✓ Copied (" + cb.included + ", " + what + "). Save the quiz as: " + o.fileName + "." + big, "ok");
             }, function () {
                 status(copyStatus, "Automatic copy was blocked by the browser. Try again, or allow clipboard access for this site.", "err");
             });
