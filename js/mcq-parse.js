@@ -50,6 +50,20 @@
    question_group_id gets set to the shared key so the client can pair
    them back up. See the post-pass at the bottom of parseMcqMarkdown().
 
+   ---- Bilingual one-row mode (one-row-per-question redesign) -----
+
+   If a question block has @alt_question (or, for assertion_reason,
+   @alt_assertion / @alt_reason), the block carries BOTH languages and
+   produces ONE mcq (one id, no "_<language>" suffix, question_group_id
+   empty). Extra tags: @alt_language (default Hindi, with a warning),
+   @alt_question, @alt_options (same count + same order as @options),
+   @alt_explanation, @alt_why_1..@alt_why_6, @source_qid, @source_page.
+   A passage can carry @alt_passage_text (-> content_alt). A paper header
+   can carry @source_path (-> collection.source_path). Every one of these
+   is optional; a missing tag is simply an empty value, never an error.
+   The result also has a top-level warnings[] (one summary line per
+   paper, e.g. "12 questions have no source Question ID", pyq only).
+
    Nothing here writes to Google Sheets — Phase 3 (a save_mcqs_bulk
    doPost action + ensureCollection_ find-or-create) is what takes
    this function's output and persists it. This file only turns
@@ -225,6 +239,13 @@
         return result;
     }
 
+    // How many options a list has = position of the last filled one (A-F -> 0-6).
+    function lastFilled_(list) {
+        let n = list.length;
+        while (n > 0 && !list[n - 1]) n--;
+        return n;
+    }
+
     const AR_DEFAULT_OPTIONS_ = {
         A: "Both A and R are true, and R is the correct explanation of A",
         B: "Both A and R are true, but R is NOT the correct explanation of A",
@@ -271,12 +292,16 @@
 
         if (passageId) passageIds.add(passageId);
 
-        passages.push({
+        const passageObj = {
             passage_id: passageId,
             node_id: nodeId,
             kind: kind,
             content: content
-        });
+        };
+        // Second-language passage text (bilingual one-row mode). Only added when present.
+        const contentAlt = getField_(fields, "alt_passage_text");
+        if (contentAlt) passageObj.content_alt = contentAlt;
+        passages.push(passageObj);
     }
 
     /* ---------------------------------------------------------
@@ -372,6 +397,56 @@
             }
         }
 
+        // ---- Bilingual one-row mode ----------------------------------
+        // A block with @alt_question (or @alt_assertion/@alt_reason for
+        // assertion_reason) carries both languages and stays ONE row.
+        const altQuestionRaw = getField_(fields, "alt_question");
+        const altAssertion = getField_(fields, "alt_assertion");
+        const altReason = getField_(fields, "alt_reason");
+        const altIsAr = isAssertionReason && !!(altAssertion || altReason);
+        const isBilingual = !!altQuestionRaw || altIsAr;
+        const altOptionsRaw = hasTag_(fields, "alt_options") ? getField_(fields, "alt_options") : "";
+        let alt = null;
+
+        if (isBilingual) {
+            alt = {};
+            const altLang = getField_(fields, "alt_language");
+            if (!altLang) warnings.push("@alt_question present but @alt_language missing — defaulted to Hindi");
+            alt.alt_language = altLang || "Hindi";
+
+            if (altIsAr) {
+                if (!altAssertion) warnings.push("missing @alt_assertion");
+                if (!altReason) warnings.push("missing @alt_reason");
+                alt.question_alt = "**Assertion (A):** " + altAssertion + "\n\n**Reason (R):** " + altReason;
+            } else {
+                alt.question_alt = altQuestionRaw;
+            }
+
+            const altParsed = altOptionsRaw ? parseOptionLines_(altOptionsRaw) : {};
+            const altList = [altParsed.A || "", altParsed.B || "", altParsed.C || "", altParsed.D || "", altParsed.E || "", altParsed.F || ""];
+            ["a", "b", "c", "d", "e", "f"].forEach(function (letter, i) {
+                alt["option_" + letter + "_alt"] = altList[i];
+            });
+
+            if (!altOptionsRaw) {
+                warnings.push("@alt_question without @alt_options — second-language options missing");
+            } else {
+                const primaryCount = lastFilled_([optionA, optionB, optionC, optionD, optionE, optionF]);
+                const altCount = lastFilled_(altList);
+                if (altCount !== primaryCount) {
+                    warnings.push("IMPORTANT: @alt_options has " + altCount + " options but @options has " + primaryCount +
+                        " — both languages must have the same number of options in the same order");
+                }
+            }
+
+            alt.explanation_alt = getField_(fields, "alt_explanation");
+            ["a", "b", "c", "d", "e", "f"].forEach(function (letter, i) {
+                alt["explanation_" + letter + "_alt"] = getField_(fields, "alt_why_" + (i + 1));
+            });
+        } else if (altOptionsRaw) {
+            warnings.push("@alt_options without @alt_question — second language ignored");
+        }
+
         // correct option — stored as 1-6 (1 = first option). Accepts
         // "1"-"6" (standard) or legacy "A"-"F" and always outputs 1-6.
         const correctRaw = getField_(fields, "correct").toUpperCase();
@@ -420,6 +495,7 @@
         const year = getField_(fields, "year");
         const session = getField_(fields, "session");
         const source = getField_(fields, "source");
+        const sourcePath = getField_(fields, "source_path");
 
         // collections dedup (rule 9 — exact title match; first non-empty
         // exam/year/session/source seen for that title wins; description
@@ -433,7 +509,8 @@
                     exam: exam,
                     year: year,
                     session: session,
-                    source: source
+                    source: source,
+                    source_path: sourcePath
                 });
             } else {
                 const existing = state.collectionsMap.get(collectionRef);
@@ -441,6 +518,7 @@
                 if (!existing.year && year) existing.year = year;
                 if (!existing.session && session) existing.session = session;
                 if (!existing.source && source) existing.source = source;
+                if (!existing.source_path && sourcePath) existing.source_path = sourcePath;
             }
         }
 
@@ -448,6 +526,7 @@
             mcq_id: mcqId,
             _groupKey: groupKey,   // internal — consumed by the post-pass, never sent to the sheet
             _langSlug: langSlug,   // internal — consumed by the post-pass, never sent to the sheet
+            _bilingual: isBilingual, // internal — bilingual one-row blocks never take part in @group pairing
             node_id: topic,
             question_type: type,
             passage_id: passageRef,
@@ -473,6 +552,22 @@
             source_question_no: getField_(fields, "source_question_no"),
             warnings: warnings
         };
+
+        // Bilingual one-row fields + source info. For a bilingual block every
+        // alt field is always present (empty string if the tag was absent);
+        // for an ordinary block source_qid / source_page are only added when
+        // given, so an older .md never blanks values already saved.
+        if (isBilingual) Object.assign(built, alt);
+        const sourceQid = getField_(fields, "source_qid");
+        const sourcePage = getField_(fields, "source_page");
+        if (isBilingual || sourceQid) built.source_qid = sourceQid;
+        if (isBilingual || sourcePage) built.source_page = sourcePage;
+
+        // Collection-level summary counter: real exam questions without a source Question ID.
+        if (originValue === "pyq" && !sourceQid) {
+            const k = collectionRef || "";
+            state.pyqNoQid.set(k, (state.pyqNoQid.get(k) || 0) + 1);
+        }
 
         // Origin is only added when known, so re-importing an older .md that
         // has no @origin never blanks an origin already set in the sheet.
@@ -507,6 +602,7 @@
             collectionsMap: new Map()      // title -> collection object
         };
 
+        state.pyqNoQid = new Map(); // collection title -> number of pyq questions with no source_qid
         const mcqs = [];
 
         blocks.forEach(function (block) {
@@ -531,7 +627,7 @@
            ----------------------------------------------------- */
         const groupCounts = new Map();
         mcqs.forEach(function (mcq) {
-            if (mcq._groupKey) {
+            if (mcq._groupKey && !mcq._bilingual) {
                 groupCounts.set(mcq._groupKey, (groupCounts.get(mcq._groupKey) || 0) + 1);
             }
         });
@@ -539,7 +635,7 @@
         const seenIdsPerGroup = new Map(); // groupKey -> Set of mcq_ids already assigned in this group
         mcqs.forEach(function (mcq) {
             const groupKey = mcq._groupKey;
-            const isRealGroup = !!groupKey && groupCounts.get(groupKey) > 1;
+            const isRealGroup = !mcq._bilingual && !!groupKey && groupCounts.get(groupKey) > 1;
 
             mcq.question_group_id = isRealGroup ? groupKey : "";
 
@@ -570,12 +666,23 @@
 
             delete mcq._groupKey;
             delete mcq._langSlug;
+            delete mcq._bilingual;
+        });
+
+        // Paper-level soft warnings: ONE summary line per paper, never one per question.
+        const paperWarnings = [];
+        state.pyqNoQid.forEach(function (count, title) {
+            paperWarnings.push(
+                (title ? title + ": " : "") + count +
+                (count === 1 ? " question has" : " questions have") + " no source Question ID"
+            );
         });
 
         return {
             collections: Array.from(state.collectionsMap.values()),
             passages: passages,
-            mcqs: mcqs
+            mcqs: mcqs,
+            warnings: paperWarnings
         };
     }
 
