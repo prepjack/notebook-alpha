@@ -387,6 +387,14 @@ function doPost(e) {
       return jsonResponse_(result);
     }
 
+    // PHASE 6A: paper-level info (PDF link, website, answer key, remark ...)
+    // edited once in the Collections sheet. Fixed allow-list only.
+    if (data.action === "update_collection_info") {
+      const result = updateCollectionInfo(data);
+      return jsonResponse_(result);
+    }
+
+
     // PROGRESS SYNC (2026-09): the client POSTs with mode:"no-cors", so this
     // response is never read; the client re-reads with get_progress
     // afterwards to verify the merge landed.
@@ -3072,6 +3080,74 @@ function addMissingColumns_(sheet, columns) {
     }
   });
   return added;
+}
+
+// PHASE 6A — edit paper-level info in the Collections sheet.
+// Only the columns below can be written. A field that is NOT sent stays
+// untouched; a field sent as "" CLEARS the cell (empty is always allowed).
+const COLLECTION_INFO_EDITABLE_COLUMNS_ = [
+  "pdf_url", "answer_key_url", "source_url", "source_path", "remark",
+  "exam", "year", "session", "description"
+];
+const COLLECTION_INFO_URL_COLUMNS_ = ["pdf_url", "answer_key_url", "source_url"];
+
+function updateCollectionInfo(data) {
+  if (!data || !data.collection_id) throw new Error("collection_id is required.");
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Collections");
+  if (!sheet) throw new Error("Collections sheet not found.");
+
+  const values = sheet.getDataRange().getValues();
+  if (!values.length) throw new Error("Collections sheet is empty.");
+
+  const headers = values[0].map(String);
+  const idCol = headers.indexOf("collection_id");
+  if (idCol === -1) throw new Error("collection_id column not found.");
+
+  let targetRow = -1;
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][idCol]) === String(data.collection_id)) {
+      targetRow = i + 1;
+      break;
+    }
+  }
+  if (targetRow === -1) throw new Error("collection_id not found: " + data.collection_id);
+
+  const fields = data.fields || {};
+
+  // 1) Check everything first, so a bad link never causes a half save.
+  const clean = {};
+  COLLECTION_INFO_EDITABLE_COLUMNS_.forEach(function(col) {
+    if (fields[col] === undefined) return;
+    const text = (fields[col] === null) ? "" : String(fields[col]).trim();
+    if (text && COLLECTION_INFO_URL_COLUMNS_.indexOf(col) !== -1 && !/^https?:\/\//i.test(text)) {
+      throw new Error(col + " must start with http:// or https://");
+    }
+    clean[col] = text;
+  });
+
+  // 2) Write.
+  const changed = [];
+  const skipped = [];
+  Object.keys(clean).forEach(function(col) {
+    const idx = headers.indexOf(col);
+    if (idx === -1) { skipped.push(col); return; }
+    sheet.getRange(targetRow, idx + 1).setValue(safeSheetText_(clean[col]));
+    changed.push(col);
+  });
+
+  if (changed.length) {
+    const updatedIdx = headers.indexOf("updated_at");
+    if (updatedIdx !== -1) sheet.getRange(targetRow, updatedIdx + 1).setValue(new Date());
+  }
+
+  return {
+    success: true,
+    collection_id: data.collection_id,
+    fields_changed: changed,
+    fields_skipped_missing_column: skipped
+  };
 }
 
 function setupBilingualRowSchema() {
