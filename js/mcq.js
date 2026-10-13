@@ -238,7 +238,25 @@ function mapMcqRow(row) {
         passage_id: row.passage_id || "",
         origin: normalizeMcqOrigin(row.origin),
         derived_from: row.derived_from || "",
-        warnings: row.warnings || []
+        warnings: row.warnings || [],
+        // PHASE 4 — one-row bilingual question: second-language columns
+        // (copied one by one, as mapMcqRow always does).
+        alt_language: row.alt_language || "",
+        question_alt: row.question_alt || "",
+        option_a_alt: row.option_a_alt || "", option_b_alt: row.option_b_alt || "",
+        option_c_alt: row.option_c_alt || "", option_d_alt: row.option_d_alt || "",
+        option_e_alt: row.option_e_alt || "", option_f_alt: row.option_f_alt || "",
+        explanation_alt: row.explanation_alt || "",
+        explanation_a_alt: row.explanation_a_alt || "", explanation_b_alt: row.explanation_b_alt || "",
+        explanation_c_alt: row.explanation_c_alt || "", explanation_d_alt: row.explanation_d_alt || "",
+        explanation_e_alt: row.explanation_e_alt || "", explanation_f_alt: row.explanation_f_alt || "",
+        source_qid: row.source_qid || "",
+        source_page: row.source_page || "",
+        remark: row.remark || "",
+        extra_link: row.extra_link || "",
+        extra_link_label: row.extra_link_label || "",
+        // true only on the second-language variant of a one-row question
+        isAltVariant: false
     };
 }
 
@@ -247,6 +265,31 @@ function mapMcqRow(row) {
 // one slot holding several language variants (toggle-able); every
 // other row becomes its own single-variant slot, unchanged from the
 // old flat behaviour. Order follows first appearance in `rows`.
+// PHASE 4 — a row with question_alt is ONE question holding two
+// languages. This builds the second-language variant: same id, same
+// answer, same option ORDER; text comes from the *_alt columns. A blank
+// alt option / explanation falls back to the first language's text, so
+// the screen never shows an empty option.
+function buildMcqAltVariant_(row, altKey) {
+    const n = row.options.length;
+    const altOpts = [
+        row.option_a_alt, row.option_b_alt, row.option_c_alt,
+        row.option_d_alt, row.option_e_alt, row.option_f_alt
+    ];
+    const altNotes = [
+        row.explanation_a_alt, row.explanation_b_alt, row.explanation_c_alt,
+        row.explanation_d_alt, row.explanation_e_alt, row.explanation_f_alt
+    ];
+    return Object.assign({}, row, {
+        language: altKey,
+        question: row.question_alt || row.question,
+        options: row.options.map((o, i) => String(altOpts[i] || "").trim() ? String(altOpts[i]) : o),
+        explanation: row.explanation_alt || row.explanation,
+        optionNotes: row.optionNotes.map((t, i) => String(altNotes[i] || "").trim() ? String(altNotes[i]) : t).slice(0, n),
+        isAltVariant: true
+    });
+}
+
 function buildMcqSlots(rows) {
     const order = [];
     const byGroup = new Map();
@@ -254,6 +297,21 @@ function buildMcqSlots(rows) {
     (rows || []).forEach(row => {
         const groupId = String(row.question_group_id || "").trim();
         const langKey = row.language || "English";
+
+        // PHASE 4 — one-row bilingual question (new way): ONE slot, two
+        // variants built from this single row. Old grouped rows (below)
+        // are untouched.
+        if (!groupId && String(row.question_alt || "").trim()) {
+            let altKey = String(row.alt_language || "").trim() || "Hindi";
+            if (altKey.toLowerCase() === langKey.toLowerCase()) altKey = altKey + " (2)";
+            order.push({
+                group_id: "row:" + row.id,
+                primaryKey: langKey,
+                variants: { [langKey]: row, [altKey]: buildMcqAltVariant_(row, altKey) },
+                languages: [langKey, altKey]
+            });
+            return;
+        }
 
         if (groupId) {
             let slot = byGroup.get(groupId);
@@ -397,7 +455,9 @@ function mcqPassageHtml(q, prevQ) {
     const passage = ((mcqApiData && mcqApiData.passages) || [])
         .find(p => String(p.passage_id) === pid);
     if (!passage || !passage.content) return "";
-    return `<div class="mcq-passage" style="margin:0 0 12px;padding:10px 12px;border-left:3px solid #2e7d4f;background:rgba(0,0,0,0.03);border-radius:4px;"><strong>Passage</strong><div>${renderRichInline(passage.content, true)}</div></div>`;
+    // PHASE 4 — second-language view uses content_alt (falls back to content).
+    const passageText = (q.isAltVariant && String(passage.content_alt || "").trim()) ? passage.content_alt : passage.content;
+    return `<div class="mcq-passage" style="margin:0 0 12px;padding:10px 12px;border-left:3px solid #2e7d4f;background:rgba(0,0,0,0.03);border-radius:4px;"><strong>Passage</strong><div>${renderRichInline(passageText, true)}</div></div>`;
 }
 
 function mcqCrumbHtml(nodeId) {
@@ -483,7 +543,15 @@ function updateTimerDisplay() {
 
 
 function getMcqLanguages(rows) {
-    return Array.from(new Set((rows || []).map(mcq => String(mcq.language || "").trim()).filter(Boolean)))
+    // PHASE 4 — a one-row bilingual question counts for BOTH its languages.
+    const names = [];
+    (rows || []).forEach(mcq => {
+        names.push(String(mcq.language || "").trim());
+        if (!mcq.question_group_id && String(mcq.question_alt || "").trim()) {
+            names.push(String(mcq.alt_language || "").trim() || "Hindi");
+        }
+    });
+    return Array.from(new Set(names.filter(Boolean)))
         .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
 }
 
@@ -1018,6 +1086,15 @@ function renderMcqView() {
     });
 
     document.getElementById("mcq-edit-meta")?.addEventListener("click", () => {
+        // PHASE 4 safety — the edit form writes into the FIRST-language
+        // columns. If the second language is on screen, open the first
+        // language instead so Hindi text can never overwrite English.
+        // (Editing the second language comes in Phase 6.)
+        if (mcq.isAltVariant && mcq.variants && mcq.variants[mcq.primaryKey]) {
+            alert("Abhi edit sirf pehli bhasha (" + mcq.primaryKey + ") ka khulta hai. Doosri bhasha ka edit Phase 6 mein aayega.");
+            openMcqMetaModal(mcq.variants[mcq.primaryKey]);
+            return;
+        }
         openMcqMetaModal(mcq);
     });
 
