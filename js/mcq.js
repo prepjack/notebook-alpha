@@ -1681,6 +1681,53 @@ function renderMcqTagSuggestions(value) {
     });
 }
 
+// ONE-ROW BILINGUAL (Phase 3) — prompt text for exactly 2 languages.
+// Grammar is the one js/mcq-parse.js understands (one block = one question, both languages).
+function buildMcqBilingualPromptLines_(primary, second, collection) {
+    return [
+        "",
+        `BILINGUAL ONE-BLOCK INSTRUCTION (PRIMARY language = ${primary}, SECOND language = ${second})`,
+        "Create ONE block per question that carries BOTH languages. Do NOT repeat the question set once per language and do NOT use @group.",
+        `Question N must be the same question in both languages: same meaning, same options, same correct answer.`,
+        `- PRIMARY (${primary}) tags: @question, @options, @explanation, @why_1 ... @why_6 — exactly as in the format instructions above.`,
+        `- SECOND (${second}) tags, same meaning: @alt_question, @alt_options, @alt_explanation, @alt_why_1 ... @alt_why_6.`,
+        `- Put @language: ${primary} and @alt_language: ${second} on EVERY question.`,
+        `- @alt_options must have EXACTLY the same number of options as @options, in EXACTLY the same order (option 1 in ${primary} = option 1 in ${second}). Write ONE shared @correct (the number of the correct option); never a second @correct.`,
+        `- Assertion–Reasoning questions: use @assertion / @reason for ${primary} and @alt_assertion / @alt_reason for ${second}, and also write @alt_options: the four standard statements translated into ${second}, in this order: 1) Both A and R are true, and R is the correct explanation of A  2) Both A and R are true, but R is NOT the correct explanation of A  3) A is true, but R is false  4) A is false, but R is true.`,
+        `- Comprehension: ONE @passage block with the passage in ${primary} under @passage_text and the same passage in ${second} under @alt_passage_text (both before @end_passage). The questions point to it with @passage and carry their own @alt_ tags.`,
+        "- @source_qid: copy the paper's own Question ID for that question EXACTLY as printed in the source PDF. If the PDF has no Question ID, leave @source_qid out. Same for @source_page. Never guess or invent an ID.",
+        collection
+            ? `- Paper header: on the FIRST question block only (it carries forward) write @collection: ${collection} and, only if the source prints them, @exam, @year, @session and @source_path. Do not write a separate empty header block.`
+            : "- Paper header: on the FIRST question block only (it carries forward) write @collection: <paper name> and, only if the source prints them, @exam, @year, @session and @source_path. Do not write a separate empty header block.",
+        "- If the source does not print a year, session or path, leave that tag out. Never guess.",
+        "- Never invent URLs. Do not write any link (PDF, website, answer key) in the file; links are added later on the website.",
+        "",
+        "Example of ONE bilingual question block:",
+        "@type: simple",
+        "@topic: <node_id>",
+        "@question_no: 1",
+        `@language: ${primary}`,
+        `@alt_language: ${second}`,
+        "@source_qid: <Question ID from the PDF, or leave this tag out>",
+        `@question: <question in ${primary}>`,
+        "@options:",
+        "1) <option 1>",
+        "2) <option 2>",
+        "3) <option 3>",
+        "4) <option 4>",
+        `@alt_question: <same question in ${second}>`,
+        "@alt_options:",
+        "1) <same option 1>",
+        "2) <same option 2>",
+        "3) <same option 3>",
+        "4) <same option 4>",
+        "@correct: <1-4>",
+        `@explanation: <explanation in ${primary}>`,
+        `@alt_explanation: <explanation in ${second}>`,
+        "@end"
+    ];
+}
+
 function buildMcqAiPrompt() {
     const collection = document.getElementById("mcq-collection")?.value.trim() || "";
     const description = document.getElementById("mcq-description")?.value.trim() || "";
@@ -1721,7 +1768,7 @@ function buildMcqAiPrompt() {
     // PHASE 8a — N=1 keeps the old single-@collection instruction;
     // N>=2 replaces it with a per-language-block instruction so the
     // AI generates the same question set once per selected language.
-    if (languages.length >= 2) {
+    if (languages.length >= 3) {
         const countWord = languages.length === 2 ? "TWICE" : (languages.length + " TIMES");
         const blockCollectionName = lang => collection ? `${collection} (${lang})` : `(${lang})`;
         const blockText = languages.map((lang, i) => {
@@ -1744,6 +1791,8 @@ function buildMcqAiPrompt() {
             "This is what lets the website show one question with a language-toggle instead of treating each " +
             "language's version as a separate question — without it, the languages will still generate fine but will " +
             "appear as unrelated questions in practice mode.");
+    } else if (languages.length === 2) {
+        lines.push(...buildMcqBilingualPromptLines_(languages[0], languages[1], collection));
     } else if (collection) {
         lines.push("", `@collection: ${collection}`,
             "Put this @collection line on the FIRST question of this collection only. It carries forward to subsequent questions; do not repeat it on every question.");
@@ -1998,6 +2047,23 @@ function openAddMcqModal() {
                     together, so future papers just mean adding another .md file to the same folder.
                     Either way, the file(s) must be shared as <strong>"Anyone with the link can view"</strong>.</p>
 
+                <details class="mcq-source-details" style="margin:8px 0 12px;">
+                    <summary><span class="mcq-field-num mcq-num-green">3b.</span> Paper source details <small>(all optional — you can add them later)</small></summary>
+                    <label for="mcq-pdf-url">Original PDF link (Drive)</label>
+                    <input id="mcq-pdf-url" type="url" placeholder="https://drive.google.com/file/d/.../view">
+                    <label for="mcq-source-url">Source website link</label>
+                    <input id="mcq-source-url" type="url" placeholder="https://...">
+                    <label for="mcq-source-path">Source path</label>
+                    <input id="mcq-source-path" type="text" placeholder="e.g. Demo Site > STET > 2025 > Paper II">
+                    <label for="mcq-answer-key-url">Answer key link</label>
+                    <input id="mcq-answer-key-url" type="url" placeholder="https://...">
+                    <label for="mcq-paper-remark">Paper remark</label>
+                    <textarea id="mcq-paper-remark" rows="2" placeholder="Optional note about this paper"></textarea>
+                    <p class="drive-note">None of these are needed to fetch the questions. Only full http(s) links are accepted.
+                        A blank field never erases something already saved for the paper.</p>
+                    <p id="mcq-source-msg" class="drive-note" style="color:#b00020" hidden></p>
+                </details>
+
                 <label for="mcq-description"><span class="mcq-field-num mcq-num-green">4.</span> Description</label>
                 <textarea id="mcq-description" rows="2" placeholder="Optional description"></textarea>
 
@@ -2050,7 +2116,7 @@ function openAddMcqModal() {
 @origin: pyq | book | ai | old (carries forward — put it once on the first question)
 @derived_from: mcq_id (optional — for AI-made questions: the real question it was based on)
 @question_no: 1
-@group: t20-q1 (optional — same value on this question's translation in another language block links them into one toggle-able question)
+@group: t20-q1 (OLD way — only for 3+ languages: same value on each language block of a question. For 2 languages use the bilingual one-block tags below)
 @type: simple | assertion_reason
 @topic: node_id
 @passage: p001
@@ -2081,6 +2147,23 @@ function openAddMcqModal() {
 @session: June
 @source: Source name
 @source_question_no: 12
+@source_qid: 80123 (paper's own Question ID — leave out if the source has none)
+@source_page: 4 (optional)
+@source_path: Site > Exam > 2025 > Paper II (paper header, first question only — optional)
+
+--- BILINGUAL ONE BLOCK (2 languages, ONE question = ONE row) ---
+@language: English
+@alt_language: Hindi
+@question: English question
+@options: (1-4, same count and order as @alt_options)
+@alt_question: Hindi question
+@alt_options: (1-4, same count and order as @options)
+@correct: 2 (one shared answer)
+@explanation: English explanation
+@alt_explanation: Hindi explanation
+@why_1 ... @why_6 / @alt_why_1 ... @alt_why_6 (optional)
+@alt_assertion / @alt_reason (assertion_reason: Hindi side)
+@alt_passage_text: (inside a @passage block, before @end_passage)
 @end`)}</pre>
                 </details>
 
@@ -2295,6 +2378,62 @@ function applyMcqPopupDefaults(parsed) {
     return parsed;
 }
 
+// ONE-ROW BILINGUAL (Phase 3) — readable warning lines for the preview:
+// paper-level lines first, then per-question ones (repeats are grouped).
+function buildMcqWarningLines_(parsed) {
+    const lines = (parsed.warnings || []).slice();
+    const groups = new Map();
+    (parsed.mcqs || []).forEach((row, i) => {
+        (row.warnings || []).forEach(w => {
+            let text = String(w);
+            const m = text.match(/@alt_options has (\d+) options but @options has (\d+)/);
+            if (m) {
+                text = `${row.alt_language || "Second language"} has ${m[1]} options, ${row.language || "first language"} has ${m[2]} — both must have the same options in the same order`;
+            }
+            const key = (m ? "IMPORTANT|" : "") + text;
+            if (!groups.has(key)) groups.set(key, { text, important: !!m, nos: [] });
+            groups.get(key).nos.push(row.question_no || (i + 1));
+        });
+    });
+    groups.forEach(g => {
+        if (g.important || g.nos.length === 1) {
+            g.nos.forEach(n => lines.push(`Q${n}: ${g.text}`));
+        } else {
+            lines.push(`${g.nos.length} questions: ${g.text}`);
+        }
+    });
+    return lines;
+}
+
+function renderMcqPreviewNotes_(parsed) {
+    const box = document.getElementById("mcq-preview-notes");
+    if (!box) return;
+    const parts = [];
+
+    const bilingual = (parsed.mcqs || []).filter(r => r.question_alt);
+    if (bilingual.length) {
+        const labels = Array.from(new Set(bilingual.map(r => `${r.language || "en"} + ${r.alt_language || "?"}`)));
+        parts.push(`<div>📚 <strong>${parsed.mcqs.length} questions</strong> — one row each · ${mcqEscapeHtml(labels.join(", "))}</div>`);
+    }
+
+    const lines = buildMcqWarningLines_(parsed);
+    if (lines.length) {
+        const shown = lines.slice(0, 15).map(l => `<li>${mcqEscapeHtml(l)}</li>`).join("");
+        const more = lines.length > 15 ? `<li>…and ${lines.length - 15} more</li>` : "";
+        parts.push(`<div class="mcq-preview-warning">⚠ Warnings (saving is not blocked):<ul style="margin:4px 0 0 18px;">${shown}${more}</ul></div>`);
+    }
+
+    const cols = parsed.collections || [];
+    if (cols.length && !cols.some(c => c.pdf_url)) {
+        parts.push(`<div>ℹ️ No PDF link given — you can add it later in Paper info.</div>`);
+    }
+    if (cols.length > 1 && cols.some(c => c.pdf_url || c.source_url || c.answer_key_url)) {
+        parts.push(`<div>ℹ️ This import has ${cols.length} collections — the links typed in the popup will be saved on every one of them.</div>`);
+    }
+
+    box.innerHTML = parts.join("");
+}
+
 function renderMcqPreviewModal(parsed) {
     mcqPreviewRows = parsed.mcqs.map((row, index) => ({
         row,
@@ -2312,6 +2451,7 @@ function renderMcqPreviewModal(parsed) {
                 <button type="button" class="modal-close" id="mcq-preview-close">×</button>
                 <h2>MCQ Import Preview</h2>
                 <p class="add-resource-scope" id="mcq-preview-count"></p>
+                <div id="mcq-preview-notes" class="drive-note"></div>
                 <div class="mcq-preview-table-wrap">
                     <table class="mcq-preview-table">
                         <thead><tr>
@@ -2328,6 +2468,7 @@ function renderMcqPreviewModal(parsed) {
 
     document.body.appendChild(modal);
     document.getElementById("mcq-preview-close").addEventListener("click", () => modal.remove());
+    renderMcqPreviewNotes_(parsed);
 
     const body = document.getElementById("mcq-preview-body");
     body.innerHTML = mcqPreviewRows.map(item => {
@@ -2343,9 +2484,11 @@ function renderMcqPreviewModal(parsed) {
                 ? `<span class="mcq-preview-warning" title="${mcqEscapeHtml(warnings.join("; "))}">⚠ ${mcqEscapeHtml(warnings.join("; "))}</span>`
                 : `<span>✅ Ready</span>`;
         const question = String(row.question || "").replace(/\s+/g, " ").trim();
-        const langDisplay = row.question_group_id
-            ? `🔗 ${mcqEscapeHtml(row.language || "en")}`
-            : mcqEscapeHtml(row.language || "en");
+        const langDisplay = row.question_alt
+            ? `${mcqEscapeHtml(row.language || "en")} + ${mcqEscapeHtml(row.alt_language || "?")}`
+            : row.question_group_id
+                ? `🔗 ${mcqEscapeHtml(row.language || "en")}`
+                : mcqEscapeHtml(row.language || "en");
         return `<tr>
             <td><input type="checkbox" class="mcq-preview-check" data-index="${item.index}" ${item.checked ? "checked" : ""} ${item.fatal ? "" : ""}></td>
             <td>${topicDisplay}</td>
@@ -2415,6 +2558,41 @@ async function openTopicMcqFolder() {
     }
 }
 
+// ONE-ROW BILINGUAL (Phase 3) — optional paper-level source details typed in the
+// popup. All optional; only the http(s) check can stop the fetch, never an empty field.
+const MCQ_SOURCE_URL_FIELDS_ = [
+    { id: "mcq-pdf-url", key: "pdf_url", label: "Original PDF link" },
+    { id: "mcq-source-url", key: "source_url", label: "Source website link" },
+    { id: "mcq-answer-key-url", key: "answer_key_url", label: "Answer key link" }
+];
+
+function readMcqSourceInputs_() {
+    const values = {};
+    let error = "";
+    let errorId = "";
+    MCQ_SOURCE_URL_FIELDS_.forEach(field => {
+        const v = (document.getElementById(field.id)?.value || "").trim();
+        if (v && !/^https?:\/\/\S+$/i.test(v) && !error) {
+            error = field.label + ": only a full link starting with http:// or https:// is accepted. Leave it blank if you do not have it.";
+            errorId = field.id;
+        }
+        values[field.key] = v;
+    });
+    values.source_path = (document.getElementById("mcq-source-path")?.value || "").trim();
+    values.remark = (document.getElementById("mcq-paper-remark")?.value || "").trim();
+    return { values, error, errorId };
+}
+
+// Modal values are put on every collection of this import. A blank modal field
+// changes nothing, so a value from the .md header (e.g. @source_path) is kept.
+function applyMcqSourceInputs_(parsed, values) {
+    (parsed.collections || []).forEach(c => {
+        ["pdf_url", "source_url", "answer_key_url", "source_path", "remark"].forEach(key => {
+            if (values[key]) c[key] = values[key];
+        });
+    });
+}
+
 async function submitAddMcq() {
     // PHASE 8b — Collection name's required-ness is reactive to the
     // Full Set/Individual toggle (updateMcqCollectionRequirement());
@@ -2432,6 +2610,17 @@ async function submitAddMcq() {
         return;
     }
 
+    const sourceInputs = readMcqSourceInputs_();
+    const sourceMsg = document.getElementById("mcq-source-msg");
+    if (sourceMsg) { sourceMsg.hidden = true; sourceMsg.textContent = ""; }
+    if (sourceInputs.error) {
+        if (sourceMsg) { sourceMsg.textContent = "⚠ " + sourceInputs.error; sourceMsg.hidden = false; }
+        const box = document.querySelector("#add-mcq-modal .mcq-source-details");
+        if (box) box.open = true;
+        document.getElementById(sourceInputs.errorId)?.focus();
+        return;
+    }
+
     const btn = document.getElementById("mcq-fetch-preview");
     if (btn) { btn.disabled = true; btn.textContent = "Fetching…"; }
 
@@ -2446,7 +2635,7 @@ async function submitAddMcq() {
         // two files reuse the same collection name) resolves the same way
         // save_mcqs_bulk already resolves any duplicate: last one kept.
         const files = await fetchMcqSourceFiles(ref);
-        const merged = { collections: [], passages: [], mcqs: [] };
+        const merged = { collections: [], passages: [], mcqs: [], warnings: [] };
         const collectionTitlesSeen = new Set();
         const passageIdsSeen = new Set();
         files.forEach(file => {
@@ -2462,10 +2651,13 @@ async function submitAddMcq() {
                 merged.passages.push(p);
             });
             merged.mcqs.push(...(parsed.mcqs || []));
+            merged.warnings.push(...(parsed.warnings || []));
         });
 
         window.__mcqLastParsedPassages = merged.passages;
         applyMcqPopupDefaults(merged);
+        applyMcqSourceInputs_(merged, sourceInputs.values);
+        window.__mcqLastParsedCollections = merged.collections;
 
         if (!merged.mcqs.length) {
             throw new Error(files.length > 1
@@ -2498,13 +2690,20 @@ async function confirmSaveMcqs() {
         if (!title || collectionSeen.has(title)) return;
         collectionSeen.add(title);
         const source = (mcqPreviewRows.find(x => x.row === row)?.row) || row;
+        const parsedCol = (window.__mcqLastParsedCollections || []).find(c => c.title === title) || {};
         collections.push({
             title,
             description: row.description || "",
             exam: row.exam || "",
             year: row.year || "",
             session: row.session || "",
-            source: row.source || ""
+            source: row.source || "",
+            // one-row bilingual: paper-level source details (blank = backend keeps what is saved)
+            pdf_url: parsedCol.pdf_url || "",
+            source_url: parsedCol.source_url || "",
+            answer_key_url: parsedCol.answer_key_url || "",
+            source_path: parsedCol.source_path || "",
+            remark: parsedCol.remark || ""
         });
     });
 
