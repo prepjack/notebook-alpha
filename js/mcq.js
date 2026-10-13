@@ -1208,13 +1208,10 @@ function renderMcqView() {
     });
 
     document.getElementById("mcq-edit-meta")?.addEventListener("click", () => {
-        // PHASE 4 safety — the edit form writes into the FIRST-language
-        // columns. If the second language is on screen, open the first
-        // language instead so Hindi text can never overwrite English.
-        // (Editing the second language comes in Phase 6.)
-        if (mcq.isAltVariant && mcq.variants && mcq.variants[mcq.primaryKey]) {
-            alert("Abhi edit sirf pehli bhasha (" + mcq.primaryKey + ") ka khulta hai. Doosri bhasha ka edit Phase 6 mein aayega.");
-            openMcqMetaModal(mcq.variants[mcq.primaryKey]);
+        // PHASE 6 — a one-row bilingual question is ONE row: always edit that
+        // row. If the second language is on screen, open the "Language 2" tab.
+        if (mcq.variants && mcq.variants[mcq.primaryKey]) {
+            openMcqMetaModal(mcq.variants[mcq.primaryKey], { startTab: mcq.isAltVariant ? "alt" : "" });
             return;
         }
         openMcqMetaModal(mcq);
@@ -3011,7 +3008,7 @@ function renderEditMcqTagSuggestions(value) {
     }));
 }
 
-function openMcqMetaModal(mcq) {
+function openMcqMetaModal(mcq, options) {
     document.getElementById("mcq-meta-modal")?.remove();
 
     const topicOptions = getMcqMetaTopicOptions(mcq.node_id || currentMcqTopic?.id || "");
@@ -3109,6 +3106,7 @@ function openMcqMetaModal(mcq) {
 
     document.body.appendChild(modal);
     tags.forEach(addEditMcqTagChip);
+    setupMcqMetaTabs_(modal, mcq, options && options.startTab);
 
     const tagInput = document.getElementById("mcq-meta-tag-input");
     tagInput?.addEventListener("input", () => renderEditMcqTagSuggestions(tagInput.value));
@@ -3146,6 +3144,130 @@ function openMcqMetaModal(mcq) {
         }
         if (visibleOptionCount >= 6) e.currentTarget.style.display = "none";
     });
+}
+
+// PHASE 6 — turns the one long edit form into tabs: Question / Source /
+// (Language 2, only for a one-row bilingual question). The existing fields
+// are only MOVED into the first tab, so nothing about them changes.
+function setupMcqMetaTabs_(modal, mcq, startTab) {
+    const box = modal.querySelector(".mcq-meta-modal");
+    const firstLabel = box && box.querySelector('label[for="mcq-edit-question"]');
+    const actions = box && box.querySelector(".modal-actions");
+    if (!box || !firstLabel || !actions) return;
+
+    const esc = mcqEscapeHtml;
+    const letters = ["a", "b", "c", "d", "e", "f"];
+    const isBilingual = !!String(mcq.question_alt || "").trim();
+
+    // 1) Question tab = everything that is already in the form.
+    const qPanel = document.createElement("div");
+    qPanel.dataset.mcqTab = "question";
+    let node = firstLabel;
+    while (node && node !== actions) {
+        const next = node.nextSibling;
+        qPanel.appendChild(node);
+        node = next;
+    }
+    box.insertBefore(qPanel, actions);
+
+    // New optional fields sit just above "Status".
+    const statusLabel = qPanel.querySelector('label[for="mcq-meta-status"]');
+    if (statusLabel) {
+        statusLabel.insertAdjacentHTML("beforebegin", `
+            <label for="mcq-edit-remark">Remark <small>(optional note shown in ⓘ)</small></label>
+            <textarea id="mcq-edit-remark" rows="2">${esc(mcq.remark || "")}</textarea>
+            <label for="mcq-edit-extra-link">Extra link <small>(optional, must start with http:// or https://)</small></label>
+            <input id="mcq-edit-extra-link" type="text" value="${esc(mcq.extra_link || "")}" placeholder="https://...">
+            <label for="mcq-edit-extra-link-label">Extra link label <small>(optional)</small></label>
+            <input id="mcq-edit-extra-link-label" type="text" value="${esc(mcq.extra_link_label || "")}" placeholder="e.g. Video explanation">`);
+    }
+
+    // 2) Source tab.
+    const sPanel = document.createElement("div");
+    sPanel.dataset.mcqTab = "source";
+    sPanel.hidden = true;
+    sPanel.innerHTML = `
+        <p class="add-resource-scope">Where this question came from. Every field is optional — leave it empty if you do not know it.</p>
+        <label for="mcq-src-qid">Source Question ID <small>(the ID printed in the original paper)</small></label>
+        <input id="mcq-src-qid" type="text" value="${esc(mcq.source_qid || "")}">
+        <label for="mcq-src-page">Page <small>(page number in the original paper)</small></label>
+        <input id="mcq-src-page" type="text" value="${esc(mcq.source_page || "")}">`;
+    box.insertBefore(sPanel, actions);
+
+    // 3) Language 2 tab (only when this row already holds a second language).
+    let aPanel = null;
+    if (isBilingual) {
+        const altVals = letters.map(l => String(mcq["option_" + l + "_alt"] || ""));
+        let altCount = altVals.length;
+        while (altCount > 0 && !altVals[altCount - 1].trim()) altCount--;
+        const startRows = Math.min(6, Math.max(4, mcq.options?.length || 0, altCount));
+        aPanel = document.createElement("div");
+        aPanel.dataset.mcqTab = "alt";
+        aPanel.hidden = true;
+        aPanel.innerHTML = `
+            <p class="add-resource-scope">Second language text. The correct answer and the option ORDER are shared with the first language, so the number of options must be the same in both languages.</p>
+            <label for="mcq-alt-language">Second language name</label>
+            <input id="mcq-alt-language" type="text" value="${esc(mcq.alt_language || "")}" placeholder="e.g. Hindi">
+            <label for="mcq-alt-question">Question (second language)</label>
+            <textarea id="mcq-alt-question" rows="3">${esc(mcq.question_alt || "")}</textarea>
+            ${[1, 2, 3, 4, 5, 6].map(n => {
+                const l = letters[n - 1];
+                const hide = n > startRows ? ' style="display:none"' : "";
+                return `
+            <label for="mcq-alt-option-${l}" data-alt-n="${n}"${hide}>Option ${n}</label>
+            <input id="mcq-alt-option-${l}" data-alt-n="${n}" type="text" value="${esc(altVals[n - 1])}"${hide}>`;
+            }).join("")}
+            <button type="button" id="mcq-alt-add-option" class="content-action"${startRows >= 6 ? ' style="display:none"' : ""}>+ Add option</button>
+            <label for="mcq-alt-explanation">Explanation (second language)</label>
+            <textarea id="mcq-alt-explanation" rows="3">${esc(mcq.explanation_alt || "")}</textarea>
+            ${[1, 2, 3, 4, 5, 6].map(n => {
+                const l = letters[n - 1];
+                const hide = n > startRows ? ' style="display:none"' : "";
+                return `
+            <label for="mcq-alt-why-${n}" data-alt-n="${n}"${hide}>Option ${n} — why right / wrong (second language)</label>
+            <textarea id="mcq-alt-why-${n}" data-alt-n="${n}" rows="2"${hide}>${esc(mcq["explanation_" + l + "_alt"] || "")}</textarea>`;
+            }).join("")}`;
+        box.insertBefore(aPanel, actions);
+
+        const showAltRows = count => {
+            for (let n = 1; n <= count && n <= 6; n++) {
+                aPanel.querySelectorAll(`[data-alt-n="${n}"]`).forEach(el => { el.style.display = ""; });
+            }
+            if (count >= 6) aPanel.querySelector("#mcq-alt-add-option").style.display = "none";
+        };
+        aPanel.querySelector("#mcq-alt-add-option")?.addEventListener("click", () => {
+            const visible = aPanel.querySelectorAll('input[data-alt-n]:not([style*="display: none"])').length;
+            showAltRows(visible + 1);
+        });
+        // Keep the number of rows in step with the Question tab when switching.
+        aPanel.syncRows = () => {
+            const primaryVisible = qPanel.querySelectorAll('input[data-opt-n]:not([style*="display: none"])').length;
+            showAltRows(primaryVisible);
+        };
+    }
+
+    // 4) Tab bar.
+    const tabs = [["question", "Question"], ["source", "Source"]];
+    if (aPanel) tabs.push(["alt", "Language 2"]);
+    const bar = document.createElement("div");
+    bar.className = "content-layer-tabs";
+    bar.innerHTML = tabs.map(([key, label]) =>
+        `<button type="button" class="content-layer-tab" data-mcq-tab-btn="${key}">${label}</button>`).join("");
+    box.insertBefore(bar, qPanel);
+
+    const panels = { question: qPanel, source: sPanel, alt: aPanel };
+    const showTab = key => {
+        if (!panels[key]) key = "question";
+        Object.keys(panels).forEach(k => { if (panels[k]) panels[k].hidden = (k !== key); });
+        bar.querySelectorAll("[data-mcq-tab-btn]").forEach(b =>
+            b.classList.toggle("active", b.dataset.mcqTabBtn === key));
+        if (key === "alt" && aPanel && aPanel.syncRows) aPanel.syncRows();
+    };
+    bar.addEventListener("click", e => {
+        const btn = e.target.closest("[data-mcq-tab-btn]");
+        if (btn) showTab(btn.dataset.mcqTabBtn);
+    });
+    showTab(startTab === "alt" ? "alt" : "question");
 }
 
 // ALPHA-PLUS — real permanent delete, distinct from the "Archived"
@@ -3204,6 +3326,24 @@ async function saveMcqMeta(mcq) {
     if (description !== oldDescription) fields.description = description;
     if (status !== oldStatus) fields.status = status;
 
+    // PHASE 6 — remark / extra link / source fields. All optional; an empty
+    // value clears the cell. Nothing is sent yet, so an early return is safe.
+    const extraLinkText = document.getElementById("mcq-edit-extra-link")?.value.trim() || "";
+    if (extraLinkText && !mcqSafeUrl_(extraLinkText)) {
+        alert("Extra link must start with http:// or https:// (or leave it empty).");
+        return;
+    }
+    [
+        ["remark", "mcq-edit-remark"], ["extra_link", "mcq-edit-extra-link"],
+        ["extra_link_label", "mcq-edit-extra-link-label"],
+        ["source_qid", "mcq-src-qid"], ["source_page", "mcq-src-page"]
+    ].forEach(([col, id]) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const v = el.value.trim();
+        if (v !== String(mcq[col] || "")) fields[col] = v;
+    });
+
     // ALPHA-PLUS — content fields (question/options/answer/explanation)
     // go through a separate update_mcq_content action (see Code.gs —
     // update_mcq_meta's allow-list deliberately excludes these), so they
@@ -3242,6 +3382,40 @@ async function saveMcqMeta(mcq) {
         const note = document.getElementById(`mcq-edit-why-${i + 1}`)?.value.trim() || "";
         if (note !== String(mcq.optionNotes?.[i] || "")) contentFields["explanation_" + letter] = note;
     });
+
+    // PHASE 6 — second language (only exists when the Language 2 tab is open).
+    if (document.getElementById("mcq-alt-question")) {
+        const altQuestion = document.getElementById("mcq-alt-question").value.trim();
+        const altOpts = optionLetters.map(l => document.getElementById("mcq-alt-option-" + l)?.value.trim() || "");
+        let altFilled = altOpts.length;
+        while (altFilled > 0 && !altOpts[altFilled - 1]) altFilled--;
+        if (altQuestion || altFilled > 0) {
+            if (!altQuestion) {
+                alert("Language 2: the question text is empty. Fill it, or empty ALL Language 2 fields to remove the second language.");
+                return;
+            }
+            if (altOpts.slice(0, altFilled).some(v => !v)) {
+                alert("Language 2: fill the options in order (Option 1, 2, 3 ...) with no empty option in between.");
+                return;
+            }
+            if (altFilled !== filledCount) {
+                alert("Both languages must have the same number of options. Question tab has " + filledCount + ", Language 2 has " + altFilled + ". Fix one of them, then save again.");
+                return;
+            }
+        }
+        const altPairs = [
+            ["alt_language", document.getElementById("mcq-alt-language")?.value.trim() || "", mcq.alt_language],
+            ["question_alt", altQuestion, mcq.question_alt],
+            ["explanation_alt", document.getElementById("mcq-alt-explanation")?.value.trim() || "", mcq.explanation_alt]
+        ];
+        optionLetters.forEach((letter, i) => {
+            altPairs.push(["option_" + letter + "_alt", altOpts[i], mcq["option_" + letter + "_alt"]]);
+            altPairs.push(["explanation_" + letter + "_alt", document.getElementById("mcq-alt-why-" + (i + 1))?.value.trim() || "", mcq["explanation_" + letter + "_alt"]]);
+        });
+        altPairs.forEach(([col, now, before]) => {
+            if (now !== String(before || "")) contentFields[col] = now;
+        });
+    }
 
     if (!Object.keys(fields).length && !Object.keys(contentFields).length) {
         document.getElementById("mcq-meta-modal")?.remove();
