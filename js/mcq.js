@@ -196,6 +196,117 @@ function mcqOriginBadgeHtml(q) {
     return "";
 }
 
+// PHASE 5 — ⓘ info button (READ-ONLY). Shows where a question comes from.
+// Every field is optional: a row is drawn only when its value is filled.
+const MCQ_ORIGIN_CHIP_LABELS = { pyq: "Original PYQ", old: "Unchecked", book: "Book", ai: "AI practice" };
+
+// A link is used ONLY if it starts with http:// or https:// (never javascript:/data:).
+function mcqSafeUrl_(value) {
+    const s = String(value ?? "").trim();
+    return /^https?:\/\//i.test(s) ? s : "";
+}
+
+function mcqInfoLinkHtml_(url, text) {
+    const safe = mcqSafeUrl_(url);
+    if (!safe) return "";
+    return `<a class="content-action mcq-info-link" href="${escapeHtml(safe)}" target="_blank" rel="noopener noreferrer">${escapeHtml(text)}</a>`;
+}
+
+function mcqOriginChipHtml_(q, index) {
+    const origin = normalizeMcqOrigin(q && q.origin);
+    return `<button type="button" class="mcq-origin-chip ${origin}" data-mcq-info="${index}" title="Question info">${escapeHtml(MCQ_ORIGIN_CHIP_LABELS[origin])}</button>`;
+}
+
+function mcqInfoButtonHtml_(index) {
+    return `<button type="button" class="mcq-info-btn" data-mcq-info="${index}" title="Question info" aria-label="Question info">ⓘ</button>`;
+}
+
+// One label/value row. An empty value draws nothing (no "N/A").
+function mcqInfoRowHtml_(label, valueHtml) {
+    if (valueHtml === undefined || valueHtml === null || String(valueHtml).trim() === "") return "";
+    return `<div class="mcq-info-row"><span class="mcq-info-label">${escapeHtml(label)}</span><span class="mcq-info-value">${valueHtml}</span></div>`;
+}
+
+function mcqInfoHtml_(q) {
+    const txt = v => escapeHtml(String(v ?? "").trim());
+    const col = getMcqCollectionInfo(q.collection_id_ref || q.collection_id) || {};
+    const origin = normalizeMcqOrigin(q.origin);
+    const topic = getMcqNodePath(q.node_id).map(n => n.title).join(" › ");
+
+    const details = [
+        mcqInfoRowHtml_("Topic", txt(topic)),
+        mcqInfoRowHtml_("Origin", txt(MCQ_ORIGIN_CHIP_LABELS[origin])),
+        mcqInfoRowHtml_("Languages", txt((q.languages || []).join(", "))),
+        mcqInfoRowHtml_("Difficulty", txt(q.difficulty)),
+        mcqInfoRowHtml_("Tags", txt(q.tags)),
+        mcqInfoRowHtml_("Question type", txt(q.question_type)),
+        mcqInfoRowHtml_("Passage", String(q.passage_id || "").trim() ? "Comprehension passage question" : ""),
+        mcqInfoRowHtml_("Note", txt(q.remark)),
+        mcqInfoRowHtml_("Extra link", mcqInfoLinkHtml_(q.extra_link, String(q.extra_link_label || "").trim() || "Open link"))
+    ].join("");
+
+    // AI practice question: show what it was based on (only if derived_from is filled).
+    let basedOn = "";
+    if (origin === "ai" && String(q.derived_from || "").trim()) {
+        const src = (allLoadedMcqs || []).find(m => String(m.id) === String(q.derived_from));
+        const srcText = src ? String(src.question || "").trim() : "";
+        basedOn = srcText ? txt(srcText.length > 140 ? srcText.slice(0, 140) + "…" : srcText) : "A real exam question";
+    }
+
+    const source = [
+        mcqInfoRowHtml_("Paper", txt(col.title)),
+        mcqInfoRowHtml_("Exam", txt(col.exam)),
+        mcqInfoRowHtml_("Year", txt(col.year)),
+        mcqInfoRowHtml_("Session / shift", txt(col.session)),
+        mcqInfoRowHtml_("Question number", txt(q.question_no)),
+        mcqInfoRowHtml_("Source Question ID", txt(q.source_qid)),
+        mcqInfoRowHtml_("Page", txt(q.source_page)),
+        mcqInfoRowHtml_("Source path", txt(col.source_path)),
+        mcqInfoRowHtml_("Based on", basedOn),
+        mcqInfoRowHtml_("Paper remark", txt(col.remark))
+    ].join("");
+    const buttons = [
+        mcqInfoLinkHtml_(col.pdf_url, "Open original PDF"),
+        mcqInfoLinkHtml_(col.source_url, "Open source website"),
+        mcqInfoLinkHtml_(col.answer_key_url, "Answer key")
+    ].join("");
+
+    const sourceHtml = (source || buttons)
+        ? `<div class="mcq-info-heading">Original source</div>${source}${buttons ? `<div class="mcq-info-buttons">${buttons}</div>` : ""}`
+        : `<div class="mcq-info-empty">Source details not recorded for this question.</div>`;
+    return `<div class="mcq-info-heading">Question details</div>${details}${sourceHtml}`;
+}
+
+function closeMcqInfoModal() {
+    document.getElementById("mcq-info-overlay")?.remove();
+}
+
+function openMcqInfoModal(index) {
+    const q = currentMcqs[index];
+    if (!q) return;
+    closeMcqInfoModal();
+    const overlay = document.createElement("div");
+    overlay.id = "mcq-info-overlay";
+    overlay.className = "mcq-info-overlay";
+    overlay.innerHTML = `<div class="mcq-info-panel" role="dialog" aria-modal="true" aria-label="Question info">
+        <button type="button" class="mcq-info-close" aria-label="Close">×</button>
+        ${mcqInfoHtml_(q)}
+    </div>`;
+    overlay.addEventListener("click", event => {
+        if (event.target === overlay || event.target.closest(".mcq-info-close")) closeMcqInfoModal();
+    });
+    document.body.appendChild(overlay);
+}
+
+// One listener for every ⓘ button and origin chip (they are re-drawn on each render).
+document.addEventListener("click", event => {
+    const btn = event.target.closest && event.target.closest("[data-mcq-info]");
+    if (btn) openMcqInfoModal(Number(btn.dataset.mcqInfo));
+});
+document.addEventListener("keydown", event => {
+    if (event.key === "Escape") closeMcqInfoModal();
+});
+
 function mapMcqRow(row) {
 
     const correctIndex = correctToIndex(row.correct_option);
@@ -701,8 +812,14 @@ function renderMcqPaperSourcesToolbar(shared) {
     btn.hidden = false;
     popover.innerHTML = shared.map(([id]) => {
         const info = getMcqCollectionInfo(id);
+        const paperLinks = [
+            mcqInfoLinkHtml_(info?.pdf_url, "Open original PDF"),
+            mcqInfoLinkHtml_(info?.source_url, "Open source website"),
+            mcqInfoLinkHtml_(info?.answer_key_url, "Answer key")
+        ].join("");
         return `<div class="mcq-collection-note">
-            This topic includes questions from: <strong>${escapeHtml(info?.title || id)}</strong>
+            <strong>${escapeHtml(info?.title || id)}</strong>
+            ${paperLinks}
             <button type="button" class="mcq-collection-link" data-collection-id="${escapeHtml(id)}">View full paper in order</button>
         </div>`;
     }).join("");
@@ -921,6 +1038,7 @@ function renderMcqView() {
                     <div class="mcq-all-item">
                         <div class="mcq-question-number mcq-question-heading">
                             <span>Question ${i + 1} of ${currentMcqs.length}</span>
+                            <span class="mcq-head-tools">${mcqOriginChipHtml_(q, i)}${mcqInfoButtonHtml_(i)}</span>
                         </div>
                         ${mcqCrumbHtml(q.node_id)}
                         ${mcqOriginBadgeHtml(q)}
@@ -1009,7 +1127,11 @@ function renderMcqView() {
                         </div>
                     ` : ""}
                 </div>
-                <button type="button" class="mcq-edit-meta" id="mcq-edit-meta" title="Edit question metadata" aria-label="Edit question metadata">✏️</button>
+                <span class="mcq-head-tools">
+                    ${mcqOriginChipHtml_(mcq, currentMcqIndex)}
+                    ${mcqInfoButtonHtml_(currentMcqIndex)}
+                    <button type="button" class="mcq-edit-meta" id="mcq-edit-meta" title="Edit question metadata" aria-label="Edit question metadata">✏️</button>
+                </span>
             </div>
             ${mcqCrumbHtml(mcq.node_id)}
             ${mcqOriginBadgeHtml(mcq)}

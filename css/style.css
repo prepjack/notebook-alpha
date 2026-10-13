@@ -5654,3 +5654,30 @@ a.bottom-strip-btn.practice-open{
 .quiz-host .qh-srcbox{margin:6px 0 4px}
 .quiz-host .qh-srctext{width:100%;box-sizing:border-box;min-height:140px;padding:8px 10px;border:1px solid #cfd8d2;border-radius:8px;font:12px/1.5 Arial,sans-serif;color:#2f3d35;resize:vertical}
 .quiz-host .qh-optbox{margin:4px 0 6px}
+
+/* =========================================================
+   PHASE 5 — ⓘ info button, origin chip, info popup (read-only)
+   ========================================================= */
+.mcq-head-tools{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.mcq-info-btn{border:1px solid var(--line);background:var(--panel,#fff);border-radius:7px;padding:4px 8px;cursor:pointer;font-size:14px;line-height:1;color:#315f4c}
+.mcq-info-btn:hover{filter:brightness(.97)}
+.mcq-origin-chip{border:1px solid #cbd5c7;background:#fff;color:#3a5a44;border-radius:999px;padding:3px 9px;cursor:pointer;font:700 10px Arial,sans-serif;letter-spacing:.02em}
+.mcq-origin-chip.pyq{background:rgba(46,125,79,.10);border-color:rgba(46,125,79,.40);color:#245c3b}
+.mcq-origin-chip.old{background:#f1f3f0;border-color:#d3d9d1;color:#6b7a70}
+.mcq-origin-chip.book{background:rgba(184,134,11,.10);border-color:rgba(184,134,11,.35);color:#8a6508}
+.mcq-origin-chip.ai{background:rgba(124,77,255,.10);border-color:rgba(124,77,255,.35);color:#5b3cc4}
+.mcq-info-overlay{position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;padding:12px}
+.mcq-info-panel{position:relative;box-sizing:border-box;width:100%;max-width:480px;max-height:85vh;overflow-y:auto;background:#fff;border-radius:10px;box-shadow:0 12px 30px rgba(0,0,0,.22);padding:16px;font:13px/1.5 Arial,sans-serif;color:#2f3d34}
+.mcq-info-close{position:absolute;top:6px;right:10px;border:0;background:transparent;font-size:24px;line-height:1;cursor:pointer;color:#55695c}
+.mcq-info-heading{margin:14px 0 6px;font-weight:700;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:#315f4c}
+.mcq-info-heading:first-of-type{margin-top:0}
+.mcq-info-row{display:flex;gap:10px;padding:4px 0;border-bottom:1px dashed #e3e8e1}
+.mcq-info-label{flex:0 0 120px;color:#6b7a70}
+.mcq-info-value{flex:1;min-width:0;overflow-wrap:anywhere}
+.mcq-info-buttons{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.mcq-info-link{display:inline-block;text-decoration:none}
+.mcq-info-empty{margin-top:14px;padding-top:10px;border-top:1px solid #e3e8e1;color:#6b7a70}
+@media (max-width:480px){
+    .mcq-info-row{flex-direction:column;gap:0}
+    .mcq-info-label{flex:none;font-size:11px}
+}
