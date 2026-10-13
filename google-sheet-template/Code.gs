@@ -3041,6 +3041,86 @@ function ensureMcqBankSheets_(ss) {
   return { collectionsSheet: collectionsSheet, passagesSheet: passagesSheet };
 }
 
+/* =========================================================
+   ONE ROW = ONE QUESTION (bilingual) — new columns
+   Run setupBilingualRowSchema() ONCE from the Apps Script editor
+   (function dropdown -> Run). Safe to re-run: columns are only
+   added at the END of row 1 if missing; nothing existing moves,
+   nothing is deleted.
+   ========================================================= */
+const BILINGUAL_MCQ_COLUMNS_ = [
+  "alt_language", "question_alt",
+  "option_a_alt", "option_b_alt", "option_c_alt", "option_d_alt", "option_e_alt", "option_f_alt",
+  "explanation_alt",
+  "explanation_a_alt", "explanation_b_alt", "explanation_c_alt",
+  "explanation_d_alt", "explanation_e_alt", "explanation_f_alt",
+  "source_qid", "source_page", "remark", "extra_link", "extra_link_label"
+];
+const COLLECTION_EXTRA_COLUMNS_ = ["pdf_url", "answer_key_url", "source_url", "source_path", "remark"];
+const BILINGUAL_PASSAGE_COLUMNS_ = ["content_alt"];
+
+// Adds every missing column name at the end of row 1; returns the names added.
+function addMissingColumns_(sheet, columns) {
+  const lastCol = Math.max(sheet.getLastColumn(), 1);
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(String);
+  const added = [];
+  columns.forEach(function(col) {
+    if (headers.indexOf(col) === -1) {
+      sheet.getRange(1, sheet.getLastColumn() + 1).setValue(col);
+      headers.push(col);
+      added.push(col);
+    }
+  });
+  return added;
+}
+
+function setupBilingualRowSchema() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheets = ensureMcqBankSheets_(ss);
+
+  const mcqSheet = ss.getSheetByName("MCQs");
+  if (!mcqSheet) throw new Error("MCQs sheet not found.");
+
+  const addedMcq = addMissingColumns_(mcqSheet, BILINGUAL_MCQ_COLUMNS_);
+  const addedCol = addMissingColumns_(sheets.collectionsSheet, COLLECTION_EXTRA_COLUMNS_);
+  const addedPas = addMissingColumns_(sheets.passagesSheet, BILINGUAL_PASSAGE_COLUMNS_);
+
+  // IDs / page numbers must stay text ("00123" must not become 123).
+  const headers = mcqSheet.getRange(1, 1, 1, mcqSheet.getLastColumn()).getValues()[0].map(String);
+  ["source_qid", "source_page"].forEach(function(col) {
+    const idx = headers.indexOf(col);
+    const rows = mcqSheet.getMaxRows() - 1;
+    if (idx !== -1 && rows > 0) {
+      mcqSheet.getRange(2, idx + 1, rows, 1).setNumberFormat("@");
+    }
+  });
+
+  Logger.log("MCQs: added " + (addedMcq.join(", ") || "nothing (already there)"));
+  Logger.log("Collections: added " + (addedCol.join(", ") || "nothing (already there)"));
+  Logger.log("MCQ_Passages: added " + (addedPas.join(", ") || "nothing (already there)"));
+}
+
+// Writes the paper-level extras (PDF link, website link/path, answer key,
+// remark) into an existing Collections row. A blank/missing value NEVER
+// erases what is already in the sheet.
+function applyCollectionExtras_(sheet, headers, rowNumber, info) {
+  let touched = false;
+  COLLECTION_EXTRA_COLUMNS_.forEach(function(col) {
+    const v = info[col];
+    if (v === undefined || v === null) return;
+    const text = String(v).trim();
+    if (!text) return;
+    const idx = headers.indexOf(col);
+    if (idx === -1) return;
+    sheet.getRange(rowNumber, idx + 1).setValue(safeSheetText_(text));
+    touched = true;
+  });
+  if (touched) {
+    const updatedIdx = headers.indexOf("updated_at");
+    if (updatedIdx !== -1) sheet.getRange(rowNumber, updatedIdx + 1).setValue(new Date());
+  }
+}
+
 // ONE-TIME SETUP — select this in the Apps Script editor's function
 // dropdown and click Run, once. Safe to re-run any number of times:
 // no duplicate columns, no duplicate sheets.
@@ -3258,6 +3338,7 @@ function ensureCollection_(ss, info) {
 
   for (let i = 1; i < values.length; i++) {
     if (String(values[i][normIndex]) === normalized) {
+      applyCollectionExtras_(sheet, headers, i + 1, info);
       return values[i][idIndex];
     }
   }
@@ -3268,6 +3349,7 @@ function ensureCollection_(ss, info) {
   sheet.appendRow([collectionId, title, normalized, info.description || "",
     info.exam || "", info.year || "", info.session || "", info.paper || "",
     info.subject || "", info.language || "", now, now]);
+  applyCollectionExtras_(sheet, headers, sheet.getLastRow(), info);
 
   return collectionId;
 }
