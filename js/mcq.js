@@ -2029,7 +2029,8 @@ function buildMcqSourcePromptLines_(collection) {
     return [
         "",
         "SOURCE INFO (all optional — leave a tag out when the source does not print it; never guess)",
-        "- @question_no: the question's own number in the paper (1, 2, 3 ...), on EVERY question.",
+        "- @question_no: the question's own position in this file (1, 2, 3 ...), on EVERY question.",
+        "- @source_question_no: the question's number EXACTLY as printed in the source PDF (it can differ from @question_no). If the PDF does not number its questions, leave it out.",
         "- @source_qid: copy the paper's own Question ID for that question EXACTLY as printed in the source PDF. If the PDF has no Question ID, leave @source_qid out. Same for @source_page. Never guess or invent an ID.",
         collection
             ? `- Paper header: on the FIRST question block only (it carries forward), next to @collection: ${collection}, write @exam, @year, @session and @source_path only if the source prints them. Do not write a separate empty header block.`
@@ -2053,7 +2054,9 @@ function buildMcqBilingualPromptLines_(primary, second, collection) {
         `- @alt_options must have EXACTLY the same number of options as @options, in EXACTLY the same order (option 1 in ${primary} = option 1 in ${second}). Write ONE shared @correct (the number of the correct option); never a second @correct.`,
         `- Assertion–Reasoning questions: use @assertion / @reason for ${primary} and @alt_assertion / @alt_reason for ${second}, and also write @alt_options: the four standard statements translated into ${second}, in this order: 1) Both A and R are true, and R is the correct explanation of A  2) Both A and R are true, but R is NOT the correct explanation of A  3) A is true, but R is false  4) A is false, but R is true.`,
         `- Comprehension: ONE @passage block with the passage in ${primary} under @passage_text and the same passage in ${second} under @alt_passage_text (both before @end_passage). The questions point to it with @passage and carry their own @alt_ tags.`,
-        "- @source_qid: copy the paper's own Question ID for that question EXACTLY as printed in the source PDF. If the PDF has no Question ID, leave @source_qid out. Same for @source_page. Never guess or invent an ID.",
+        `- SOURCE NUMBERS for the ${primary} PDF: @source_question_no (the question's number EXACTLY as printed in that PDF), @source_qid (its Question ID EXACTLY as printed) and @source_page. If the PDF does not print one of them, leave that tag out.`,
+        `- SOURCE NUMBERS for the ${second} PDF: @alt_source_question_no, @alt_source_qid and @alt_source_page — the same facts, read from the ${second} version of the paper. The ${second} version can number or order its questions differently, so find the same question by its meaning (or by its Question ID, if both PDFs print the same ID) and write the ${second} number even when it differs from the ${primary} one. Leave an @alt_source_... tag out when the ${second} PDF prints the same value as the ${primary} one or does not print it at all.`,
+        "- Never guess or invent a number, ID or page; copy only what the PDF prints.",
         collection
             ? `- Paper header: on the FIRST question block only (it carries forward) write @collection: ${collection} and, only if the source prints them, @exam, @year, @session and @source_path. Do not write a separate empty header block.`
             : "- Paper header: on the FIRST question block only (it carries forward) write @collection: <paper name> and, only if the source prints them, @exam, @year, @session and @source_path. Do not write a separate empty header block.",
@@ -2066,7 +2069,10 @@ function buildMcqBilingualPromptLines_(primary, second, collection) {
         "@question_no: 1",
         `@language: ${primary}`,
         `@alt_language: ${second}`,
+        `@source_question_no: <number in the ${primary} PDF, or leave this tag out>`,
+        `@alt_source_question_no: <number in the ${second} PDF, or leave this tag out>`,
         "@source_qid: <Question ID from the PDF, or leave this tag out>",
+        `@alt_source_qid: <only if the ${second} PDF prints a different ID, else leave this tag out>`,
         `@question: <question in ${primary}>`,
         "@options:",
         "1) <option 1>",
@@ -2493,6 +2499,9 @@ function openAddMcqModal() {
 --- BILINGUAL ONE BLOCK (2 languages, ONE question = ONE row) ---
 @language: English
 @alt_language: Hindi
+@source_question_no: 101 (number printed in the English PDF)
+@alt_source_question_no: 129 (number printed in the Hindi PDF)
+@alt_source_qid / @alt_source_page: only if the Hindi PDF prints a different ID / page
 @question: English question
 @options: (1-4, same count and order as @alt_options)
 @alt_question: Hindi question
