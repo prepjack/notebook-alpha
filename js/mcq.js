@@ -232,14 +232,20 @@ function mcqInfoRowHtml_(label, valueHtml) {
     return `<div class="mcq-info-row"><span class="mcq-info-label">${escapeHtml(label)}</span><span class="mcq-info-value">${valueHtml}</span></div>`;
 }
 
-function mcqSourceNosText_(q) {
+// One "in the source" fact, per language. Same value in both languages ->
+// one row "(English, Hindi)"; different -> one row per language; only one
+// language filled -> a single row.
+function mcqSourceRowsHtml_(q, label, key, altKey) {
     const langs = q.languages || [];
-    const first = String(q.source_question_no ?? "").trim();
-    const second = String(q.alt_source_question_no ?? "").trim();
-    if (first && second) {
-        return (langs[0] || "1st") + ": " + first + "  |  " + (q.alt_language || langs[1] || "2nd") + ": " + second;
-    }
-    return first || second;
+    const l1 = langs[0] || "1st language";
+    const l2 = q.alt_language || langs[1] || "2nd language";
+    const a = String(q[key] ?? "").trim();
+    const b = String(q[altKey] ?? "").trim();
+    const row = (lbl, v) => mcqInfoRowHtml_(lbl, escapeHtml(v));
+    if (a && b && a === b) return row(`${label} (${l1}, ${l2})`, a);
+    if (a && b) return row(`${label} (${l1})`, a) + row(`${label} (${l2})`, b);
+    if (b) return row(`${label} (${l2})`, b);
+    return row(label, a);
 }
 
 function mcqInfoHtml_(q) {
@@ -292,9 +298,9 @@ function mcqInfoHtml_(q) {
 
     // 4) This question inside that original paper.
     const sourceQRows = [
-        mcqInfoRowHtml_("Source question no.", txt(mcqSourceNosText_(q))),
-        mcqInfoRowHtml_("Source Question ID", txt(q.source_qid)),
-        mcqInfoRowHtml_("Page", txt(q.source_page))
+        mcqSourceRowsHtml_(q, "Question no. in source", "source_question_no", "alt_source_question_no"),
+        mcqSourceRowsHtml_(q, "Question ID in source", "source_qid", "alt_source_qid"),
+        mcqSourceRowsHtml_(q, "Page in source", "source_page", "alt_source_page")
     ].join("");
 
     const section = (title, body) => body ? `<div class="mcq-info-heading">${title}</div>${body}` : "";
@@ -524,6 +530,8 @@ function mapMcqRow(row) {
         source_qid: row.source_qid || "",
         source_question_no: row.source_question_no ?? "",
         alt_source_question_no: row.alt_source_question_no ?? "",
+        alt_source_qid: row.alt_source_qid ?? "",
+        alt_source_page: row.alt_source_page ?? "",
         source_page: row.source_page || "",
         remark: row.remark || "",
         extra_link: row.extra_link || "",
@@ -3317,12 +3325,22 @@ function setupMcqMetaTabs_(modal, mcq, startTab) {
     const sPanel = document.createElement("div");
     sPanel.dataset.mcqTab = "source";
     sPanel.hidden = true;
+    // One set of boxes per language (second set only for a bilingual question):
+    // the same paper can print a different number / ID / page in each version.
+    const srcBox = (id, label, hint, key, lang) =>
+        `<label for="${id}">${label}${lang ? " — " + esc(lang) : ""} <small>(${hint})</small></label>` +
+        `<input id="${id}" type="text" value="${esc(mcq[key] || "")}">`;
+    const srcLang1 = isBilingual ? (mcq.language || "Language 1") : "";
+    const srcLang2 = mcq.alt_language || "Language 2";
     sPanel.innerHTML = `
-        <p class="add-resource-scope">Where this question came from. Every field is optional — leave it empty if you do not know it.</p>
-        <label for="mcq-src-qid">Source Question ID <small>(the ID printed in the original paper)</small></label>
-        <input id="mcq-src-qid" type="text" value="${esc(mcq.source_qid || "")}">
-        <label for="mcq-src-page">Page <small>(page number in the original paper)</small></label>
-        <input id="mcq-src-page" type="text" value="${esc(mcq.source_page || "")}">`;
+        <p class="add-resource-scope">Where this question came from. Every field is optional — leave it empty if you do not know it.${isBilingual ? " A bilingual question has one set of boxes per language, because the original paper can print a different number, ID or page in each version." : ""}</p>
+        ${srcBox("mcq-src-qno", "Question no. in source", "the number printed in the original paper", "source_question_no", srcLang1)}
+        ${srcBox("mcq-src-qid", "Question ID in source", "the ID printed in the original paper", "source_qid", srcLang1)}
+        ${srcBox("mcq-src-page", "Page in source", "page number in the original paper", "source_page", srcLang1)}
+        ${isBilingual ? `
+        ${srcBox("mcq-src-alt-qno", "Question no. in source", "the number printed in the original paper", "alt_source_question_no", srcLang2)}
+        ${srcBox("mcq-src-alt-qid", "Question ID in source", "the ID printed in the original paper", "alt_source_qid", srcLang2)}
+        ${srcBox("mcq-src-alt-page", "Page in source", "page number in the original paper", "alt_source_page", srcLang2)}` : ""}`;
     box.insertBefore(sPanel, actions);
 
     // 3) Language 2 tab (only when this row already holds a second language).
@@ -3467,7 +3485,10 @@ async function saveMcqMeta(mcq) {
     [
         ["remark", "mcq-edit-remark"], ["extra_link", "mcq-edit-extra-link"],
         ["extra_link_label", "mcq-edit-extra-link-label"],
-        ["source_qid", "mcq-src-qid"], ["source_page", "mcq-src-page"]
+        ["source_qid", "mcq-src-qid"], ["source_page", "mcq-src-page"],
+        ["source_question_no", "mcq-src-qno"],
+        ["alt_source_question_no", "mcq-src-alt-qno"],
+        ["alt_source_qid", "mcq-src-alt-qid"], ["alt_source_page", "mcq-src-alt-page"]
     ].forEach(([col, id]) => {
         const el = document.getElementById(id);
         if (!el) return;

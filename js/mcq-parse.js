@@ -37,7 +37,8 @@
    @alt_assertion / @alt_reason), the block carries BOTH languages and
    produces ONE mcq (one id, question_group_id empty). Extra tags: @alt_language (default Hindi, with a warning),
    @alt_question, @alt_options (same count + same order as @options),
-   @alt_explanation, @alt_why_1..@alt_why_6, @source_qid, @source_page.
+   @alt_explanation, @alt_why_1..@alt_why_6, @source_qid, @source_page,
+   @source_question_no, @alt_source_question_no, @alt_source_qid, @alt_source_page.
    A passage can carry @alt_passage_text (-> content_alt). A paper header
    can carry @source_path (-> collection.source_path). Every one of these
    is optional; a missing tag is simply an empty value, never an error.
@@ -530,6 +531,10 @@
         if (isBilingual || sourcePage) built.source_page = sourcePage;
         const altSourceNo = getField_(fields, "alt_source_question_no");
         if (isBilingual || altSourceNo) built.alt_source_question_no = altSourceNo;
+        const altSourceQid = getField_(fields, "alt_source_qid");
+        if (isBilingual || altSourceQid) built.alt_source_qid = altSourceQid;
+        const altSourcePage = getField_(fields, "alt_source_page");
+        if (isBilingual || altSourcePage) built.alt_source_page = altSourcePage;
 
         // Collection-level summary counter: real exam questions without a source Question ID.
         if (originValue === "pyq" && !sourceQid) {
