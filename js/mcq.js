@@ -207,6 +207,25 @@ function mcqInfoButtonHtml_(index) {
     return `<button type="button" class="mcq-info-btn" data-mcq-info="${index}" title="Question info" aria-label="Question info">ⓘ</button>`;
 }
 
+// pdf_url can hold ONE link or MANY: "link Label || link Label"
+// (a label is optional; the link itself never contains a space).
+function mcqParsePdfLinks_(raw) {
+    return String(raw ?? "").split("||").map(x => x.trim()).filter(Boolean).map(part => {
+        const m = part.match(/^(\S+)\s*(.*)$/);
+        return { url: m[1], label: (m[2] || "").trim() };
+    });
+}
+
+function mcqPdfButtonsHtml_(raw) {
+    const links = mcqParsePdfLinks_(raw);
+    return links.map((l, i) => {
+        let text;
+        if (l.label) text = "Open " + l.label + (/pdf/i.test(l.label) ? "" : " PDF");
+        else text = links.length === 1 ? "Open original PDF" : "Open PDF " + (i + 1);
+        return mcqInfoLinkHtml_(l.url, text);
+    }).join("");
+}
+
 // One label/value row. An empty value draws nothing (no "N/A").
 function mcqInfoRowHtml_(label, valueHtml) {
     if (valueHtml === undefined || valueHtml === null || String(valueHtml).trim() === "") return "";
@@ -229,18 +248,6 @@ function mcqInfoHtml_(q) {
     const origin = normalizeMcqOrigin(q.origin);
     const topic = getMcqNodePath(q.node_id).map(n => n.title).join(" › ");
 
-    const details = [
-        mcqInfoRowHtml_("Topic", txt(topic)),
-        mcqInfoRowHtml_("Origin", txt(MCQ_ORIGIN_CHIP_LABELS[origin])),
-        mcqInfoRowHtml_("Languages", txt((q.languages || []).join(", "))),
-        mcqInfoRowHtml_("Difficulty", txt(q.difficulty)),
-        mcqInfoRowHtml_("Tags", txt(q.tags)),
-        mcqInfoRowHtml_("Question type", txt(q.question_type)),
-        mcqInfoRowHtml_("Passage", String(q.passage_id || "").trim() ? "Comprehension passage question" : ""),
-        mcqInfoRowHtml_("Note", txt(q.remark)),
-        mcqInfoRowHtml_("Extra link", mcqInfoLinkHtml_(q.extra_link, String(q.extra_link_label || "").trim() || "Open link"))
-    ].join("");
-
     // AI practice question: show what it was based on (only if derived_from is filled).
     let basedOn = "";
     if (origin === "ai" && String(q.derived_from || "").trim()) {
@@ -249,34 +256,61 @@ function mcqInfoHtml_(q) {
         basedOn = srcText ? txt(srcText.length > 140 ? srcText.slice(0, 140) + "…" : srcText) : "A real exam question";
     }
 
-    const source = [
+    // 1) The paper / set as it exists on this website.
+    const paperRows = [
         mcqInfoRowHtml_("Paper", txt(col.title)),
+        mcqInfoRowHtml_("Question number", txt(q.question_no))
+    ].join("");
+
+    // 2) This question.
+    const questionRows = [
+        mcqInfoRowHtml_("Topic", txt(topic)),
+        mcqInfoRowHtml_("Origin", txt(MCQ_ORIGIN_CHIP_LABELS[origin])),
+        mcqInfoRowHtml_("Languages", txt((q.languages || []).join(", "))),
+        mcqInfoRowHtml_("Difficulty", txt(q.difficulty)),
+        mcqInfoRowHtml_("Tags", txt(q.tags)),
+        mcqInfoRowHtml_("Question type", txt(q.question_type)),
+        mcqInfoRowHtml_("Passage", String(q.passage_id || "").trim() ? "Comprehension passage question" : ""),
+        mcqInfoRowHtml_("Based on", basedOn),
+        mcqInfoRowHtml_("Note", txt(q.remark)),
+        mcqInfoRowHtml_("Extra link", mcqInfoLinkHtml_(q.extra_link, String(q.extra_link_label || "").trim() || "Open link"))
+    ].join("");
+
+    // 3) The original paper (the real exam paper this came from).
+    const sourceRows = [
         mcqInfoRowHtml_("Exam", txt(col.exam)),
         mcqInfoRowHtml_("Year", txt(col.year)),
         mcqInfoRowHtml_("Session / shift", txt(col.session)),
-        mcqInfoRowHtml_("Question number", txt(q.question_no)),
-        mcqInfoRowHtml_("Source question no.", txt(mcqSourceNosText_(q))),
-        mcqInfoRowHtml_("Source Question ID", txt(q.source_qid)),
-        mcqInfoRowHtml_("Page", txt(q.source_page)),
         mcqInfoRowHtml_("Source path", txt(col.source_path)),
-        mcqInfoRowHtml_("Based on", basedOn),
         mcqInfoRowHtml_("Paper remark", txt(col.remark))
     ].join("");
     const buttons = [
-        mcqInfoLinkHtml_(col.pdf_url, "Open original PDF"),
+        mcqPdfButtonsHtml_(col.pdf_url),
         mcqInfoLinkHtml_(col.source_url, "Open source website"),
         mcqInfoLinkHtml_(col.answer_key_url, "Answer key")
     ].join("");
 
-    const sourceHtml = (source || buttons)
-        ? `<div class="mcq-info-heading">Original source</div>${source}${buttons ? `<div class="mcq-info-buttons">${buttons}</div>` : ""}`
+    // 4) This question inside that original paper.
+    const sourceQRows = [
+        mcqInfoRowHtml_("Source question no.", txt(mcqSourceNosText_(q))),
+        mcqInfoRowHtml_("Source Question ID", txt(q.source_qid)),
+        mcqInfoRowHtml_("Page", txt(q.source_page))
+    ].join("");
+
+    const section = (title, body) => body ? `<div class="mcq-info-heading">${title}</div>${body}` : "";
+    const sourceBody = sourceRows + (buttons ? `<div class="mcq-info-buttons">${buttons}</div>` : "");
+    const sourceHtml = (sourceBody || sourceQRows)
+        ? section("Original paper (source)", sourceBody) + section("This question in the source", sourceQRows)
         : `<div class="mcq-info-empty">Source details not recorded for this question.</div>`;
+
     // PHASE 6 — edit button (only when this paper has a row in Collections).
     const collectionId = String(q.collection_id_ref || q.collection_id || "").trim();
     const editPaperBtn = (collectionId && getMcqCollectionInfo(collectionId))
         ? `<div class="mcq-info-buttons"><button type="button" class="content-action mcq-info-link" data-mcq-edit-collection="${escapeHtml(collectionId)}">✏️ Edit paper info</button></div>`
         : "";
-    return `<div class="mcq-info-heading">Question details</div>${details}${sourceHtml}${editPaperBtn}`;
+    return section("Paper on this website", paperRows)
+        + section("Question details", questionRows)
+        + sourceHtml + editPaperBtn;
 }
 
 // PHASE 6 — remembers the papers shown in the "Paper info" popover so it can
@@ -289,7 +323,7 @@ const MCQ_COLLECTION_EDIT_FIELDS_ = [
     ["exam", "Exam", "text", "e.g. UGC NET"],
     ["year", "Year", "text", "e.g. 2024"],
     ["session", "Session / shift", "text", "e.g. June 2024 Shift 1"],
-    ["pdf_url", "Original PDF link", "url", "https://..."],
+    ["pdf_url", "Original PDF link(s) — for several write: link Label || link Label", "urls", "https://drive.google.com/... English PDF || https://drive.google.com/... Hindi PDF"],
     ["answer_key_url", "Answer key link", "url", "https://..."],
     ["source_url", "Source website link", "url", "https://..."],
     ["source_path", "Source path (menu path on the website)", "text", ""],
@@ -317,8 +351,8 @@ function openMcqCollectionEditModal(collectionId, reopenInfoIndex) {
                 These facts are saved once for the whole paper. Every field is optional — leave it empty if you do not know it.</p>
                 ${MCQ_COLLECTION_EDIT_FIELDS_.map(([col, label, kind, hint]) => {
                     const val = esc(String(info[col] ?? "").trim());
-                    const input = kind === "area"
-                        ? `<textarea id="mcq-col-${col}" rows="2">${val}</textarea>`
+                    const input = (kind === "area" || kind === "urls")
+                        ? `<textarea id="mcq-col-${col}" rows="${kind === "urls" ? 3 : 2}" placeholder="${esc(hint)}">${val}</textarea>`
                         : `<input id="mcq-col-${col}" type="text" value="${val}" placeholder="${esc(hint)}">`;
                     return `<label for="mcq-col-${col}">${esc(label)}</label>${input}`;
                 }).join("")}
@@ -341,7 +375,15 @@ function openMcqCollectionEditModal(collectionId, reopenInfoIndex) {
         // 1) Read + check everything first (nothing is sent if a link is bad).
         const next = {};
         for (const [col, label, kind] of MCQ_COLLECTION_EDIT_FIELDS_) {
-            const v = document.getElementById("mcq-col-" + col)?.value.trim() || "";
+            let v = document.getElementById("mcq-col-" + col)?.value.trim() || "";
+            if (kind === "urls" && v) {
+                const parts = mcqParsePdfLinks_(v);
+                if (!parts.length || parts.some(p => !mcqSafeUrl_(p.url))) {
+                    alert("PDF links: every link must start with http:// or https:// (separate several with ||).");
+                    return;
+                }
+                v = parts.map(p => p.label ? p.url + " " + p.label : p.url).join(" || ");
+            }
             if (kind === "url" && v && !mcqSafeUrl_(v)) {
                 alert(label + " must start with http:// or https:// (or leave it empty).");
                 return;
@@ -904,7 +946,7 @@ function renderMcqPaperSourcesToolbar(shared) {
     popover.innerHTML = shared.map(([id]) => {
         const info = getMcqCollectionInfo(id);
         const paperLinks = [
-            mcqInfoLinkHtml_(info?.pdf_url, "Open original PDF"),
+            mcqPdfButtonsHtml_(info?.pdf_url),
             mcqInfoLinkHtml_(info?.source_url, "Open source website"),
             mcqInfoLinkHtml_(info?.answer_key_url, "Answer key")
         ].join("");

@@ -1665,7 +1665,8 @@ const STUDY_CONTENT_FOLDER_ID = "";
    ========================================================= */
 const MCQ_META_EDITABLE_COLUMNS = [
   "node_id", "tags", "description", "difficulty", "language", "status",
-  "source_qid", "source_page", "remark", "extra_link", "extra_link_label"
+  "source_qid", "source_page", "remark", "extra_link", "extra_link_label",
+  "source_question_no", "alt_source_question_no", "alt_source_qid", "alt_source_page"
 ];
 
 function updateMcqMeta(data) {
@@ -3062,7 +3063,8 @@ const BILINGUAL_MCQ_COLUMNS_ = [
   "explanation_alt",
   "explanation_a_alt", "explanation_b_alt", "explanation_c_alt",
   "explanation_d_alt", "explanation_e_alt", "explanation_f_alt",
-  "source_qid", "source_page", "remark", "extra_link", "extra_link_label"
+  "source_qid", "source_page", "remark", "extra_link", "extra_link_label",
+  "alt_source_question_no", "alt_source_qid", "alt_source_page"
 ];
 const COLLECTION_EXTRA_COLUMNS_ = ["pdf_url", "answer_key_url", "source_url", "source_path", "remark"];
 const BILINGUAL_PASSAGE_COLUMNS_ = ["content_alt"];
@@ -3163,7 +3165,7 @@ function setupBilingualRowSchema() {
 
   // IDs / page numbers must stay text ("00123" must not become 123).
   const headers = mcqSheet.getRange(1, 1, 1, mcqSheet.getLastColumn()).getValues()[0].map(String);
-  ["source_qid", "source_page"].forEach(function(col) {
+  ["source_qid", "source_page", "source_question_no", "alt_source_question_no", "alt_source_qid", "alt_source_page"].forEach(function(col) {
     const idx = headers.indexOf(col);
     const rows = mcqSheet.getMaxRows() - 1;
     if (idx !== -1 && rows > 0) {
@@ -4220,6 +4222,7 @@ const MCQ_TEXT_COLUMNS_ = [
   "explanation_alt", "explanation_a_alt", "explanation_b_alt", "explanation_c_alt",
   "explanation_d_alt", "explanation_e_alt", "explanation_f_alt",
   "source_qid", "source_page", "remark", "extra_link", "extra_link_label",
+  "alt_source_question_no", "alt_source_qid", "alt_source_page",
   // purani list (waise hi)
   "question", "option_a", "option_b", "option_c", "option_d", "option_e", "option_f",
   "explanation", "explanation_a", "explanation_b", "explanation_c", "explanation_d",
