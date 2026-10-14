@@ -20,42 +20,22 @@
                          correct_option, explanation, difficulty,
                          language, tags, description, exam, year,
                          session, source, source_question_no,
-                         question_group_id, warnings: [] } ]
+                         question_group_id (always ""), warnings: [] } ]
      }
 
-   ---- Language-linking (question_group_id) -----------------------
+   ---- Language-linking (REMOVED in Phase 7) ----------------------
 
-   @group: <id>          (optional tag on a question block, see below)
-
-   Two or more question blocks that resolve to the SAME group key are
-   treated as language/translation variants of ONE question — the
-   practice UI shows them as a single slot with a language-toggle,
-   instead of as separate questions. A group key resolves like this:
-
-     - explicit @group: <id>  -> group key is that id (slugged). This
-       is what the "MULTI-LANGUAGE" AI prompt in mcq.js now asks for:
-       question N of the English block and question N of the Hindi
-       block both get the SAME @group value, so they pair up even
-       though each language block uses its own @collection.
-     - no @group, but same @collection + same @question_no across
-       blocks -> those blocks share a group key too (covers a file
-       that reuses one @collection for multiple languages instead)
-     - neither @group nor a shared collection+question_no -> no
-       grouping; behaves exactly as before
-
-   A group key shared by only ONE block is not a real pairing, so
-   mcq_id stays exactly the legacy format in that case (existing saved
-   data is unaffected). Only once a group key is shared by 2+ blocks
-   does mcq_id get a "_<language>" suffix to stay unique, and
-   question_group_id gets set to the shared key so the client can pair
-   them back up. See the post-pass at the bottom of parseMcqMarkdown().
+   The old way of tying two rows together (@group / question_group_id)
+   is gone. One question = one block = one row; two languages go in the
+   same block (see below). The question_group_id output field is kept
+   (always "") so the sheet column stays untouched. An old @group tag in
+   a file is now simply ignored.
 
    ---- Bilingual one-row mode (one-row-per-question redesign) -----
 
    If a question block has @alt_question (or, for assertion_reason,
    @alt_assertion / @alt_reason), the block carries BOTH languages and
-   produces ONE mcq (one id, no "_<language>" suffix, question_group_id
-   empty). Extra tags: @alt_language (default Hindi, with a warning),
+   produces ONE mcq (one id, question_group_id empty). Extra tags: @alt_language (default Hindi, with a warning),
    @alt_question, @alt_options (same count + same order as @options),
    @alt_explanation, @alt_why_1..@alt_why_6, @source_qid, @source_page.
    A passage can carry @alt_passage_text (-> content_alt). A paper header
@@ -92,9 +72,6 @@
      @derived_from: <mcq_id>      (optional — for origin ai: the real question
                                     this AI question was based on)
      @question_no: <number>       (optional — auto-assigned if absent)
-     @group: <id>                 (optional — links this question to its
-                                    translation/variant in another language,
-                                    see "Language-linking" above)
      @type: simple | assertion_reason
      @topic: <node_id>
      @passage: <passage_id>       (optional — must reference an earlier @passage:)
@@ -475,20 +452,11 @@
         }
         state.questionNoCounters.set(counterKey, (state.questionNoCounters.get(counterKey) || 0) + 1);
 
-        // group key (language-linking, see file header) — resolved to a
-        // final mcq_id / question_group_id in the post-pass at the end of
-        // parseMcqMarkdown(), once every block's group key is known and we
-        // can tell whether it's actually shared by 2+ blocks or not.
-        const explicitGroup = getField_(fields, "group");
-        const groupKey = explicitGroup
-            ? "grp_" + slug_(explicitGroup)
-            : (collectionRef ? "mcq_" + slug_(collectionRef) + "_q" + questionNo : null);
-        const langSlug = slug_(getField_(fields, "language") || "en") || "en";
+        // Base of the mcq_id: collection + question number (so a re-import
+        // of the same paper updates the same rows). No collection -> hash.
+        const groupKey = collectionRef ? "mcq_" + slug_(collectionRef) + "_q" + questionNo : null;
 
         // mcq_id (rule 6 — deterministic, never Date.now()/Math.random()).
-        // Provisional when groupKey exists — finalized in the post-pass,
-        // which is also where the language suffix gets added IF this
-        // group key turns out to be shared by more than one block.
         const mcqId = groupKey || ("mcq_" + shortHash_(questionText));
 
         const exam = getField_(fields, "exam");
@@ -524,14 +492,12 @@
 
         const built = {
             mcq_id: mcqId,
-            _groupKey: groupKey,   // internal — consumed by the post-pass, never sent to the sheet
-            _langSlug: langSlug,   // internal — consumed by the post-pass, never sent to the sheet
-            _bilingual: isBilingual, // internal — bilingual one-row blocks never take part in @group pairing
             node_id: topic,
             question_type: type,
             passage_id: passageRef,
             collection_id_ref: collectionRef || "",
             question_no: questionNo,
+            question_group_id: "",
             question: questionText,
             option_a: optionA,
             option_b: optionB,
@@ -613,60 +579,15 @@
             }
         });
 
-        /* -----------------------------------------------------
-           Post-pass — resolve language-linking now that every
-           block's provisional group key is known (see file header
-           and buildMcq_ above). A group key held by only ONE block
-           is not a real pairing: that block's mcq_id is left exactly
-           as its legacy format (existing saved data, and every
-           single-language file that already exists, is unaffected).
-           A group key shared by 2+ blocks becomes a real pairing:
-           question_group_id is set to that shared key, and each
-           member's mcq_id gets a "_<language>" suffix so they stay
-           unique rows while remaining linkable by question_group_id.
-           ----------------------------------------------------- */
-        const groupCounts = new Map();
+        // Post-pass: two blocks with the SAME mcq_id in one file would
+        // overwrite each other on save (e.g. a pasted old two-block file).
+        // Soft warning only — nothing is changed or blocked.
+        const idCounts = new Map();
+        mcqs.forEach(function (mcq) { idCounts.set(mcq.mcq_id, (idCounts.get(mcq.mcq_id) || 0) + 1); });
         mcqs.forEach(function (mcq) {
-            if (mcq._groupKey && !mcq._bilingual) {
-                groupCounts.set(mcq._groupKey, (groupCounts.get(mcq._groupKey) || 0) + 1);
+            if (idCounts.get(mcq.mcq_id) > 1) {
+                mcq.warnings.push("same collection + question number as another question in this file — they would overwrite each other");
             }
-        });
-
-        const seenIdsPerGroup = new Map(); // groupKey -> Set of mcq_ids already assigned in this group
-        mcqs.forEach(function (mcq) {
-            const groupKey = mcq._groupKey;
-            const isRealGroup = !mcq._bilingual && !!groupKey && groupCounts.get(groupKey) > 1;
-
-            mcq.question_group_id = isRealGroup ? groupKey : "";
-
-            if (isRealGroup) {
-                let seen = seenIdsPerGroup.get(groupKey);
-                if (!seen) { seen = new Set(); seenIdsPerGroup.set(groupKey, seen); }
-
-                let candidate = groupKey + "_" + mcq._langSlug;
-                if (seen.has(candidate)) {
-                    // Two blocks in the same group share a language (likely
-                    // an authoring mistake — two English variants under one
-                    // @group). Disambiguate rather than silently collide,
-                    // and flag it so the author notices in the preview.
-                    let n = 2;
-                    while (seen.has(candidate + "-" + n)) n++;
-                    candidate = candidate + "-" + n;
-                    mcq.warnings.push(
-                        "duplicate @language '" + mcq._langSlug + "' within @group '" +
-                        groupKey.replace(/^grp_/, "") + "' — mcq_id disambiguated, please check for a copy-paste mistake"
-                    );
-                }
-                seen.add(candidate);
-                mcq.mcq_id = candidate;
-            } else if (groupKey) {
-                mcq.mcq_id = groupKey; // single member — legacy id format, unchanged
-            }
-            // else: mcq_id already set to the hash-based standalone fallback
-
-            delete mcq._groupKey;
-            delete mcq._langSlug;
-            delete mcq._bilingual;
         });
 
         // Paper-level soft warnings: ONE summary line per paper, never one per question.

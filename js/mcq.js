@@ -467,7 +467,6 @@ function mapMcqRow(row) {
         collection_id: row.collection_id || "",
         question_no: row.question_no ?? "",
         node_id: row.node_id || "",
-        question_group_id: row.question_group_id || "",
         passage_id: row.passage_id || "",
         origin: normalizeMcqOrigin(row.origin),
         derived_from: row.derived_from || "",
@@ -493,11 +492,10 @@ function mapMcqRow(row) {
     };
 }
 
-// LANGUAGE-LINKING — groups flat mapped rows into practice "slots".
-// A slot with a non-empty question_group_id shared by 2+ rows becomes
-// one slot holding several language variants (toggle-able); every
-// other row becomes its own single-variant slot, unchanged from the
-// old flat behaviour. Order follows first appearance in `rows`.
+// Groups flat mapped rows into practice "slots". Every row is ONE
+// question = ONE slot. A row with question_alt becomes one slot holding
+// two language variants (toggle-able); every other row is its own
+// single-variant slot. Order follows first appearance in `rows`.
 // PHASE 4 — a row with question_alt is ONE question holding two
 // languages. This builds the second-language variant: same id, same
 // answer, same option ORDER; text comes from the *_alt columns. A blank
@@ -525,16 +523,13 @@ function buildMcqAltVariant_(row, altKey) {
 
 function buildMcqSlots(rows) {
     const order = [];
-    const byGroup = new Map();
 
     (rows || []).forEach(row => {
-        const groupId = String(row.question_group_id || "").trim();
         const langKey = row.language || "English";
 
-        // PHASE 4 — one-row bilingual question (new way): ONE slot, two
-        // variants built from this single row. Old grouped rows (below)
-        // are untouched.
-        if (!groupId && String(row.question_alt || "").trim()) {
+        // One-row bilingual question: ONE slot, two variants built from
+        // this single row.
+        if (String(row.question_alt || "").trim()) {
             let altKey = String(row.alt_language || "").trim() || "Hindi";
             if (altKey.toLowerCase() === langKey.toLowerCase()) altKey = altKey + " (2)";
             order.push({
@@ -546,26 +541,7 @@ function buildMcqSlots(rows) {
             return;
         }
 
-        if (groupId) {
-            let slot = byGroup.get(groupId);
-            if (!slot) {
-                slot = { group_id: groupId, variants: {}, languages: [] };
-                byGroup.set(groupId, slot);
-                order.push(slot);
-            }
-            // Safety net: if this language key is already taken in the
-            // group (almost always a missing @language tag upstream, so
-            // both variants defaulted to the same value), don't silently
-            // overwrite and lose the earlier variant — give this one a
-            // distinguishing label so both stay visible/toggle-able.
-            let finalKey = langKey;
-            let n = 2;
-            while (slot.variants[finalKey]) finalKey = `${langKey} (${n++})`;
-            slot.languages.push(finalKey);
-            slot.variants[finalKey] = row;
-        } else {
-            order.push({ group_id: "", variants: { [langKey]: row }, languages: [langKey] });
-        }
+        order.push({ group_id: "", variants: { [langKey]: row }, languages: [langKey] });
     });
 
     return order;
@@ -780,7 +756,7 @@ function getMcqLanguages(rows) {
     const names = [];
     (rows || []).forEach(mcq => {
         names.push(String(mcq.language || "").trim());
-        if (!mcq.question_group_id && String(mcq.question_alt || "").trim()) {
+        if (String(mcq.question_alt || "").trim()) {
             names.push(String(mcq.alt_language || "").trim() || "Hindi");
         }
     });
@@ -1908,7 +1884,7 @@ function renderMcqLanguageSelects(count) {
     if (!wrap) return;
 
     const existingValues = Array.from(wrap.querySelectorAll(".mcq-lang-select")).map(s => s.value);
-    const n = Math.max(1, Math.min(23, Number(count) || 1));
+    const n = Math.max(1, Math.min(2, Number(count) || 1));
 
     wrap.innerHTML = "";
     for (let i = 0; i < n; i++) {
@@ -2013,7 +1989,7 @@ function buildMcqBilingualPromptLines_(primary, second, collection) {
     return [
         "",
         `BILINGUAL ONE-BLOCK INSTRUCTION (PRIMARY language = ${primary}, SECOND language = ${second})`,
-        "Create ONE block per question that carries BOTH languages. Do NOT repeat the question set once per language and do NOT use @group.",
+        "Create ONE block per question that carries BOTH languages. Do NOT repeat the question set once per language.",
         `Question N must be the same question in both languages: same meaning, same options, same correct answer.`,
         `- PRIMARY (${primary}) tags: @question, @options, @explanation, @why_1 ... @why_6 — exactly as in the format instructions above.`,
         `- SECOND (${second}) tags, same meaning: @alt_question, @alt_options, @alt_explanation, @alt_why_1 ... @alt_why_6.`,
@@ -2091,33 +2067,9 @@ function buildMcqAiPrompt() {
             "MATH WRITING FORMAT: write every formula in LaTeX. Inline math goes between single dollar signs, e.g. $x^2 + y^2 = r^2$ or $\\frac{a}{b}$; a separate equation line goes between double dollar signs, e.g. $$\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}$$. Never use the dollar sign for money (write Rs. or the rupee symbol instead), and do not use \\( \\) or \\[ \\] delimiters. Use only standard LaTeX that KaTeX supports: no chemistry \\ce{...} syntax, no custom \\newcommand macros, and no images of equations.");
     }
 
-    // PHASE 8a — N=1 keeps the old single-@collection instruction;
-    // N>=2 replaces it with a per-language-block instruction so the
-    // AI generates the same question set once per selected language.
-    if (languages.length >= 3) {
-        const countWord = languages.length === 2 ? "TWICE" : (languages.length + " TIMES");
-        const blockCollectionName = lang => collection ? `${collection} (${lang})` : `(${lang})`;
-        const blockText = languages.map((lang, i) => {
-            const intro = i === 0 ? `Start the ${lang} block with:` : `Then start the ${lang} block with:`;
-            const closing = i === 0
-                ? `...then all ${lang} questions...`
-                : `...then all ${lang} questions in the same order and meaning as the ${languages[i - 1]} block.`;
-            return `${intro}\n@collection: ${blockCollectionName(lang)}\n@language: ${lang} (put this on EVERY question in this block, including the English block — it is REQUIRED here even though a single-language file could skip it)\n${closing}`;
-        }).join("\n");
-
-        lines.push("", "MULTI-LANGUAGE INSTRUCTION",
-            `Generate this exact set of questions ${countWord}, once fully in each of the following languages, in this exact order, so that question N in one block corresponds exactly to question N in every other block: ${languages.join(", then ")}.`,
-            blockText,
-            "Each new @collection line above starts a fresh sequential question_no count for that block only (do not repeat it mid-block).",
-            "",
-            "LANGUAGE-LINKING (IMPORTANT): also add a @group tag to EVERY question, set to " +
-            `"${topicId}-qN" where N is that question's position within its own language block (1, 2, 3, ...). ` +
-            `The SAME @group value must appear on question N in EVERY language block — e.g. @group: ${topicId}-q1 on the ` +
-            "first question of each block, @group: " + topicId + "-q2 on the second question of each block, and so on. " +
-            "This is what lets the website show one question with a language-toggle instead of treating each " +
-            "language's version as a separate question — without it, the languages will still generate fine but will " +
-            "appear as unrelated questions in practice mode.");
-    } else if (languages.length === 2) {
+    // 2 languages = ONE block per question carrying both languages;
+    // 1 language = plain single-language file.
+    if (languages.length === 2) {
         lines.push(...buildMcqBilingualPromptLines_(languages[0], languages[1], collection));
     } else if (collection) {
         lines.push("", `@collection: ${collection}`,
@@ -2228,9 +2180,8 @@ const MCQ_GUIDE_POINTS = [
       hi: "Tags — optional हैं। Index में मौजूद terms को search करके select करें; यहाँ से नया tag नहीं बनाया जा सकता।" },
     { en: "Study Topic — optional. Pick the tree node these MCQs belong to; used to build the suggested file name.",
       hi: "Study Topic — optional है। उस tree node को चुनें जिससे ये MCQs related हैं; इसी से suggested file name बनता है।" },
-    { en: "How many languages? — choose 1–23. Selecting more than one adds a Language dropdown for each, used to generate the same questions in every selected language. The AI prompt also adds a matching @group tag to each pair, so the practice page shows them as ONE question with a language-toggle instead of separate questions.",
-      hi: "How many languages? — 1 से 23 तक चुन सकते हैं। एक से ज़्यादा चुनने पर हर एक के लिए एक Language dropdown आ जाता है, जिससे same questions हर selected language में generate होते हैं। AI prompt हर pair पर एक matching @group tag भी जोड़ता है, ताकि practice page पर वो अलग-अलग questions की जगह एक ही question की तरह language-toggle के साथ दिखें।" },
-    { en: "Question type(s) — select which types (Simple, Assertion–Reasoning, Comprehension, Table/DI) the AI prompt should ask for; at least one is required. The same row has an optional 'Include math' checkbox for calculation-heavy questions.",
+    { en: "How many languages? — choose 1 or 2. Choosing 2 adds a second Language dropdown; the AI prompt then asks for ONE block per question that carries both languages (@alt_question, @alt_options ...), so the practice page shows it as ONE question with a language toggle.",
+      hi: "How many languages? — 1 या 2 चुन सकते हैं। 2 चुनने पर दूसरा Language dropdown आ जाता है; AI prompt तब हर question के लिए ONE block माँगता है जिसमें दोनों languages होती हैं (@alt_question, @alt_options ...), ताकि practice page पर वो एक ही question की तरह language-toggle के साथ दिखे।" },    { en: "Question type(s) — select which types (Simple, Assertion–Reasoning, Comprehension, Table/DI) the AI prompt should ask for; at least one is required. The same row has an optional 'Include math' checkbox for calculation-heavy questions.",
       hi: "Question type(s) — तय करें कि AI prompt किस type (Simple, Assertion–Reasoning, Comprehension, Table/DI) के questions माँगे; कम से कम एक type चुनना ज़रूरी है। इसी row में एक optional 'Include math' checkbox भी है, calculation-heavy questions के लिए।" },
     { en: "How many questions? — sets the approximate question count the AI prompt asks for.",
       hi: "How many questions? — इससे AI prompt में लगभग कितने questions चाहिए, वो number set होता है।" },
@@ -2408,7 +2359,7 @@ function openAddMcqModal() {
 
                 <label for="mcq-lang-count"><span class="mcq-field-num mcq-num-yellow">7.</span> How many languages?</label>
                 <select id="mcq-lang-count">
-                    ${Array.from({ length: 23 }, (_, i) => i + 1).map(n =>
+                    ${[1, 2].map(n =>
                         `<option value="${n}" ${n === 1 ? "selected" : ""}>${n}</option>`).join("")}
                 </select>
                 <div id="mcq-lang-select-row" class="mcq-lang-select-row"></div>
@@ -2442,7 +2393,6 @@ function openAddMcqModal() {
 @origin: pyq | book | ai | old (carries forward — put it once on the first question)
 @derived_from: mcq_id (optional — for AI-made questions: the real question it was based on)
 @question_no: 1
-@group: t20-q1 (OLD way — only for 3+ languages: same value on each language block of a question. For 2 languages use the bilingual one-block tags below)
 @type: simple | assertion_reason
 @topic: node_id
 @passage: p001
@@ -2812,15 +2762,13 @@ function renderMcqPreviewModal(parsed) {
         const question = String(row.question || "").replace(/\s+/g, " ").trim();
         const langDisplay = row.question_alt
             ? `${mcqEscapeHtml(row.language || "en")} + ${mcqEscapeHtml(row.alt_language || "?")}`
-            : row.question_group_id
-                ? `🔗 ${mcqEscapeHtml(row.language || "en")}`
-                : mcqEscapeHtml(row.language || "en");
+            : mcqEscapeHtml(row.language || "en");
         return `<tr>
             <td><input type="checkbox" class="mcq-preview-check" data-index="${item.index}" ${item.checked ? "checked" : ""} ${item.fatal ? "" : ""}></td>
             <td>${topicDisplay}</td>
             <td>${mcqEscapeHtml(row.collection_id_ref || "")}</td>
             <td>${mcqEscapeHtml(row.question_type || "simple")}</td>
-            <td title="${row.question_group_id ? "Linked — will show as one question with a language toggle" : "Standalone — no other language variant detected"}">${langDisplay}</td>
+            <td>${langDisplay}</td>
             <td title="${mcqEscapeHtml(row.question || "")}">${mcqEscapeHtml(question.length > 100 ? question.slice(0, 100) + "…" : question)}</td>
             <td>${status}</td>
         </tr>`;
