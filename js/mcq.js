@@ -1958,6 +1958,24 @@ function renderMcqTagSuggestions(value) {
     });
 }
 
+// SINGLE-LANGUAGE files — the same source-info rules the bilingual prompt
+// already has (Question ID, page, paper header). Every tag is optional and
+// the AI must leave it out instead of guessing; links are never written by
+// the AI (they are added on the website).
+function buildMcqSourcePromptLines_(collection) {
+    return [
+        "",
+        "SOURCE INFO (all optional — leave a tag out when the source does not print it; never guess)",
+        "- @question_no: the question's own number in the paper (1, 2, 3 ...), on EVERY question.",
+        "- @source_qid: copy the paper's own Question ID for that question EXACTLY as printed in the source PDF. If the PDF has no Question ID, leave @source_qid out. Same for @source_page. Never guess or invent an ID.",
+        collection
+            ? `- Paper header: on the FIRST question block only (it carries forward), next to @collection: ${collection}, write @exam, @year, @session and @source_path only if the source prints them. Do not write a separate empty header block.`
+            : "- If these questions belong to a named paper, put @collection: <paper name> on the FIRST question block only, and, only if the source prints them, @exam, @year, @session and @source_path.",
+        "- If the source does not print a year, session or path, leave that tag out. Never guess.",
+        "- Never invent URLs. Do not write any link (PDF, website, answer key) in the file; links are added later on the website."
+    ];
+}
+
 // ONE-ROW BILINGUAL (Phase 3) — prompt text for exactly 2 languages.
 // Grammar is the one js/mcq-parse.js understands (one block = one question, both languages).
 function buildMcqBilingualPromptLines_(primary, second, collection) {
@@ -2046,9 +2064,12 @@ function buildMcqAiPrompt() {
     // 1 language = plain single-language file.
     if (languages.length === 2) {
         lines.push(...buildMcqBilingualPromptLines_(languages[0], languages[1], collection));
-    } else if (collection) {
-        lines.push("", `@collection: ${collection}`,
-            "Put this @collection line on the FIRST question of this collection only. It carries forward to subsequent questions; do not repeat it on every question.");
+    } else {
+        if (collection) {
+            lines.push("", `@collection: ${collection}`,
+                "Put this @collection line on the FIRST question of this collection only. It carries forward to subsequent questions; do not repeat it on every question.");
+        }
+        lines.push(...buildMcqSourcePromptLines_(collection));
     }
 
     if (languages.length === 1 && languages[0] && languages[0].toLowerCase() !== "english") {
