@@ -2165,7 +2165,7 @@ let mcqGuideActiveTab = "english"; // persists for the session only
 // green = fine to leave as-is / fully optional. Point 2 (Collection
 // name) is dynamic — its color is computed from the live field in
 // mcqGuideColorClass() below, not from this static list.
-const MCQ_GUIDE_COLORS = ["yellow", "red", "red", "green", "green", "green", "yellow", "red", "yellow", "green", "yellow", "red"];
+const MCQ_GUIDE_COLORS = ["yellow", "red", "red", "green", "green", "green", "yellow", "red", "yellow", "green", "yellow", "green", "red"];
 
 const MCQ_GUIDE_POINTS = [
     { en: "Import mode — choose Full Set/Paper for a whole paper/collection, or Individual MCQ for a single question. This decides whether Collection name is required.",
@@ -2189,6 +2189,8 @@ const MCQ_GUIDE_POINTS = [
       hi: "Copy AI Prompt — ऊपर की सारी settings से पूरा prompt बनाकर copy कर देता है, जिसे किसी AI tool में paste किया जा सकता है।" },
     { en: "Suggested file name — auto-generated from the selected Study Topic; copy it and use it exactly when saving the .md file to Drive. (Below it is a collapsible 'Tag format reference' — nothing to fill in, just a cheat-sheet of the @tag grammar.)",
       hi: "Suggested file name — selected Study Topic से auto-generate होता है; .md file को Drive पर save करते समय इसी नाम का इस्तेमाल करें। (इसके ठीक ऊपर एक collapsible 'Tag format reference' है — उसमें कुछ भरना नहीं है, बस @tag grammar की cheat-sheet है।)" },
+    { en: "Origin and paper details — optional. Origin says honestly where the questions come from (Original PYQ only when you are sure). The paper's PDF link, website link/path, answer-key link and remark are saved once per paper in Collections. A missing detail is never an error: leave it blank, the AI must not guess it.",
+      hi: "Origin और paper details — optional हैं। Origin सच-सच बताता है कि questions कहाँ से आए हैं (Original PYQ तभी चुनें जब पक्का हो)। Paper का PDF link, website link/path, answer-key link और remark हर paper के लिए Collections में एक बार save होते हैं। कोई detail न हो तो खाली छोड़ दें — यह कभी error नहीं है, और AI को उसका अंदाज़ा नहीं लगाना चाहिए।" },
     { en: "Fetch & Preview — required. Fetches the Drive file, parses it, and opens a preview before anything is saved to the sheet.",
       hi: "Fetch & Preview — ज़रूरी step है। Drive file को fetch करके parse करता है, और sheet में save होने से पहले एक preview खोलता है।" }
 ];
@@ -3554,7 +3556,7 @@ window.initMobileDrawers?.({
     ]
 });
 
-/* ROLL-UP TOGGLE — "Include sub-topics" checkbox next to Paper Sources. */
+/* ROLL-UP TOGGLE — "Include sub-topics" checkbox next to the Paper info / paper-sources bar. */
 (function setupMcqSubtopicToggle() {
     const anchor = document.getElementById("mcq-paper-sources-btn");
     if (!anchor || document.getElementById("mcq-include-sub")) return;

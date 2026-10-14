@@ -192,24 +192,58 @@ The MCQ page has:
   supersedes an earlier placeholder note in this file; translation
   itself is authored per question via `@language`, not machine-translated.
 
-### Language-linking (question pairs shown as one question with a toggle)
-When the same question is authored in 2+ languages (e.g. via the "How
-many languages?" multi-language AI-prompt flow in the Add MCQ popup),
-each language's question can carry a matching `@group: <id>` tag
-(`js/mcq-parse.js`) so they resolve to one shared `question_group_id`.
-The practice page (`js/mcq.js` `buildMcqSlots` / `activateSlotLanguage`)
-groups such rows into a single "slot" shown as ONE question with a
-small language-toggle pill row above it, instead of as separate
-questions — switching the pill swaps the displayed question/options/
-explanation in place without losing the answer already selected
-(tracked by slot position, not by row id). A question with no `@group`
-match, or only one language, behaves exactly as before (its own single
-slot, no toggle shown). This is additive/backward-compatible: existing
-single-language MCQs keep their original `mcq_id`; only a real 2+-member
-group gets a language-suffixed id (see the file header comment in
-`js/mcq-parse.js` for the exact resolution rules and the
-"MULTI-LANGUAGE INSTRUCTION" section of `buildMcqAiPrompt` in
-`js/mcq.js` for how the AI prompt asks for matching `@group` values).
+## MCQ one-row-per-question design (done Oct 2026, Phases 1-7)
+**Rule: ONE sheet row = ONE question.** A bilingual question is no longer two rows tied by
+`question_group_id`; both languages live in the same row. This makes attempts, totals and
+"Question N of M" count questions, not rows.
+- **Primary language** = the normal columns (`question`, `option_a..f`, `explanation`,
+  `explanation_a..f`), `language` says which (normally English).
+- **Second language** = `*_alt` columns: `alt_language`, `question_alt`, `option_a_alt..option_f_alt`,
+  `explanation_alt`, `explanation_a_alt..explanation_f_alt`. ONE shared `correct_option`; option ORDER and
+  COUNT are identical in both languages. Passages: `MCQ_Passages.content_alt`.
+- **Question-level source info** (MCQs row, all optional): `source_qid` (the paper's own Question ID),
+  `source_page`, `remark`, `extra_link`, `extra_link_label`.
+- **Paper-level info** (once per paper in `Collections`, all optional): `pdf_url`, `answer_key_url`,
+  `source_url`, `source_path`, `remark` (+ existing exam/year/session/description).
+- **Missing source info is normal.** Nothing is blocked or auto-filled because a source field is empty;
+  the AI must leave a tag out instead of guessing; warnings are one soft summary line per paper (pyq only).
+  AI never invents links.
+- **Only 1 or 2 languages** are supported (Add MCQs "How many languages?" = 1 or 2). 3+ language sets would be a new project.
+- **Legacy removed in Phase 7:** `@group`, the grouped-row branch of `buildMcqSlots`, and the group post-pass in
+  `js/mcq-parse.js`. The `question_group_id` COLUMN stays in the sheet (columns are never deleted); the parser writes
+  it as "" and the site ignores it. An old `@group` tag in a file is silently ignored.
+- **Practice page** (`buildMcqSlots` / `activateSlotLanguage`): a row with `question_alt` becomes ONE slot with a
+  language toggle; the selected answer survives a language switch (tracked by slot position).
+- **`mcq_id`** format is unchanged: `mcq_<collection-slug>_q<question_no>` (hash of the question text when there is no
+  collection), so re-importing a paper updates the same rows. Two questions in one file with the same collection +
+  question number get a soft preview warning (they would overwrite each other).
+
+### Tag grammar for one-row bilingual import (`js/mcq-parse.js`)
+One block = one question, closed by `@end`. Primary tags `@question`, `@options` (`1)`..`6)`), `@correct`, `@explanation`,
+`@why_1..@why_6`. Second language: `@alt_language`, `@alt_question`, `@alt_options`, `@alt_explanation`, `@alt_why_1..6`
+(assertion-reason: `@alt_assertion` / `@alt_reason`). Source: `@source_qid`, `@source_page`, `@source_path` (paper header).
+Passage: `@passage_text` + `@alt_passage_text`, closed by `@end_passage`. `@origin` carries forward like `@collection`.
+
+### Where things are edited
+- **Pencil (per question)**: tabs Question / Source / Language 2 (Language 2 only for a question that already has a second
+  language). Fields go to `update_mcq_meta` (remark, extra link, source qid/page, meta) and `update_mcq_content` (second language).
+  Save is blocked only for real structure errors (option-count mismatch, hole between options, Language 2 question empty
+  while options filled). Emptying every Language 2 field removes the second language.
+- **Edit paper info (per paper)**: button in the ⓘ popup and in "Paper info"; saves via Code.gs `update_collection_info`
+  (editable: pdf_url, answer_key_url, source_url, source_path, remark, exam, year, session, description; `title` is NOT editable;
+  a field not sent stays untouched, "" clears; links must start with http:// or https://).
+- **ⓘ button** is read-only: "Question details" and "Original source".
+
+### Delete / re-import procedure for a paper
+1. Backup copy of the Google Sheet first. 2. MCQ page -> topic -> paper sources -> "View full paper in order" ->
+"Delete this entire collection" (also cleans the Collections row and unused passages). An old-style bilingual paper was TWO
+collections: delete both. 3. Fix the .md, put it in the topic's Drive MCQ folder (every .md in that folder is imported), then
+Add MCQs -> Fetch & Preview -> save. 4. Old attempt history of deleted questions is ignored automatically.
+
+### Audit
+Apps Script function `auditBilingualRows()` (READ-ONLY, writes only to the log): total rows, one-row bilingual count, rows still
+having `question_group_id`, duplicate `mcq_id`, `correct_option` pointing at an empty option, option-count mismatch between languages,
+`question_alt` without `alt_language`, leftover `_alt` options. Run it after big imports. Phase 7 result on the live sheet: 3 rows, 0 problems.
 
 ## Important product direction
 The author publishes the initial/core structure and content. Users can extend the structure, maintain My Notes, add resources, and contribute content. The user is the actual builder of their personalized notebook while the author/community layer keeps shared content organized.

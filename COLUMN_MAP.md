@@ -1,4 +1,7 @@
-# COLUMN_MAP.md — Notebook Alpha (Phase 1, Step 0 audit)
+# COLUMN_MAP.md — Notebook Alpha (Phase 1, Step 0 audit; updated in Phase 7)
+> Phase 7 status: all columns below exist in the live sheet. Backend actions for the new columns: `update_mcq_meta` (remark, extra_link, extra_link_label, source_qid, source_page),
+> `update_mcq_content` (alt_language, question_alt, option_*_alt, explanation_alt, explanation_*_alt), `update_collection_info` (Collections: pdf_url, answer_key_url, source_url, source_path, remark, exam, year, session, description; `title` NOT editable).
+> All new columns are copied into the site by `mapMcqRow` (MCQs) and shown in the pencil (tabs), the ⓘ popup, and "Edit paper info". `auditBilingualRows()` (Code.gs) checks them read-only.
 Source: live headers pasted by Mahender (2026-10-12) + repo check (HEAD 637a3b3). Nothing here is a code change.
 Legend: **W** = who writes · **R** = who reads · **UI** = editable in UI · **Safe** = goes through `safeSheetText_` today
 
@@ -26,7 +29,7 @@ Legend: **W** = who writes · **R** = who reads · **UI** = editable in UI · **
 | 25 | source | free-text source | bulk | preview (mcq.js ~2507) | no | no | overlaps new `remark`/`source_*` — keep, don't delete |
 | 26 | source_question_no | question number printed in source | parser tag `@source_question_no` | not in mapMcqRow | no | no | DIFFERENT from new `source_qid` (qid = paper's Question ID). Keep both |
 | 27-28 | orphaned_at / orphan_reason | content-removed flag | Code.gs orphan logic | – | no | no | |
-| 29 | question_group_id | ties legacy EN+HI rows | bulk | mapMcqRow | no | no | LEGACY — keep until Phase 7 |
+| 29 | question_group_id | ties legacy EN+HI rows | bulk | mapMcqRow | no | no | LEGACY — not used by the site since Phase 7 (parser writes ""); column kept, never delete |
 | 30-33 | explanation_a..d | per-option notes | bulk, update_mcq_content | mapMcqRow (optionNotes) | content | yes | |
 | 34-35 | option_e / option_f | 5th/6th option | bulk, update_mcq_content | mapMcqRow | content | yes | |
 | 36-37 | explanation_e / explanation_f | notes | bulk, update_mcq_content | mapMcqRow | content | yes | |
