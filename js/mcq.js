@@ -182,20 +182,6 @@ function normalizeMcqOrigin(value) {
     return MCQ_ORIGINS.includes(s) ? s : "old";
 }
 
-// Small badge shown on a question. Real PYQ and Old questions show nothing
-// (they are the normal case); only book / AI-made ones are marked, so an AI
-// question can never be mistaken for a real exam question.
-function mcqOriginBadgeHtml(q) {
-    const origin = normalizeMcqOrigin(q?.origin);
-    if (origin === "ai") {
-        return `<div class="mcq-origin-badge ai">🤖 AI-made practice question${q.derived_from ? " — based on a real exam question" : ""}</div>`;
-    }
-    if (origin === "book") {
-        return `<div class="mcq-origin-badge book">📖 From a book — not an exam question</div>`;
-    }
-    return "";
-}
-
 // PHASE 5 — ⓘ info button (READ-ONLY). Shows where a question comes from.
 // Every field is optional: a row is drawn only when its value is filled.
 const MCQ_ORIGIN_CHIP_LABELS = { pyq: "Original PYQ", old: "Unchecked", book: "Book", ai: "AI practice" };
@@ -669,13 +655,6 @@ function mcqPassageHtml(q, prevQ) {
     return `<div class="mcq-passage" style="margin:0 0 12px;padding:10px 12px;border-left:3px solid #2e7d4f;background:rgba(0,0,0,0.03);border-radius:4px;"><strong>Passage</strong><div>${renderRichInline(passageText, true)}</div></div>`;
 }
 
-function mcqCrumbHtml(nodeId) {
-    const titles = getMcqNodePath(nodeId).map(n => n.title);
-    if (!titles.length) return "";
-    const shown = titles.length > 4 ? ["…"].concat(titles.slice(-3)) : titles;
-    return `<div class="mcq-crumb" title="${mcqEscapeHtml(titles.join(" › "))}" style="font-size:0.78em;color:#6b7a70;margin:2px 0 8px;line-height:1.4;">${shown.map(t => escapeHtml(t)).join(" › ")}</div>`;
-}
-
 function findTopic(nodes, id) {
     for (const node of nodes || []) {
         if (node.id === id) return node;
@@ -1146,8 +1125,6 @@ function renderMcqView() {
                             <span>Question ${i + 1} of ${currentMcqs.length}</span>
                             <span class="mcq-head-tools">${mcqOriginChipHtml_(q, i)}${mcqInfoButtonHtml_(i)}</span>
                         </div>
-                        ${mcqCrumbHtml(q.node_id)}
-                        ${mcqOriginBadgeHtml(q)}
                         ${q.languages.length > 1 ? `
                             <div class="mcq-lang-toggle" role="group" aria-label="Question language">
                                 ${q.languages.map(lang => `
@@ -1239,8 +1216,6 @@ function renderMcqView() {
                     <button type="button" class="mcq-edit-meta" id="mcq-edit-meta" title="Edit question metadata" aria-label="Edit question metadata">✏️</button>
                 </span>
             </div>
-            ${mcqCrumbHtml(mcq.node_id)}
-            ${mcqOriginBadgeHtml(mcq)}
 
             ${mcqPassageHtml(mcq)}
             <div class="mcq-question-text">
