@@ -5666,7 +5666,7 @@ a.bottom-strip-btn.practice-open{
 .mcq-origin-chip.old{background:#f1f3f0;border-color:#d3d9d1;color:#6b7a70}
 .mcq-origin-chip.book{background:rgba(184,134,11,.10);border-color:rgba(184,134,11,.35);color:#8a6508}
 .mcq-origin-chip.ai{background:rgba(124,77,255,.10);border-color:rgba(124,77,255,.35);color:#5b3cc4}
-.mcq-info-overlay{position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;padding:12px}
+.mcq-info-overlay{position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;padding:12px}
 .mcq-info-panel{position:relative;box-sizing:border-box;width:100%;max-width:480px;max-height:85vh;overflow-y:auto;background:#fff;border-radius:10px;box-shadow:0 12px 30px rgba(0,0,0,.22);padding:16px;font:13px/1.5 Arial,sans-serif;color:#2f3d34}
 .mcq-info-close{position:absolute;top:6px;right:10px;border:0;background:transparent;font-size:24px;line-height:1;cursor:pointer;color:#55695c}
 .mcq-info-heading{margin:14px 0 6px;font-weight:700;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:#315f4c}

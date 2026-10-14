@@ -213,6 +213,16 @@ function mcqInfoRowHtml_(label, valueHtml) {
     return `<div class="mcq-info-row"><span class="mcq-info-label">${escapeHtml(label)}</span><span class="mcq-info-value">${valueHtml}</span></div>`;
 }
 
+function mcqSourceNosText_(q) {
+    const langs = q.languages || [];
+    const first = String(q.source_question_no ?? "").trim();
+    const second = String(q.alt_source_question_no ?? "").trim();
+    if (first && second) {
+        return (langs[0] || "1st") + ": " + first + "  |  " + (q.alt_language || langs[1] || "2nd") + ": " + second;
+    }
+    return first || second;
+}
+
 function mcqInfoHtml_(q) {
     const txt = v => escapeHtml(String(v ?? "").trim());
     const col = getMcqCollectionInfo(q.collection_id_ref || q.collection_id) || {};
@@ -245,6 +255,7 @@ function mcqInfoHtml_(q) {
         mcqInfoRowHtml_("Year", txt(col.year)),
         mcqInfoRowHtml_("Session / shift", txt(col.session)),
         mcqInfoRowHtml_("Question number", txt(q.question_no)),
+        mcqInfoRowHtml_("Source question no.", txt(mcqSourceNosText_(q))),
         mcqInfoRowHtml_("Source Question ID", txt(q.source_qid)),
         mcqInfoRowHtml_("Page", txt(q.source_page)),
         mcqInfoRowHtml_("Source path", txt(col.source_path)),
@@ -469,6 +480,8 @@ function mapMcqRow(row) {
         explanation_c_alt: row.explanation_c_alt || "", explanation_d_alt: row.explanation_d_alt || "",
         explanation_e_alt: row.explanation_e_alt || "", explanation_f_alt: row.explanation_f_alt || "",
         source_qid: row.source_qid || "",
+        source_question_no: row.source_question_no ?? "",
+        alt_source_question_no: row.alt_source_question_no ?? "",
         source_page: row.source_page || "",
         remark: row.remark || "",
         extra_link: row.extra_link || "",

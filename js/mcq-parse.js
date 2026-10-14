@@ -528,6 +528,8 @@
         const sourcePage = getField_(fields, "source_page");
         if (isBilingual || sourceQid) built.source_qid = sourceQid;
         if (isBilingual || sourcePage) built.source_page = sourcePage;
+        const altSourceNo = getField_(fields, "alt_source_question_no");
+        if (isBilingual || altSourceNo) built.alt_source_question_no = altSourceNo;
 
         // Collection-level summary counter: real exam questions without a source Question ID.
         if (originValue === "pyq" && !sourceQid) {
