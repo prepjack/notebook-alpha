@@ -3176,6 +3176,80 @@ function setupBilingualRowSchema() {
   Logger.log("MCQ_Passages: added " + (addedPas.join(", ") || "nothing (already there)"));
 }
 
+// PHASE 7 — READ-ONLY audit. Sheet mein kuch change nahi karta, sirf
+// Logger mein report likhta hai. Apps Script editor mein function
+// dropdown se "auditBilingualRows" chuno -> Run -> View > Logs.
+function auditBilingualRows() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("MCQs");
+  if (!sheet) throw new Error("MCQs sheet not found.");
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0].map(String);
+  const col = function(name) { return headers.indexOf(name); };
+  const cell = function(row, name) {
+    const i = col(name);
+    return i === -1 ? "" : String(row[i] === null || row[i] === undefined ? "" : row[i]).trim();
+  };
+  const letters = ["a", "b", "c", "d", "e", "f"];
+  const problems = [];
+  const seenIds = {};
+  const perCollection = {};
+  let total = 0, grouped = 0, oneRowBilingual = 0;
+
+  for (let r = 1; r < values.length; r++) {
+    const row = values[r];
+    const id = cell(row, "mcq_id");
+    if (!id && !cell(row, "question")) continue; // blank row
+    total++;
+    const where = "row " + (r + 1) + " (" + (id || "no id") + ")";
+
+    if (id) {
+      if (seenIds[id]) problems.push(where + ": duplicate mcq_id (also row " + seenIds[id] + ")");
+      else seenIds[id] = r + 1;
+    }
+    if (cell(row, "question_group_id")) grouped++;
+
+    const cid = cell(row, "collection_id");
+    if (cid) perCollection[cid] = (perCollection[cid] || 0) + 1;
+
+    let count = 0, gap = false;
+    letters.forEach(function(l) {
+      if (cell(row, "option_" + l)) { if (gap) problems.push(where + ": empty option before option_" + l); count++; }
+      else if (count > 0 || l === "a") { gap = true; }
+    });
+
+    const correct = parseInt(cell(row, "correct_option"), 10);
+    if (!correct || correct < 1 || correct > count) {
+      problems.push(where + ": correct_option (" + cell(row, "correct_option") + ") does not point at a filled option (options: " + count + ")");
+    }
+
+    if (cell(row, "question_alt")) {
+      oneRowBilingual++;
+      let altCount = 0, altGap = false;
+      letters.forEach(function(l) {
+        if (cell(row, "option_" + l + "_alt")) { if (altGap) problems.push(where + ": empty alt option before option_" + l + "_alt"); altCount++; }
+        else if (altCount > 0 || l === "a") { altGap = true; }
+      });
+      if (altCount !== count) problems.push(where + ": option count differs (main " + count + " vs alt " + altCount + ")");
+      if (!cell(row, "alt_language")) problems.push(where + ": question_alt filled but alt_language is empty");
+    } else {
+      letters.forEach(function(l) {
+        if (cell(row, "option_" + l + "_alt")) problems.push(where + ": option_" + l + "_alt filled but question_alt is empty");
+      });
+    }
+  }
+
+  Logger.log("=== auditBilingualRows (read-only) ===");
+  Logger.log("Total question rows: " + total);
+  Logger.log("One-row bilingual (question_alt filled): " + oneRowBilingual);
+  Logger.log("GATE: rows with non-empty question_group_id: " + grouped + (grouped === 0 ? "  -> legacy code can be removed" : "  -> DO NOT remove legacy code"));
+  Logger.log("Collections used by MCQs: " + Object.keys(perCollection).length);
+  Logger.log("Problems found: " + problems.length);
+  problems.slice(0, 100).forEach(function(p) { Logger.log("  - " + p); });
+  if (problems.length > 100) Logger.log("  ... and " + (problems.length - 100) + " more");
+  return { total: total, grouped: grouped, oneRowBilingual: oneRowBilingual, problems: problems.length };
+}
+
 // Writes the paper-level extras (PDF link, website link/path, answer key,
 // remark) into an existing Collections row. A blank/missing value NEVER
 // erases what is already in the sheet.
