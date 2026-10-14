@@ -274,7 +274,123 @@ function mcqInfoHtml_(q) {
     const sourceHtml = (source || buttons)
         ? `<div class="mcq-info-heading">Original source</div>${source}${buttons ? `<div class="mcq-info-buttons">${buttons}</div>` : ""}`
         : `<div class="mcq-info-empty">Source details not recorded for this question.</div>`;
-    return `<div class="mcq-info-heading">Question details</div>${details}${sourceHtml}`;
+    // PHASE 6 — edit button (only when this paper has a row in Collections).
+    const collectionId = String(q.collection_id_ref || q.collection_id || "").trim();
+    const editPaperBtn = (collectionId && getMcqCollectionInfo(collectionId))
+        ? `<div class="mcq-info-buttons"><button type="button" class="content-action mcq-info-link" data-mcq-edit-collection="${escapeHtml(collectionId)}">✏️ Edit paper info</button></div>`
+        : "";
+    return `<div class="mcq-info-heading">Question details</div>${details}${sourceHtml}${editPaperBtn}`;
+}
+
+// PHASE 6 — remembers the papers shown in the "Paper info" popover so it can
+// be redrawn right after "Edit paper info" is saved (no page reload needed).
+let lastMcqPaperShared_ = [];
+
+// PHASE 6 — "Edit paper info": the facts that belong to the WHOLE paper
+// (Collections sheet). Every field is optional; an empty value clears it.
+const MCQ_COLLECTION_EDIT_FIELDS_ = [
+    ["exam", "Exam", "text", "e.g. UGC NET"],
+    ["year", "Year", "text", "e.g. 2024"],
+    ["session", "Session / shift", "text", "e.g. June 2024 Shift 1"],
+    ["pdf_url", "Original PDF link", "url", "https://..."],
+    ["answer_key_url", "Answer key link", "url", "https://..."],
+    ["source_url", "Source website link", "url", "https://..."],
+    ["source_path", "Source path (menu path on the website)", "text", ""],
+    ["remark", "Paper remark", "area", ""],
+    ["description", "Description", "area", ""]
+];
+
+function openMcqCollectionEditModal(collectionId, reopenInfoIndex) {
+    const info = getMcqCollectionInfo(collectionId);
+    if (!info) {
+        alert("Paper info was not found for this question.");
+        return;
+    }
+    document.getElementById("mcq-collection-edit-modal")?.remove();
+    const esc = mcqEscapeHtml;
+
+    const modal = document.createElement("div");
+    modal.id = "mcq-collection-edit-modal";
+    modal.innerHTML = `
+        <div class="add-resource-overlay">
+            <div class="add-resource-modal mcq-meta-modal">
+                <button type="button" class="modal-close" id="mcq-col-close">×</button>
+                <h2>✏️ Edit paper info</h2>
+                <p class="add-resource-scope"><strong>${esc(info.title || collectionId)}</strong><br>
+                These facts are saved once for the whole paper. Every field is optional — leave it empty if you do not know it.</p>
+                ${MCQ_COLLECTION_EDIT_FIELDS_.map(([col, label, kind, hint]) => {
+                    const val = esc(String(info[col] ?? "").trim());
+                    const input = kind === "area"
+                        ? `<textarea id="mcq-col-${col}" rows="2">${val}</textarea>`
+                        : `<input id="mcq-col-${col}" type="text" value="${val}" placeholder="${esc(hint)}">`;
+                    return `<label for="mcq-col-${col}">${esc(label)}</label>${input}`;
+                }).join("")}
+                <div class="modal-actions">
+                    <button type="button" id="mcq-col-cancel">Cancel</button>
+                    <button type="button" id="mcq-col-save" class="primary">Save paper info</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+
+    const close = () => modal.remove();
+    document.getElementById("mcq-col-close")?.addEventListener("click", close);
+    document.getElementById("mcq-col-cancel")?.addEventListener("click", close);
+    modal.querySelector(".add-resource-overlay")?.addEventListener("click", e => {
+        if (e.target === e.currentTarget) close();
+    });
+
+    document.getElementById("mcq-col-save")?.addEventListener("click", async () => {
+        // 1) Read + check everything first (nothing is sent if a link is bad).
+        const next = {};
+        for (const [col, label, kind] of MCQ_COLLECTION_EDIT_FIELDS_) {
+            const v = document.getElementById("mcq-col-" + col)?.value.trim() || "";
+            if (kind === "url" && v && !mcqSafeUrl_(v)) {
+                alert(label + " must start with http:// or https:// (or leave it empty).");
+                return;
+            }
+            if (v !== String(info[col] ?? "").trim()) next[col] = v;
+        }
+        if (!Object.keys(next).length) {
+            close();
+            if (reopenInfoIndex !== undefined) openMcqInfoModal(reopenInfoIndex);
+            return;
+        }
+
+        const btn = document.getElementById("mcq-col-save");
+        if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
+
+        try {
+            const body = JSON.stringify({ action: "update_collection_info", collection_id: collectionId, fields: next });
+            try {
+                // Normal request first, so a server-side error can be shown.
+                const res = await fetch(MCQ_GOOGLE_SHEET_API, { method: "POST", body });
+                const out = await res.json();
+                if (!out || out.success !== true) throw new Error((out && out.error) || "Save failed.");
+            } catch (err) {
+                // Browser blocked reading the reply: send once more the old
+                // way (same values, so saving twice is harmless).
+                if (!(err instanceof TypeError)) throw err;
+                await fetch(MCQ_GOOGLE_SHEET_API, { method: "POST", mode: "no-cors", body });
+            }
+
+            // 2) Refresh what is already in memory so ⓘ and Paper info
+            //    show the new values straight away.
+            Object.assign(info, next);
+            const backupInfo = (currentCollectionViewApiBackup?.collections || [])
+                .find(c => String(c.collection_id || "") === String(collectionId));
+            if (backupInfo) Object.assign(backupInfo, next);
+
+            close();
+            renderMcqPaperSourcesToolbar(lastMcqPaperShared_);
+            if (reopenInfoIndex !== undefined) openMcqInfoModal(reopenInfoIndex);
+            else alert("Paper info updated.");
+        } catch (error) {
+            console.error("Paper info update failed:", error);
+            alert("Could not save paper info: " + (error && error.message ? error.message : "please try again."));
+            if (btn) { btn.disabled = false; btn.textContent = "Save paper info"; }
+        }
+    });
 }
 
 function closeMcqInfoModal() {
@@ -293,6 +409,12 @@ function openMcqInfoModal(index) {
         ${mcqInfoHtml_(q)}
     </div>`;
     overlay.addEventListener("click", event => {
+        const editBtn = event.target.closest("[data-mcq-edit-collection]");
+        if (editBtn) {
+            closeMcqInfoModal();
+            openMcqCollectionEditModal(editBtn.dataset.mcqEditCollection, index);
+            return;
+        }
         if (event.target === overlay || event.target.closest(".mcq-info-close")) closeMcqInfoModal();
     });
     document.body.appendChild(overlay);
@@ -802,6 +924,7 @@ function renderMcqPaperSourcesToolbar(shared) {
     const popover = document.getElementById("mcq-paper-sources-popover");
     if (!btn || !popover) return;
 
+    lastMcqPaperShared_ = shared;
     if (!shared.length) {
         btn.hidden = true;
         popover.hidden = true;
@@ -821,8 +944,15 @@ function renderMcqPaperSourcesToolbar(shared) {
             <strong>${escapeHtml(info?.title || id)}</strong>
             ${paperLinks}
             <button type="button" class="mcq-collection-link" data-collection-id="${escapeHtml(id)}">View full paper in order</button>
+            ${info ? `<button type="button" class="mcq-collection-link" data-edit-collection-id="${escapeHtml(id)}">✏️ Edit paper info</button>` : ""}
         </div>`;
     }).join("");
+    popover.querySelectorAll("[data-edit-collection-id]").forEach(button => {
+        button.addEventListener("click", () => {
+            popover.hidden = true;
+            openMcqCollectionEditModal(button.dataset.editCollectionId);
+        });
+    });
     popover.querySelectorAll("[data-collection-id]").forEach(button => {
         button.addEventListener("click", () => {
             popover.hidden = true;
