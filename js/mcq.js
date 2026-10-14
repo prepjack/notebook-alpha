@@ -2354,6 +2354,8 @@ function openAddMcqModal() {
                 <button type="button" class="modal-close" id="mcq-add-close">×</button>
                 <h2>➕ Add MCQs</h2>
                 <p class="add-resource-scope">Current topic: <strong>${mcqEscapeHtml(topic?.title || "Not selected")}</strong></p>
+                <p class="drive-note" id="mcq-saved-note" hidden>↺ The values you used last time for this topic are filled in.
+                    <button type="button" id="mcq-clear-saved" class="content-action">Clear saved values</button></p>
 
                 <label class="mcq-field-label"><span class="mcq-field-num mcq-num-yellow">1.</span> Import mode</label>
                 <div class="resource-type-options" role="group" aria-label="Import mode">
@@ -2387,8 +2389,8 @@ function openAddMcqModal() {
 
                 <details class="mcq-source-details" style="margin:8px 0 12px;">
                     <summary><span class="mcq-field-num mcq-num-green">3b.</span> Paper source details <small>(all optional — you can add them later)</small></summary>
-                    <label for="mcq-pdf-url">Original PDF link (Drive)</label>
-                    <input id="mcq-pdf-url" type="url" placeholder="https://drive.google.com/file/d/.../view">
+                    <label for="mcq-pdf-url">Original PDF link(s) (Drive) <small>— for several write: link Label || link Label</small></label>
+                    <textarea id="mcq-pdf-url" rows="2" placeholder="https://drive.google.com/file/d/.../view English PDF || https://drive.google.com/file/d/.../view Hindi PDF"></textarea>
                     <label for="mcq-source-url">Source website link</label>
                     <input id="mcq-source-url" type="url" placeholder="https://...">
                     <label for="mcq-source-path">Source path</label>
@@ -2574,6 +2576,82 @@ function openAddMcqModal() {
         modeIndividual.classList.add("primary");
         modeFull.classList.remove("primary");
         updateMcqCollectionRequirement("individual");
+    });
+
+    // Fill in what was used last time for this topic (if anything).
+    restoreMcqAddForm_();
+}
+
+// REMEMBER THE FORM — the "Add MCQs" boxes are saved in this browser (localStorage)
+// per topic, right after a successful Fetch & Preview, and filled in again the next
+// time this topic's Add MCQs window opens. Nothing is sent to the server.
+const MCQ_ADDFORM_KEY_ = "na_mcq_addform_v1";
+const MCQ_ADDFORM_FIELDS_ = [
+    "mcq-collection", "mcq-origin", "mcq-drive-link", "mcq-pdf-url", "mcq-source-url",
+    "mcq-source-path", "mcq-answer-key-url", "mcq-paper-remark", "mcq-description",
+    "mcq-question-count"
+];
+
+function mcqAddFormTopicKey_() {
+    return String(currentMcqTopic?.id || "_none");
+}
+
+function saveMcqAddForm_() {
+    try {
+        const data = {};
+        MCQ_ADDFORM_FIELDS_.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) data[id] = el.value;
+        });
+        data.mode = document.getElementById("mcq-mode-individual")?.classList.contains("primary") ? "individual" : "full";
+        data.langCount = document.getElementById("mcq-lang-count")?.value || "1";
+        data.langs = Array.from(document.querySelectorAll(".mcq-lang-select")).map(s => s.value);
+        data.types = Array.from(document.querySelectorAll("#mcq-type-options input[type=checkbox]"))
+            .filter(c => c.checked).map(c => c.id || c.value);
+        const all = JSON.parse(localStorage.getItem(MCQ_ADDFORM_KEY_) || "{}");
+        all[mcqAddFormTopicKey_()] = data;
+        localStorage.setItem(MCQ_ADDFORM_KEY_, JSON.stringify(all));
+    } catch (err) {
+        console.warn("Could not remember the Add MCQs form:", err);
+    }
+}
+
+function restoreMcqAddForm_() {
+    let data = null;
+    try {
+        data = (JSON.parse(localStorage.getItem(MCQ_ADDFORM_KEY_) || "{}"))[mcqAddFormTopicKey_()] || null;
+    } catch (err) { data = null; }
+    if (!data) return;
+
+    MCQ_ADDFORM_FIELDS_.forEach(id => {
+        const el = document.getElementById(id);
+        if (el && data[id] !== undefined) el.value = data[id];
+    });
+    if (data.mode === "individual") document.getElementById("mcq-mode-individual")?.click();
+
+    const countEl = document.getElementById("mcq-lang-count");
+    if (countEl && data.langCount) {
+        countEl.value = data.langCount;
+        renderMcqLanguageSelects(countEl.value);
+    }
+    Array.from(document.querySelectorAll(".mcq-lang-select")).forEach((sel, i) => {
+        if (data.langs && data.langs[i]) sel.value = data.langs[i];
+    });
+    if (Array.isArray(data.types)) {
+        document.querySelectorAll("#mcq-type-options input[type=checkbox]").forEach(c => {
+            c.checked = data.types.includes(c.id || c.value);
+        });
+    }
+
+    const note = document.getElementById("mcq-saved-note");
+    if (note) note.hidden = false;
+    document.getElementById("mcq-clear-saved")?.addEventListener("click", () => {
+        try {
+            const all = JSON.parse(localStorage.getItem(MCQ_ADDFORM_KEY_) || "{}");
+            delete all[mcqAddFormTopicKey_()];
+            localStorage.setItem(MCQ_ADDFORM_KEY_, JSON.stringify(all));
+        } catch (err) { /* ignore */ }
+        openAddMcqModal(); // reopens with empty boxes
     });
 }
 
@@ -2906,8 +2984,21 @@ function readMcqSourceInputs_() {
     let error = "";
     let errorId = "";
     MCQ_SOURCE_URL_FIELDS_.forEach(field => {
-        const v = (document.getElementById(field.id)?.value || "").trim();
-        if (v && !/^https?:\/\/\S+$/i.test(v) && !error) {
+        let v = (document.getElementById(field.id)?.value || "").trim();
+        if (field.key === "pdf_url") {
+            // one link, or several: "link Label || link Label"
+            if (v) {
+                const parts = mcqParsePdfLinks_(v);
+                if (!parts.length || parts.some(p => !/^https?:\/\/\S+$/i.test(p.url))) {
+                    if (!error) {
+                        error = field.label + ": every link must start with http:// or https:// (separate several with ||). Leave it blank if you do not have it.";
+                        errorId = field.id;
+                    }
+                } else {
+                    v = parts.map(p => p.label ? p.url + " " + p.label : p.url).join(" || ");
+                }
+            }
+        } else if (v && !/^https?:\/\/\S+$/i.test(v) && !error) {
             error = field.label + ": only a full link starting with http:// or https:// is accepted. Leave it blank if you do not have it.";
             errorId = field.id;
         }
@@ -3000,6 +3091,7 @@ async function submitAddMcq() {
                 : "No question blocks were found in this Markdown file.");
         }
 
+        saveMcqAddForm_();
         closeAddMcqModal();
         renderMcqPreviewModal(merged);
     } catch (error) {
