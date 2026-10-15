@@ -1762,13 +1762,7 @@ For each simple MCQ, use:
 5) <option 5 — ONLY if the source question really has a 5th option, e.g. "None of these">
 6) <option 6 — ONLY if the source question really has a 6th option>
 @correct: <number of the correct option: 1-4 normally, up to 5 or 6 if the question has that many options>
-@explanation: <2-3 sentences: the concept and why the correct option is right>
-@why_1: <why option 1 is right, or why it is wrong and what it actually refers to>
-@why_2: <same for option 2>
-@why_3: <same for option 3>
-@why_4: <same for option 4>
-@why_5: <same for option 5 — only if option 5 exists>
-@why_6: <same for option 6 — only if option 6 exists>
+@explanation: <ONE combined explanation — see EXPLANATION FORMAT below>
 @end`,
 
     assertion_reason: `ASSERTION–REASONING FORMAT
@@ -1778,11 +1772,7 @@ For each assertion–reasoning MCQ, use:
 @assertion: <Assertion (A)>
 @reason: <Reason (R)>
 @correct: 1|2|3|4
-@explanation: <2-3 sentences: the concept and why the correct option is right>
-@why_1: <why option 1 is right, or why it is wrong and what it actually refers to>
-@why_2: <same for option 2>
-@why_3: <same for option 3>
-@why_4: <same for option 4>
+@explanation: <ONE combined explanation — see EXPLANATION FORMAT below>
 @end
 The parser supplies the standard four Assertion–Reasoning options (1–4) automatically, so do not invent replacement option text unless specifically required.`,
 
@@ -1808,13 +1798,7 @@ Then create each question as a normal question block and reference that passage:
 5) <option 5 — ONLY if the source question really has a 5th option, e.g. "None of these">
 6) <option 6 — ONLY if the source question really has a 6th option>
 @correct: <number of the correct option: 1-4 normally, up to 5 or 6 if the question has that many options>
-@explanation: <2-3 sentences: the concept and why the correct option is right>
-@why_1: <why option 1 is right, or why it is wrong and what it actually refers to>
-@why_2: <same for option 2>
-@why_3: <same for option 3>
-@why_4: <same for option 4>
-@why_5: <same for option 5 — only if option 5 exists>
-@why_6: <same for option 6 — only if option 6 exists>
+@explanation: <ONE combined explanation — see EXPLANATION FORMAT below>
 @end`,
 
     table: `TABLE / DI FORMAT
@@ -1831,13 +1815,7 @@ When a question depends on a table or data interpretation, keep the table/data i
 5) <option 5 — ONLY if the source question really has a 5th option, e.g. "None of these">
 6) <option 6 — ONLY if the source question really has a 6th option>
 @correct: <number of the correct option: 1-4 normally, up to 5 or 6 if the question has that many options>
-@explanation: <brief calculation/reasoning: how the correct option is reached>
-@why_1: <why option 1 is right, or the mistake that leads to it>
-@why_2: <same for option 2>
-@why_3: <same for option 3>
-@why_4: <same for option 4>
-@why_5: <same for option 5 — only if option 5 exists>
-@why_6: <same for option 6 — only if option 6 exists>
+@explanation: <ONE combined explanation — see EXPLANATION FORMAT below>
 @end`
 };
 
@@ -2048,8 +2026,8 @@ function buildMcqBilingualPromptLines_(primary, second, collection) {
         `BILINGUAL ONE-BLOCK INSTRUCTION (PRIMARY language = ${primary}, SECOND language = ${second})`,
         "Create ONE block per question that carries BOTH languages. Do NOT repeat the question set once per language.",
         `Question N must be the same question in both languages: same meaning, same options, same correct answer.`,
-        `- PRIMARY (${primary}) tags: @question, @options, @explanation, @why_1 ... @why_6 — exactly as in the format instructions above.`,
-        `- SECOND (${second}) tags, same meaning: @alt_question, @alt_options, @alt_explanation, @alt_why_1 ... @alt_why_6.`,
+        `- PRIMARY (${primary}) tags: @question, @options, @explanation — exactly as in the format instructions above.`,
+        `- SECOND (${second}) tags, same meaning: @alt_question, @alt_options, @alt_explanation (same structure and same option order as @explanation).`,
         `- Put @language: ${primary} and @alt_language: ${second} on EVERY question.`,
         `- @alt_options must have EXACTLY the same number of options as @options, in EXACTLY the same order (option 1 in ${primary} = option 1 in ${second}). Write ONE shared @correct (the number of the correct option); never a second @correct.`,
         `- Assertion–Reasoning questions: use @assertion / @reason for ${primary} and @alt_assertion / @alt_reason for ${second}, and also write @alt_options: the four standard statements translated into ${second}, in this order: 1) Both A and R are true, and R is the correct explanation of A  2) Both A and R are true, but R is NOT the correct explanation of A  3) A is true, but R is false  4) A is false, but R is true.`,
@@ -2170,9 +2148,10 @@ function buildMcqAiPrompt() {
         "- Every question must end with @end.",
         "- A genuinely required field must not be guessed. If source material does not support it, leave it out rather than fabricating it.",
         "- Keep question, option, correct answer, and explanation content faithful to the supplied source.",
-        "- Number of options: normally 4. If the source question itself has 5 or 6 options (for example a 5th option \"None of these\"), keep exactly that many (5) and 6) lines) and give @why_5 / @why_6 too. Never invent extra options to pad a question, and never drop an option the source has.",
-        "- @why_1 to @why_4 (and @why_5 / @why_6 when those options exist) must each explain THAT specific option: why it is correct, or why it is wrong and what it actually refers to. Keep each to 1-2 sentences.",
-        "- Write @explanation and every @why_ note in the SAME language as the question.",
+        "- Number of options: normally 4. If the source question itself has 5 or 6 options (for example a 5th option \"None of these\"), keep exactly that many (5) and 6) lines). Never invent extra options to pad a question, and never drop an option the source has.",
+        "- Do NOT write @why_1 ... @why_6 or @alt_why_1 ... @alt_why_6. All explanation goes in ONE @explanation (and ONE @alt_explanation for the second language).",
+        "- EXPLANATION FORMAT (@explanation and @alt_explanation): it is shown to the learner whether they picked the right or a wrong option, so write it as ONE message. Line 1: start with \"✅ Correct: \" then the correct option's text in **bold**, then 1-2 sentences on the concept and why it is correct. Then ONE line for EVERY other option (all of them, in the same order as the options), each starting with \"❌ \" then that option's text in **bold**, then 1 sentence on why it is wrong and what it actually refers to. Put a blank line between lines so each option is its own paragraph. Refer to an option by its TEXT, never by its number or letter. If an option's text is very long, shorten it with an ellipsis (...) but keep it recognisable. Keep the whole explanation short.",
+        "- Write @explanation in the SAME language as the question; @alt_explanation in the second language with the same structure.",
         "",
         "---",
         "FILE NAMING INSTRUCTION (for you, the human — not for the AI tool):",
@@ -2476,13 +2455,7 @@ function openAddMcqModal() {
 5) Option 5 (optional — only if the question has a 5th option)
 6) Option 6 (optional — only if the question has a 6th option)
 @correct: 1 (1 to 6 = number of the correct option)
-@explanation: Explanation
-@why_1: Why option 1 is right/wrong
-@why_2: Why option 2 is right/wrong
-@why_3: Why option 3 is right/wrong
-@why_4: Why option 4 is right/wrong
-@why_5: Why option 5 is right/wrong (optional)
-@why_6: Why option 6 is right/wrong (optional)
+@explanation: ✅ Correct: **right option text** — why. (blank line) ❌ **other option text** — why wrong. (one line per other option)
 @difficulty: easy | medium | hard
 @language: en | hi | Hinglish | Mixed
 @tags: tag1, tag2
@@ -2509,7 +2482,6 @@ function openAddMcqModal() {
 @correct: 2 (one shared answer)
 @explanation: English explanation
 @alt_explanation: Hindi explanation
-@why_1 ... @why_6 / @alt_why_1 ... @alt_why_6 (optional)
 @alt_assertion / @alt_reason (assertion_reason: Hindi side)
 @alt_passage_text: (inside a @passage block, before @end_passage)
 @end`)}</pre>

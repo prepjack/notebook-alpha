@@ -144,7 +144,7 @@ A question has as many options as its source gives it: normally 4, sometimes
   `correct_option` is 1-6 (1 = first option). New columns are added by running
   `setupMcqBankSheets()` once; run `makeMcqTextColumnsPlain()` once after that.
 - **Markdown import (`js/mcq-parse.js`)**: `1)` to `6)` option lines, `@correct: 1`
-  to `6`, `@why_1` to `@why_6`. Options must be continuous (no missing number).
+  to `6`. Explanation is ONE `@explanation` (right option + every wrong option in one message; `@why_1..6` is no longer written by the AI prompt but old rows/tags still work). Options must be continuous (no missing number).
   Fewer than 4 options gives a warning; `@correct` pointing at a missing option
   is a fatal row error in the preview.
 - **Practice page (`js/mcq.js`)**: shows only the options the question really has.
@@ -219,8 +219,8 @@ The MCQ page has:
   question number get a soft preview warning (they would overwrite each other).
 
 ### Tag grammar for one-row bilingual import (`js/mcq-parse.js`)
-One block = one question, closed by `@end`. Primary tags `@question`, `@options` (`1)`..`6)`), `@correct`, `@explanation`,
-`@why_1..@why_6`. Second language: `@alt_language`, `@alt_question`, `@alt_options`, `@alt_explanation`, `@alt_why_1..6`
+One block = one question, closed by `@end`. Primary tags `@question`, `@options` (`1)`..`6)`), `@correct`, `@explanation`
+(one combined message: ✅ correct option + ❌ each other option; old `@why_1..6` still parsed). Second language: `@alt_language`, `@alt_question`, `@alt_options`, `@alt_explanation`
 (assertion-reason: `@alt_assertion` / `@alt_reason`). Source: `@source_qid`, `@source_page`, `@source_path` (paper header).
 Passage: `@passage_text` + `@alt_passage_text`, closed by `@end_passage`. `@origin` carries forward like `@collection`.
 
