@@ -139,12 +139,12 @@ The Quiz box (Add Content Folder box) has a "Questions should come from" choice:
 ## MCQ options (4, 5 or 6 per question)
 A question has as many options as its source gives it: normally 4, sometimes
 5 (e.g. a 5th "None of these") or 6. Maximum is 6.
-- **Sheet (`MCQs`)**: `option_a` to `option_f`, `explanation_a` to `explanation_f`.
+- **Sheet (`MCQs`)**: `option_a` to `option_f`; ONE `explanation` column (the old per-option `explanation_a..f` columns were removed).
   `option_e`/`option_f` stay empty on normal 4-option questions.
   `correct_option` is 1-6 (1 = first option). New columns are added by running
   `setupMcqBankSheets()` once; run `makeMcqTextColumnsPlain()` once after that.
 - **Markdown import (`js/mcq-parse.js`)**: `1)` to `6)` option lines, `@correct: 1`
-  to `6`. Explanation is ONE `@explanation` (right option + every wrong option in one message; `@why_1..6` is no longer written by the AI prompt but old rows/tags still work). Options must be continuous (no missing number).
+  to `6`. Explanation is ONE `@explanation` (right option + every wrong option in one message; `@why_1..6` no longer exist, an old tag is ignored). Options must be continuous (no missing number).
   Fewer than 4 options gives a warning; `@correct` pointing at a missing option
   is a fatal row error in the preview.
 - **Practice page (`js/mcq.js`)**: shows only the options the question really has.
@@ -196,10 +196,9 @@ The MCQ page has:
 **Rule: ONE sheet row = ONE question.** A bilingual question is no longer two rows tied by
 `question_group_id`; both languages live in the same row. This makes attempts, totals and
 "Question N of M" count questions, not rows.
-- **Primary language** = the normal columns (`question`, `option_a..f`, `explanation`,
-  `explanation_a..f`), `language` says which (normally English).
+- **Primary language** = the normal columns (`question`, `option_a..f`, `explanation`), `language` says which (normally English).
 - **Second language** = `*_alt` columns: `alt_language`, `question_alt`, `option_a_alt..option_f_alt`,
-  `explanation_alt`, `explanation_a_alt..explanation_f_alt`. ONE shared `correct_option`; option ORDER and
+  `explanation_alt`. ONE shared `correct_option`; option ORDER and
   COUNT are identical in both languages. Passages: `MCQ_Passages.content_alt`.
 - **Question-level source info** (MCQs row, all optional): `source_qid` (the paper's own Question ID),
   `source_page`, `remark`, `extra_link`, `extra_link_label`.
@@ -220,7 +219,7 @@ The MCQ page has:
 
 ### Tag grammar for one-row bilingual import (`js/mcq-parse.js`)
 One block = one question, closed by `@end`. Primary tags `@question`, `@options` (`1)`..`6)`), `@correct`, `@explanation`
-(one combined message: ✅ correct option + ❌ each other option; old `@why_1..6` still parsed). Second language: `@alt_language`, `@alt_question`, `@alt_options`, `@alt_explanation`
+(one combined message: ✅ correct option + ❌ each other option). Second language: `@alt_language`, `@alt_question`, `@alt_options`, `@alt_explanation`
 (assertion-reason: `@alt_assertion` / `@alt_reason`). Source: `@source_qid`, `@source_page`, `@source_path` (paper header).
 Passage: `@passage_text` + `@alt_passage_text`, closed by `@end_passage`. `@origin` carries forward like `@collection`.
 

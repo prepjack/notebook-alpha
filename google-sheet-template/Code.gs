@@ -564,7 +564,7 @@ function flagContentRemoved(data) {
 }
 
 // Ek sawal mein maximum kitne options ho sakte hain. Sheet mein option_a..option_f
-// (aur explanation_a..explanation_f) columns isi ke hisaab se hain.
+// columns isi ke hisaab se hain.
 const MCQ_MAX_OPTIONS_ = 6;
 
 // Standard: sheet mein correct_option hamesha 1-6 (1 = pehla option).
@@ -1837,10 +1837,7 @@ const MCQ_CONTENT_EDITABLE_COLUMNS = [
   "correct_option", "explanation",
   "alt_language", "question_alt",
   "option_a_alt", "option_b_alt", "option_c_alt", "option_d_alt", "option_e_alt", "option_f_alt",
-  "explanation_alt", "explanation_a_alt", "explanation_b_alt", "explanation_c_alt",
-  "explanation_d_alt", "explanation_e_alt", "explanation_f_alt",
-  "explanation_a", "explanation_b", "explanation_c", "explanation_d",
-  "explanation_e", "explanation_f",
+  "explanation_alt",
   "origin", "derived_from"
 ];
 
@@ -3003,10 +3000,8 @@ const MCQ_BANK_NEW_COLUMNS_ = [
   // variant pairs of the SAME question (see js/mcq-parse.js header for
   // how it's derived); blank for a standalone, ungrouped question.
   "question_group_id",
-  // PER-OPTION EXPLANATIONS: why each option is right / wrong (option 1-6)
-  "explanation_a", "explanation_b", "explanation_c", "explanation_d",
   // 5th and 6th options (only used by questions that really have them)
-  "option_e", "option_f", "explanation_e", "explanation_f",
+  "option_e", "option_f",
   // ORIGIN: where the question really comes from — pyq (real exam paper),
   // book, ai (written by an AI) or old (existing/unchecked). derived_from =
   // mcq_id of the real question an AI practice question was based on.
@@ -3061,8 +3056,6 @@ const BILINGUAL_MCQ_COLUMNS_ = [
   "alt_language", "question_alt",
   "option_a_alt", "option_b_alt", "option_c_alt", "option_d_alt", "option_e_alt", "option_f_alt",
   "explanation_alt",
-  "explanation_a_alt", "explanation_b_alt", "explanation_c_alt",
-  "explanation_d_alt", "explanation_e_alt", "explanation_f_alt",
   "source_qid", "source_page", "remark", "extra_link", "extra_link_label",
   "alt_source_question_no", "alt_source_qid", "alt_source_page"
 ];
@@ -4163,8 +4156,7 @@ function makeMcqTextColumnsPlain() {
   const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
   const targets = [
     "question", "option_a", "option_b", "option_c", "option_d", "option_e", "option_f",
-    "explanation", "explanation_a", "explanation_b", "explanation_c", "explanation_d",
-    "explanation_e", "explanation_f", "derived_from"
+    "explanation", "derived_from"
   ];
 
   const done = [];
@@ -4219,14 +4211,12 @@ const MCQ_TEXT_COLUMNS_ = [
   "tags", "description", "source", "source_question_no",
   // naye bilingual columns
   "question_alt", "option_a_alt", "option_b_alt", "option_c_alt", "option_d_alt", "option_e_alt", "option_f_alt",
-  "explanation_alt", "explanation_a_alt", "explanation_b_alt", "explanation_c_alt",
-  "explanation_d_alt", "explanation_e_alt", "explanation_f_alt",
+  "explanation_alt",
   "source_qid", "source_page", "remark", "extra_link", "extra_link_label",
   "alt_source_question_no", "alt_source_qid", "alt_source_page",
   // purani list (waise hi)
   "question", "option_a", "option_b", "option_c", "option_d", "option_e", "option_f",
-  "explanation", "explanation_a", "explanation_b", "explanation_c", "explanation_d",
-  "explanation_e", "explanation_f", "derived_from"
+  "explanation", "derived_from"
 ];
 
 function safeSheetText_(value) {

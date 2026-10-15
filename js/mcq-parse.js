@@ -37,7 +37,7 @@
    @alt_assertion / @alt_reason), the block carries BOTH languages and
    produces ONE mcq (one id, question_group_id empty). Extra tags: @alt_language (default Hindi, with a warning),
    @alt_question, @alt_options (same count + same order as @options),
-   @alt_explanation, @alt_why_1..@alt_why_6, @source_qid, @source_page,
+   @alt_explanation, @source_qid, @source_page,
    @source_question_no, @alt_source_question_no, @alt_source_qid, @alt_source_page.
    A passage can carry @alt_passage_text (-> content_alt). A paper header
    can carry @source_path (-> collection.source_path). Every one of these
@@ -88,7 +88,7 @@
      6) <text>                    (optional — only if the question has a 6th option)
      @correct: 1|2|3|4|5|6        (required; legacy A-F also accepted)
      @explanation: <concept + why the correct option is right>
-     @why_1 .. @why_6: <why THAT option is right / wrong>   (optional)
+     (@why_1..@why_6 are no longer used; an old @why tag is simply ignored)
      @explanation / @difficulty / @language / @tags / @description /
      @exam / @year / @session / @source / @source_question_no  (all optional)
      @end
@@ -418,9 +418,6 @@
             }
 
             alt.explanation_alt = getField_(fields, "alt_explanation");
-            ["a", "b", "c", "d", "e", "f"].forEach(function (letter, i) {
-                alt["explanation_" + letter + "_alt"] = getField_(fields, "alt_why_" + (i + 1));
-            });
         } else if (altOptionsRaw) {
             warnings.push("@alt_options without @alt_question — second language ignored");
         }
@@ -548,14 +545,6 @@
         const derivedFrom = getField_(fields, "derived_from");
         if (derivedFrom) built.derived_from = derivedFrom;
 
-        // Per-option explanations (@why_1..@why_6 -> explanation_a..f).
-        // Only added when the tag is present and non-empty, so re-importing
-        // an older .md (or one without @why tags) never blanks notes that
-        // were already saved/edited in the sheet.
-        ["a", "b", "c", "d", "e", "f"].forEach(function (letter, i) {
-            const note = getField_(fields, "why_" + (i + 1));
-            if (note) built["explanation_" + letter] = note;
-        });
         return built;
     }
 

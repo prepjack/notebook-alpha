@@ -30,9 +30,9 @@ Legend: **W** = who writes · **R** = who reads · **UI** = editable in UI · **
 | 26 | source_question_no | question number printed in source | parser tag `@source_question_no` | not in mapMcqRow | no | no | DIFFERENT from new `source_qid` (qid = paper's Question ID). Keep both |
 | 27-28 | orphaned_at / orphan_reason | content-removed flag | Code.gs orphan logic | – | no | no | |
 | 29 | question_group_id | ties legacy EN+HI rows | bulk | mapMcqRow | no | no | LEGACY — not used by the site since Phase 7 (parser writes ""); column kept, never delete |
-| 30-33 | explanation_a..d | per-option notes | bulk, update_mcq_content | mapMcqRow (optionNotes) | content | yes | |
+| 30-33 | (removed) explanation_a..d | per-option notes | – | – | – | – | REMOVED Oct 2026: replaced by one combined `explanation` |
 | 34-35 | option_e / option_f | 5th/6th option | bulk, update_mcq_content | mapMcqRow | content | yes | |
-| 36-37 | explanation_e / explanation_f | notes | bulk, update_mcq_content | mapMcqRow | content | yes | |
+| 36-37 | (removed) explanation_e / explanation_f | notes | – | – | – | – | REMOVED Oct 2026 |
 | 38 | origin | pyq / book / ai … | bulk, update_mcq_content | mapMcqRow (normalizeMcqOrigin) | content | no | |
 | 39 | derived_from | – | bulk, update_mcq_content | mapMcqRow | content | yes | |
 
@@ -49,7 +49,7 @@ passage_id · node_id · kind · content · created_at · updated_at
 - W: `upsertRows_` (header-based, **no** text protection). R: handleGetMcqs → passages.
 
 ## NEW columns (added by `setupBilingualRowSchema`, at END of row 1)
-- **MCQs (23):** alt_language, question_alt, option_a_alt … option_f_alt (6), explanation_alt, explanation_a_alt … explanation_f_alt (6), source_qid, source_page, remark, extra_link, extra_link_label
+- **MCQs (23):** alt_language, question_alt, option_a_alt … option_f_alt (6), explanation_alt (the explanation_a_alt..f_alt columns were removed Oct 2026), source_qid, source_page, remark, extra_link, extra_link_label
 - **Collections (5):** pdf_url, answer_key_url, source_url, source_path, remark
 - **MCQ_Passages (1):** content_alt
 - New columns are added to: `MCQ_BANK_NEW_COLUMNS_` list pattern (setup), `MCQ_TEXT_COLUMNS_`, `MCQ_META_EDITABLE_COLUMNS` / `MCQ_CONTENT_EDITABLE_COLUMNS`, later `mapMcqRow` (Phase 4).

@@ -494,14 +494,6 @@ function mapMcqRow(row) {
         options: rawOptions.slice(0, optionCount),
         answer: correctIndex ?? 0,
         explanation: row.explanation || "",
-        optionNotes: [
-            row.explanation_a || "",
-            row.explanation_b || "",
-            row.explanation_c || "",
-            row.explanation_d || "",
-            row.explanation_e || "",
-            row.explanation_f || ""
-        ].slice(0, optionCount),
         tags: row.tags || "",
         language: row.language || "",
         description: row.description || "",
@@ -524,9 +516,6 @@ function mapMcqRow(row) {
         option_c_alt: row.option_c_alt || "", option_d_alt: row.option_d_alt || "",
         option_e_alt: row.option_e_alt || "", option_f_alt: row.option_f_alt || "",
         explanation_alt: row.explanation_alt || "",
-        explanation_a_alt: row.explanation_a_alt || "", explanation_b_alt: row.explanation_b_alt || "",
-        explanation_c_alt: row.explanation_c_alt || "", explanation_d_alt: row.explanation_d_alt || "",
-        explanation_e_alt: row.explanation_e_alt || "", explanation_f_alt: row.explanation_f_alt || "",
         source_qid: row.source_qid || "",
         source_question_no: row.source_question_no ?? "",
         alt_source_question_no: row.alt_source_question_no ?? "",
@@ -551,21 +540,15 @@ function mapMcqRow(row) {
 // alt option / explanation falls back to the first language's text, so
 // the screen never shows an empty option.
 function buildMcqAltVariant_(row, altKey) {
-    const n = row.options.length;
     const altOpts = [
         row.option_a_alt, row.option_b_alt, row.option_c_alt,
         row.option_d_alt, row.option_e_alt, row.option_f_alt
-    ];
-    const altNotes = [
-        row.explanation_a_alt, row.explanation_b_alt, row.explanation_c_alt,
-        row.explanation_d_alt, row.explanation_e_alt, row.explanation_f_alt
     ];
     return Object.assign({}, row, {
         language: altKey,
         question: row.question_alt || row.question,
         options: row.options.map((o, i) => String(altOpts[i] || "").trim() ? String(altOpts[i]) : o),
         explanation: row.explanation_alt || row.explanation,
-        optionNotes: row.optionNotes.map((t, i) => String(altNotes[i] || "").trim() ? String(altNotes[i]) : t).slice(0, n),
         isAltVariant: true
     });
 }
@@ -674,33 +657,10 @@ function convertApiDataToMcqData(apiData) {
 
 // Path of a question's own topic (Subject › Unit › Chapter › Topic), shown
 // small above each question. Long paths keep only the last 3 levels.
-// Feedback body: the general explanation, then (if the sheet has per-option
-// notes) the note for what the learner picked, the correct option, and the
-// remaining options collapsed. Rows without notes show only `explanation`.
+// Feedback body: ONE combined explanation (right option + why each other
+// option is wrong), shown the same way whichever option the learner picked.
 function mcqFeedbackBodyHtml(q, sel) {
-    const general = q.explanation ? `<div>${renderRichInline(q.explanation, true)}</div>` : "";
-    const notes = q.optionNotes || [];
-    if (!notes.some(n => n)) return general;
-
-    const item = (i, tag) => notes[i] ? `
-        <div style="margin-top:8px;padding:8px 10px;border-left:3px solid ${i === q.answer ? "#2e7d4f" : "#b5533c"};background:rgba(0,0,0,0.03);border-radius:4px;">
-            <strong>${tag}Option ${i + 1}</strong><br>${renderRichInline(notes[i])}
-        </div>` : "";
-
-    const shown = new Set();
-    let html = general;
-    if (sel !== undefined && sel !== q.answer) {
-        html += item(sel, "Your choice — ");
-        shown.add(sel);
-    }
-    html += item(q.answer, sel === q.answer ? "Your choice · Correct — " : "Correct answer — ");
-    shown.add(q.answer);
-
-    const rest = (q.options || []).map((_, i) => i).filter(i => !shown.has(i)).map(i => item(i, "")).join("");
-    if (rest.trim()) {
-        html += `<details style="margin-top:8px;"><summary style="cursor:pointer;">Other options</summary>${rest}</details>`;
-    }
-    return html;
+    return q.explanation ? `<div>${renderRichInline(q.explanation, true)}</div>` : "";
 }
 
 // Comprehension MCQs: shows the shared passage above the question.
@@ -3262,13 +3222,6 @@ function openMcqMetaModal(mcq, options) {
                 <label for="mcq-edit-explanation">Explanation</label>
                 <textarea id="mcq-edit-explanation" rows="3">${mcqEscapeHtml(mcq.explanation || "")}</textarea>
 
-                ${[1, 2, 3, 4, 5, 6].map(n => {
-                    const hide = n > shownOptionCount ? ' style="display:none"' : "";
-                    return `
-                <label for="mcq-edit-why-${n}" data-opt-n="${n}"${hide}>Option ${n} — why right / wrong</label>
-                <textarea id="mcq-edit-why-${n}" data-opt-n="${n}" rows="2"${hide}>${mcqEscapeHtml(mcq.optionNotes?.[n - 1] || "")}</textarea>`;
-                }).join("")}
-
                 <hr>
 
                 <label for="mcq-meta-topic">Topic</label>
@@ -3441,14 +3394,7 @@ function setupMcqMetaTabs_(modal, mcq, startTab) {
             }).join("")}
             <button type="button" id="mcq-alt-add-option" class="content-action"${startRows >= 6 ? ' style="display:none"' : ""}>+ Add option</button>
             <label for="mcq-alt-explanation">Explanation (second language)</label>
-            <textarea id="mcq-alt-explanation" rows="3">${esc(mcq.explanation_alt || "")}</textarea>
-            ${[1, 2, 3, 4, 5, 6].map(n => {
-                const l = letters[n - 1];
-                const hide = n > startRows ? ' style="display:none"' : "";
-                return `
-            <label for="mcq-alt-why-${n}" data-alt-n="${n}"${hide}>Option ${n} — why right / wrong (second language)</label>
-            <textarea id="mcq-alt-why-${n}" data-alt-n="${n}" rows="2"${hide}>${esc(mcq["explanation_" + l + "_alt"] || "")}</textarea>`;
-            }).join("")}`;
+            <textarea id="mcq-alt-explanation" rows="3">${esc(mcq.explanation_alt || "")}</textarea>`;
         box.insertBefore(aPanel, actions);
 
         const showAltRows = count => {
@@ -3603,10 +3549,6 @@ async function saveMcqMeta(mcq) {
     if (originValue !== normalizeMcqOrigin(mcq.origin)) contentFields.origin = originValue;
     const derivedFromValue = document.getElementById("mcq-meta-derived-from")?.value.trim() || "";
     if (derivedFromValue !== String(mcq.derived_from || "")) contentFields.derived_from = derivedFromValue;
-    optionLetters.forEach((letter, i) => {
-        const note = document.getElementById(`mcq-edit-why-${i + 1}`)?.value.trim() || "";
-        if (note !== String(mcq.optionNotes?.[i] || "")) contentFields["explanation_" + letter] = note;
-    });
 
     // PHASE 6 — second language (only exists when the Language 2 tab is open).
     if (document.getElementById("mcq-alt-question")) {
@@ -3635,7 +3577,6 @@ async function saveMcqMeta(mcq) {
         ];
         optionLetters.forEach((letter, i) => {
             altPairs.push(["option_" + letter + "_alt", altOpts[i], mcq["option_" + letter + "_alt"]]);
-            altPairs.push(["explanation_" + letter + "_alt", document.getElementById("mcq-alt-why-" + (i + 1))?.value.trim() || "", mcq["explanation_" + letter + "_alt"]]);
         });
         altPairs.forEach(([col, now, before]) => {
             if (now !== String(before || "")) contentFields[col] = now;

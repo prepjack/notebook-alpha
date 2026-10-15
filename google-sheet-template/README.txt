@@ -23,7 +23,7 @@ resource_id | topic_id | title | type | source | url | page_ref | description | 
 3. MCQs
 mcq_id | topic_id | question | option_a | option_b | option_c | option_d | correct_option | explanation
    (early template only. The live MCQs sheet has more columns, including
-   option_e, option_f and explanation_a..explanation_f. See section 10.)
+   option_e, option_f. See section 10.)
 
 IMPORTANT:
 - topic_id is the stable connection between Topics, Resources and MCQs.
@@ -354,10 +354,10 @@ sometimes 5 (for example a 5th option "None of these") or 6. Maximum 6.
 MCQs sheet columns involved:
 
     option_a | option_b | option_c | option_d | option_e | option_f
-    explanation_a | explanation_b | ... | explanation_f   (why each option is right/wrong)
+    explanation   (ONE combined explanation: why the right option is right + why each other option is wrong)
     correct_option   (1-6; 1 = first option)
 
-- option_e / option_f (and explanation_e / explanation_f) are left empty on
+- option_e / option_f are left empty on
   normal 4-option questions. Empty trailing options are never shown on the site.
 - Options must be continuous: no empty option between filled ones.
 - correct_option must point at a filled option.
