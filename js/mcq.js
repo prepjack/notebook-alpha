@@ -659,8 +659,29 @@ function convertApiDataToMcqData(apiData) {
 // small above each question. Long paths keep only the last 3 levels.
 // Feedback body: ONE combined explanation (right option + why each other
 // option is wrong), shown the same way whichever option the learner picked.
+// Lines starting with ✅ get a green side bar, lines starting with ❌ a red
+// one; any other text (intro, extra notes) is shown plain.
 function mcqFeedbackBodyHtml(q, sel) {
-    return q.explanation ? `<div>${renderRichInline(q.explanation, true)}</div>` : "";
+    const text = String(q.explanation || "").trim();
+    if (!text) return "";
+    if (!/^\s*[✅❌]/m.test(text)) return `<div>${renderRichInline(text, true)}</div>`;
+
+    const groups = [];
+    text.split(/\r?\n/).forEach(line => {
+        const m = line.match(/^\s*(✅|❌)/);
+        if (m) groups.push({ mark: m[1], lines: [line] });
+        else if (groups.length) groups[groups.length - 1].lines.push(line);
+        else groups.push({ mark: "", lines: [line] });
+    });
+
+    return groups.map(g => {
+        const body = g.lines.join("\n").trim();
+        if (!body) return "";
+        const html = renderRichInline(body, true);
+        if (!g.mark) return `<div>${html}</div>`;
+        const color = g.mark === "✅" ? "#2e7d4f" : "#b5533c";
+        return `<div style="margin-top:8px;padding:8px 10px;border-left:3px solid ${color};background:rgba(0,0,0,0.03);border-radius:4px;">${html}</div>`;
+    }).join("");
 }
 
 // Comprehension MCQs: shows the shared passage above the question.
