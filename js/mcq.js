@@ -2595,6 +2595,7 @@ function closeAddMcqModal() {
         document.removeEventListener("click", mcqTagOutsideClickHandler_);
         mcqTagOutsideClickHandler_ = null;
     }
+    window.mcqHubRefresh?.();   // if the MCQ Hub is open underneath, redraw it
 }
 
 // ALPHA-PLUS — MCQ LINK: folder mode (multiple .md files).

@@ -135,13 +135,16 @@ function mcqHubRender_() {
         openMcqCollectionEditModal(b.dataset.hubEdit);
     }));
     body.querySelector("#mcq-hub-open-add")?.addEventListener("click", () => {
-        closeMcqHub();
+        // Hub stays open underneath; closing Add MCQs returns to the Hub.
         openAddMcqModal();
     });
 }
 
 function mcqHubKeydown_(event) {
-    if (event.key === "Escape") closeMcqHub();
+    if (event.key !== "Escape") return;
+    // A modal opened on top of the Hub (Add MCQs / Edit paper info) closes first.
+    if (document.getElementById("add-mcq-modal") || document.getElementById("mcq-collection-edit-modal")) return;
+    closeMcqHub();
 }
 
 function closeMcqHub() {
