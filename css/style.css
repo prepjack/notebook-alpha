@@ -3944,6 +3944,43 @@ button.danger:hover,.mcq-collection-link.danger:hover{background:#fdeceb}
     .add-resource-modal.mcq-hub-modal{width:100vw;max-width:100vw;height:100vh;height:100dvh;max-height:100dvh;border-radius:0;border:0}
 }
 
+/* MCQ SELECTION + EXPORT (H2) */
+.mcq-select-label{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#5d685f;cursor:pointer;padding:6px 8px;min-height:32px;border-radius:6px}
+.mcq-select-label:hover{background:#f3f6f2}
+.mcq-select-box{width:18px;height:18px;margin:0;cursor:pointer}
+.mcq-number{position:relative}
+.mcq-number.mcq-picked::after{content:"";position:absolute;top:3px;right:3px;width:7px;height:7px;border-radius:50%;background:#c27a00}
+.mcq-selection-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 10px;margin:6px 0;background:#fff8e6;border:1px solid #e6cf8f;border-radius:8px;font-size:13px;font-weight:700;color:#6b4b00}
+.mcq-selection-bar[hidden]{display:none}
+.mcq-hub-sel-row{padding:8px 18px 0}
+.mcq-hub-sel-menu{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px}
+.mcq-hub-sel-menu[hidden]{display:none}
+.mcq-exp-row{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:8px}
+.mcq-exp-row label{display:flex;flex-direction:column;gap:3px;font-size:12px;font-weight:700;color:#5d685f;flex:1;min-width:140px}
+.mcq-exp-row label[hidden]{display:none}
+.mcq-exp-row select{padding:6px;font:inherit;font-size:13px}
+.mcq-exp-checks{display:flex;flex-wrap:wrap;gap:6px 14px;margin:6px 0}
+.mcq-exp-check{display:inline-flex;align-items:center;gap:5px;font-size:13px;min-height:30px}
+.mcq-exp-preview{width:100%;box-sizing:border-box;margin:8px 0;padding:8px;font-size:13px;line-height:1.45;font-family:inherit;border:1px solid #d8dfd8;border-radius:6px;resize:vertical;background:#fafbfa}
+.mcq-hub-card-actions button:disabled{opacity:.5;cursor:not-allowed}
+#mcq-print-root{display:none}
+.mcq-print-doc{font-family:inherit;color:#000}
+.mcq-print-title{font-size:20px;margin:0 0 4px}
+.mcq-print-date{font-size:11px;color:#555;margin-bottom:14px}
+.mcq-print-q{break-inside:avoid;page-break-inside:avoid;margin:0 0 14px;padding-bottom:8px;border-bottom:1px solid #ddd}
+.mcq-print-qtext{font-size:14px;margin-bottom:5px}
+.mcq-print-opt{font-size:13px;margin:2px 0 2px 14px}
+.mcq-print-correct,.mcq-print-expl,.mcq-print-meta{font-size:12px;margin-top:5px}
+.mcq-print-meta{color:#555}
+.mcq-print-lang{font-size:11px;font-weight:700;color:#555;margin:6px 0 2px}
+.mcq-print-passage{font-size:12px;border-left:3px solid #999;padding:4px 8px;margin-bottom:6px;background:#f5f5f5}
+.mcq-print-key{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:14px}
+@media print{
+    body.mcq-printing > *:not(#mcq-print-root){display:none!important}
+    body.mcq-printing #mcq-print-root{display:block!important}
+    body.mcq-printing{background:#fff!important}
+}
+
 /* =========================================================
    ALPHA-PLUS — INDEX TERMS: verify-after-write warning
    Small, self-dismissing, non-blocking corner note — see

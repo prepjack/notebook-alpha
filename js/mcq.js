@@ -83,6 +83,11 @@ let selectedMcqLanguage = "";
 // ORIGIN filter: "" = all, otherwise one of pyq / old / book / ai.
 let selectedMcqOrigin = "";
 let currentCollectionView = null;
+
+// H2 — question selection (mcq_id strings), shared by Export (and later Correct/Review).
+// Cleared when the topic changes; kept when switching papers / tabs.
+const mcqSelectedIds = new Set();
+let mcqSelectionTopicId_ = "";
 let mcqPreviewRows = [];
 
 function escapeHtml(value) {
@@ -493,6 +498,8 @@ function mapMcqRow(row) {
         question: row.question || "",
         options: rawOptions.slice(0, optionCount),
         answer: correctIndex ?? 0,
+        // H2 — raw sheet value, so export can tell "no answer" from "A".
+        correct_option: row.correct_option ?? "",
         explanation: row.explanation || "",
         tags: row.tags || "",
         language: row.language || "",
@@ -989,6 +996,12 @@ async function loadFullMcqCollection(collectionId) {
 }
 
 function applyMcqPracticeFilters() {
+    // H2 — a different topic means a different question set: drop the old ticks.
+    const selTopicId = currentMcqTopic ? String(currentMcqTopic.id) : "";
+    if (selTopicId !== mcqSelectionTopicId_) {
+        mcqSelectionTopicId_ = selTopicId;
+        if (mcqSelectedIds.size) { mcqSelectedIds.clear(); setTimeout(mcqUpdateSelectionUi_, 0); }
+    }
     syncMcqOriginSelection();
     let slots = buildMcqSlots(allLoadedMcqs);
 
@@ -1042,6 +1055,49 @@ function applyMcqPracticeFilters() {
     renderMcqView();
 }
 
+// ---- H2 — selection (tick boxes) -------------------------------------
+function mcqSelectBoxHtml_(q) {
+    const id = String((q && q.id) || "");
+    if (!id) return "";
+    return `<label class="mcq-select-label" title="Select for export"><input type="checkbox" class="mcq-select-box" data-mcq-id="${escapeHtml(id)}"${mcqSelectedIds.has(id) ? " checked" : ""}><span>Select</span></label>`;
+}
+
+// Updates ticks, navigator dots, selection bar, Hub chip — never re-renders the question.
+function mcqUpdateSelectionUi_() {
+    const n = mcqSelectedIds.size;
+    document.querySelectorAll("#mcq-question .mcq-select-box").forEach(cb => {
+        cb.checked = mcqSelectedIds.has(cb.dataset.mcqId);
+    });
+    document.querySelectorAll("#mcq-question-grid .mcq-number").forEach(btn => {
+        const q = currentMcqs[Number(btn.dataset.questionIndex)];
+        btn.classList.toggle("mcq-picked", !!q && mcqSelectedIds.has(String(q.id)));
+    });
+    const bar = document.getElementById("mcq-selection-bar");
+    if (bar) {
+        bar.hidden = n === 0;
+        bar.innerHTML = n ? `<span>✔ ${n} selected</span><button type="button" class="content-action" data-sel-act="export">Export</button><button type="button" class="content-action" data-sel-act="clear">Clear</button>` : "";
+    }
+    const chip = document.getElementById("mcq-hub-sel-chip");
+    if (chip) chip.textContent = `✔ ${n} selected`;
+    window.mcqExportOnSelectionChange_?.();
+}
+
+(function setupMcqSelectionListeners() {
+    document.getElementById("mcq-question")?.addEventListener("change", event => {
+        const cb = event.target.closest ? event.target.closest(".mcq-select-box") : null;
+        if (!cb) return;
+        const id = cb.dataset.mcqId;
+        if (cb.checked) mcqSelectedIds.add(id); else mcqSelectedIds.delete(id);
+        mcqUpdateSelectionUi_();
+    });
+    document.getElementById("mcq-selection-bar")?.addEventListener("click", event => {
+        const act = event.target.closest ? event.target.closest("[data-sel-act]") : null;
+        if (!act) return;
+        if (act.dataset.selAct === "clear") { mcqSelectedIds.clear(); mcqUpdateSelectionUi_(); }
+        else if (act.dataset.selAct === "export") window.openMcqHub?.({ tab: "export" });
+    });
+})();
+
 function renderMcqView() {
     const questionArea = document.getElementById("mcq-question");
     const grid = document.getElementById("mcq-question-grid");
@@ -1064,6 +1120,8 @@ function renderMcqView() {
                 attemptedQuestions.has(index) ? "attempted" : ""
             } ${
                 index === currentMcqIndex ? "current" : ""
+            } ${
+                mcqSelectedIds.has(String(mcq.id)) ? "mcq-picked" : ""
             }"
             data-question-index="${index}"
         >${index + 1}</button>
@@ -1102,7 +1160,7 @@ function renderMcqView() {
                     <div class="mcq-all-item">
                         <div class="mcq-question-number mcq-question-heading">
                             <span>Question ${i + 1} of ${currentMcqs.length}</span>
-                            <span class="mcq-head-tools">${mcqOriginChipHtml_(q, i)}${mcqInfoButtonHtml_(i)}</span>
+                            <span class="mcq-head-tools">${mcqSelectBoxHtml_(q)}${mcqOriginChipHtml_(q, i)}${mcqInfoButtonHtml_(i)}</span>
                         </div>
                         ${q.languages.length > 1 ? `
                             <div class="mcq-lang-toggle" role="group" aria-label="Question language">
@@ -1190,6 +1248,7 @@ function renderMcqView() {
                     ` : ""}
                 </div>
                 <span class="mcq-head-tools">
+                    ${mcqSelectBoxHtml_(mcq)}
                     ${mcqOriginChipHtml_(mcq, currentMcqIndex)}
                     ${mcqInfoButtonHtml_(currentMcqIndex)}
                     <button type="button" class="mcq-edit-meta" id="mcq-edit-meta" title="Edit question metadata" aria-label="Edit question metadata">✏️</button>

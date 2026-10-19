@@ -13,7 +13,8 @@ let mcqHubPaperId_ = "";
 const MCQ_HUB_TABS_ = [
     ["papers", "PAPERS"],
     ["info", "INFO"],
-    ["import", "IMPORT"]
+    ["import", "IMPORT"],
+    ["export", "EXPORT"]
 ];
 
 // Papers that really have questions in the loaded list, with counts.
@@ -119,6 +120,7 @@ function mcqHubRender_() {
     const body = modal.querySelector("#mcq-hub-body");
     if (mcqHubTab_ === "info") body.innerHTML = mcqHubInfoTabHtml_(mcqHubPaperId_);
     else if (mcqHubTab_ === "import") body.innerHTML = mcqHubImportTabHtml_();
+    else if (mcqHubTab_ === "export") { body.innerHTML = mcqExportTabHtml_(); mcqExportBind_(body); }
     else body.innerHTML = mcqHubPapersTabHtml_(papers, loose);
 
     body.querySelectorAll("[data-hub-view]").forEach(b => b.addEventListener("click", () => {
@@ -175,6 +177,15 @@ function openMcqHub(opts) {
                     <label for="mcq-hub-paper">Paper</label>
                     <select id="mcq-hub-paper"></select>
                 </div>
+                <div class="mcq-hub-sel-row">
+                    <button type="button" class="content-action" id="mcq-hub-sel-chip">✔ ${mcqSelectedIds.size} selected</button>
+                    <div class="mcq-hub-sel-menu" id="mcq-hub-sel-menu" hidden>
+                        <button type="button" class="content-action" data-hub-sel="paper">Select all in this paper</button>
+                        <button type="button" class="content-action" data-hub-sel="visible">Select visible</button>
+                        <button type="button" class="content-action" data-hub-sel="invert">Invert</button>
+                        <button type="button" class="content-action" data-hub-sel="clear">Clear</button>
+                    </div>
+                </div>
                 <div class="content-layer-tabs mcq-hub-tabs">
                     ${MCQ_HUB_TABS_.map(([key, label]) =>
                         `<button type="button" class="content-layer-tab" data-hub-tab="${key}">${label}</button>`).join("")}
@@ -197,6 +208,29 @@ function openMcqHub(opts) {
         mcqHubRender_();
     }));
     document.addEventListener("keydown", mcqHubKeydown_);
+
+    modal.querySelector("#mcq-hub-sel-chip").addEventListener("click", () => {
+        const menu = modal.querySelector("#mcq-hub-sel-menu");
+        menu.hidden = !menu.hidden;
+    });
+    modal.querySelectorAll("[data-hub-sel]").forEach(btn => btn.addEventListener("click", async () => {
+        const act = btn.dataset.hubSel;
+        const visibleIds = (currentMcqs || []).map(q => String(q.id)).filter(Boolean);
+        if (act === "clear") mcqSelectedIds.clear();
+        else if (act === "visible") visibleIds.forEach(id => mcqSelectedIds.add(id));
+        else if (act === "invert") visibleIds.forEach(id => { if (mcqSelectedIds.has(id)) mcqSelectedIds.delete(id); else mcqSelectedIds.add(id); });
+        else if (act === "paper") {
+            try {
+                const paper = await mcqExportGetPaper_(mcqHubPaperId_);
+                paper.rows.forEach(r => { if (r.id) mcqSelectedIds.add(String(r.id)); });
+            } catch (err) {
+                console.warn("Select all in paper failed:", err);
+                alert("Could not load this paper. Please try again.");
+                return;
+            }
+        }
+        mcqUpdateSelectionUi_();
+    }));
 
     mcqHubRender_();
 }
