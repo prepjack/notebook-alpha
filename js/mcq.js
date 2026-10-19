@@ -319,8 +319,8 @@ function mcqInfoHtml_(q) {
         + sourceHtml + editPaperBtn;
 }
 
-// PHASE 6 — remembers the papers shown in the "Paper info" popover so it can
-// be redrawn right after "Edit paper info" is saved (no page reload needed).
+// PHASE 6 — remembers the shared papers so the MCQ Hub can be redrawn right
+// after "Edit paper info" is saved (no page reload needed).
 let lastMcqPaperShared_ = [];
 
 // PHASE 6 — "Edit paper info": the facts that belong to the WHOLE paper
@@ -885,9 +885,13 @@ function renderMcqCollectionNotes() {
         const info = getMcqCollectionInfo(currentCollectionView.id);
         host.innerHTML = `<div class="mcq-collection-note">
             <strong>Full paper:</strong> ${escapeHtml(info?.title || currentCollectionView.id)}
+            <button type="button" id="mcq-open-hub-from-banner" class="mcq-collection-link">🗂️ Open in Hub</button>
             <button type="button" id="mcq-back-to-topic" class="mcq-collection-link">Back to topic</button>
             <button type="button" id="mcq-delete-collection" class="mcq-collection-link danger">🗑️ Delete this entire collection</button>
         </div>`;
+        document.getElementById("mcq-open-hub-from-banner")?.addEventListener("click", () =>
+            openMcqHub({ paperId: currentCollectionView.id, tab: "info" })
+        );
         document.getElementById("mcq-back-to-topic")?.addEventListener("click", () => {
             currentCollectionView = null;
             selectedMcqTags = new Set();
@@ -919,79 +923,10 @@ function renderMcqCollectionNotes() {
 // now live behind a toolbar button (hidden when there's nothing to show)
 // so the question area stays uncluttered — see renderMcqCollectionNotes.
 function renderMcqPaperSourcesToolbar(shared) {
-    const btn = document.getElementById("mcq-paper-sources-btn");
-    const popover = document.getElementById("mcq-paper-sources-popover");
-    if (!btn || !popover) return;
-
+    // The 📄 Paper info popover was merged into the 🗂️ MCQ Hub (js/mcq-hub.js).
     lastMcqPaperShared_ = shared;
-    if (!shared.length) {
-        btn.hidden = true;
-        popover.hidden = true;
-        popover.innerHTML = "";
-        return;
-    }
-
-    btn.hidden = false;
-    popover.innerHTML = shared.map(([id]) => {
-        const info = getMcqCollectionInfo(id);
-        const paperLinks = [
-            mcqPdfButtonsHtml_(info?.pdf_url),
-            mcqInfoLinkHtml_(info?.source_url, "Open source website"),
-            mcqInfoLinkHtml_(info?.answer_key_url, "Answer key")
-        ].join("");
-        return `<div class="mcq-collection-note">
-            <strong>${escapeHtml(info?.title || id)}</strong>
-            ${paperLinks}
-            <button type="button" class="mcq-collection-link" data-collection-id="${escapeHtml(id)}">View full paper in order</button>
-            ${info ? `<button type="button" class="mcq-collection-link" data-edit-collection-id="${escapeHtml(id)}">✏️ Edit paper info</button>` : ""}
-        </div>`;
-    }).join("");
-    popover.querySelectorAll("[data-edit-collection-id]").forEach(button => {
-        button.addEventListener("click", () => {
-            popover.hidden = true;
-            openMcqCollectionEditModal(button.dataset.editCollectionId);
-        });
-    });
-    popover.querySelectorAll("[data-collection-id]").forEach(button => {
-        button.addEventListener("click", () => {
-            popover.hidden = true;
-            loadFullMcqCollection(button.dataset.collectionId);
-        });
-    });
+    window.mcqHubRefresh?.();
 }
-
-function positionMcqPaperSourcesPopover() {
-    const btn = document.getElementById("mcq-paper-sources-btn");
-    const popover = document.getElementById("mcq-paper-sources-popover");
-    if (!btn || !popover) return;
-    const rect = btn.getBoundingClientRect();
-    popover.style.top = `${rect.bottom + 6}px`;
-    popover.style.left = `${Math.max(8, rect.left)}px`;
-}
-
-document.getElementById("mcq-paper-sources-btn")?.addEventListener("click", () => {
-    const popover = document.getElementById("mcq-paper-sources-popover");
-    if (!popover) return;
-    if (popover.hidden) {
-        positionMcqPaperSourcesPopover();
-        popover.hidden = false;
-    } else {
-        popover.hidden = true;
-    }
-});
-
-document.addEventListener("click", event => {
-    const popover = document.getElementById("mcq-paper-sources-popover");
-    const btn = document.getElementById("mcq-paper-sources-btn");
-    if (!popover || popover.hidden) return;
-    if (event.target === btn || popover.contains(event.target)) return;
-    popover.hidden = true;
-});
-
-window.addEventListener("resize", () => {
-    const popover = document.getElementById("mcq-paper-sources-popover");
-    if (popover && !popover.hidden) positionMcqPaperSourcesPopover();
-});
 
 let currentCollectionViewBackup = [];
 let currentCollectionViewApiBackup = null;
@@ -3652,8 +3587,6 @@ async function refreshCurrentMcqTopic() {
     applyMcqPracticeFilters();
 }
 
-document.getElementById("mcq-add-open")?.addEventListener("click", openAddMcqModal);
-
 /* PHASE 7 — MCQ mobile question-navigator drawer. */
 window.initMobileDrawers?.({
     headerSelector: ".app-header",
@@ -3663,9 +3596,9 @@ window.initMobileDrawers?.({
     ]
 });
 
-/* ROLL-UP TOGGLE — "Include sub-topics" checkbox next to the Paper info / paper-sources bar. */
+/* ROLL-UP TOGGLE — "Include sub-topics" checkbox next to the MCQ Hub button. */
 (function setupMcqSubtopicToggle() {
-    const anchor = document.getElementById("mcq-paper-sources-btn");
+    const anchor = document.getElementById("mcq-hub-open");
     if (!anchor || document.getElementById("mcq-include-sub")) return;
 
     anchor.insertAdjacentHTML("afterend",
