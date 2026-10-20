@@ -1081,6 +1081,7 @@ function mcqUpdateSelectionUi_() {
     if (chip) chip.textContent = `✔ ${n} selected`;
     window.mcqExportOnSelectionChange_?.();
     window.mcqCorrectOnSelectionChange_?.();
+    window.mcqReviewOnSelectionChange_?.();
 }
 
 (function setupMcqSelectionListeners() {
@@ -2046,6 +2047,11 @@ function buildMcqBilingualPromptLines_(primary, second, collection) {
     ];
 }
 
+// H4 — the ONE source of the explanation-style rule. Used by the Add MCQs AI prompt
+// below AND by the Hub "AI correction" prompt (js/mcq-review.js), so corrected
+// explanations render exactly like new ones.
+const MCQ_EXPLANATION_FORMAT_RULE_ = "it is shown to the learner whether they picked the right or a wrong option, so write it as ONE message. Line 1: start with \"✅ Correct: \" then the correct option's text in **bold**, then 1-2 sentences on the concept and why it is correct. Then ONE line for EVERY other option (all of them, in the same order as the options), each starting with \"❌ \" then that option's text in **bold**, then 1 sentence on why it is wrong and what it actually refers to. Put a blank line between lines so each option is its own paragraph. Refer to an option by its TEXT, never by its number or letter. If an option's text is very long, shorten it with an ellipsis (...) but keep it recognisable. Keep the whole explanation short.";
+
 function buildMcqAiPrompt() {
     const collection = document.getElementById("mcq-collection")?.value.trim() || "";
     const description = document.getElementById("mcq-description")?.value.trim() || "";
@@ -2126,7 +2132,7 @@ function buildMcqAiPrompt() {
         "- Keep question, option, correct answer, and explanation content faithful to the supplied source.",
         "- Number of options: normally 4. If the source question itself has 5 or 6 options (for example a 5th option \"None of these\"), keep exactly that many (5) and 6) lines). Never invent extra options to pad a question, and never drop an option the source has.",
         "- Do NOT write @why_1 ... @why_6 or @alt_why_1 ... @alt_why_6. All explanation goes in ONE @explanation (and ONE @alt_explanation for the second language).",
-        "- EXPLANATION FORMAT (@explanation and @alt_explanation): it is shown to the learner whether they picked the right or a wrong option, so write it as ONE message. Line 1: start with \"✅ Correct: \" then the correct option's text in **bold**, then 1-2 sentences on the concept and why it is correct. Then ONE line for EVERY other option (all of them, in the same order as the options), each starting with \"❌ \" then that option's text in **bold**, then 1 sentence on why it is wrong and what it actually refers to. Put a blank line between lines so each option is its own paragraph. Refer to an option by its TEXT, never by its number or letter. If an option's text is very long, shorten it with an ellipsis (...) but keep it recognisable. Keep the whole explanation short.",
+        "- EXPLANATION FORMAT (@explanation and @alt_explanation): " + MCQ_EXPLANATION_FORMAT_RULE_,
         "- Write @explanation in the SAME language as the question; @alt_explanation in the second language with the same structure.",
         "",
         "---",

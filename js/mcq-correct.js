@@ -329,12 +329,18 @@ if (typeof window !== "undefined") {
     window.mcqCorrectHasUnsaved_ = function () { return mcqCorrectCount_() > 0; };
 
     // true = OK to leave (nothing unsaved, or the person agreed to discard).
+    // H4: also covers unsaved Review drafts (js/mcq-review.js).
     window.mcqCorrectConfirmDiscard_ = function () {
         const n = mcqCorrectCount_();
-        if (!n) return true;
-        if (!confirm("You have " + n + " unsaved answer change" + (n === 1 ? "" : "s") + ". Discard them?")) return false;
+        const r = window.mcqReviewDraftCount_ ? window.mcqReviewDraftCount_() : { questions: 0, fields: 0 };
+        if (!n && !r.fields) return true;
+        const parts = [];
+        if (n) parts.push(n + " unsaved answer change" + (n === 1 ? "" : "s"));
+        if (r.fields) parts.push(r.fields + " unsaved review edit" + (r.fields === 1 ? "" : "s") + " in " + r.questions + " question" + (r.questions === 1 ? "" : "s"));
+        if (!confirm("You have " + parts.join(" and ") + ". Discard them?")) return false;
         mcqCorrectState_.pending = {};
         mcqCorrectState_.paste = null;
+        if (window.mcqReviewDiscardAll_) window.mcqReviewDiscardAll_();
         return true;
     };
 
@@ -532,7 +538,7 @@ function mcqCorrectDrawResult_() {
         el.innerHTML = `<div class="mcq-key-result is-ok">✔ Saved ${r.saved}/${r.total} and confirmed from the Sheet.
             <div class="mcq-hub-note">Answer changed — check the explanation too.</div>
             <div class="mcq-hub-card-actions">
-                <button type="button" class="content-action" data-key-act="review">Select these ${n} for review</button>
+                <button type="button" class="content-action" data-key-act="review">Review these ${n} →</button>
                 ${undoBtn}
             </div></div>`;
         return;
@@ -702,7 +708,7 @@ function mcqCorrectClick_(event) {
     } else if (a === "review") {
         st.lastChangedIds.forEach(id => mcqSelectedIds.add(id));
         mcqUpdateSelectionUi_();
-        act.textContent = "✔ Selected " + st.lastChangedIds.length + " (Review mode comes next)";
-        act.disabled = true;
+        if (window.mcqReviewOpenSub_) window.mcqReviewOpenSub_("review", { scope: "selected" });
+        else { act.textContent = "✔ Selected " + st.lastChangedIds.length; act.disabled = true; }
     }
 }

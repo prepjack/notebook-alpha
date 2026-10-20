@@ -408,6 +408,7 @@ function mcqExportTabHtml_() {
                 <button type="button" class="content-action" id="mcq-exp-print">🖨️ Print / Save as PDF</button>
                 <button type="button" class="content-action" id="mcq-exp-md">⬇️ .md</button>
                 <button type="button" class="content-action" id="mcq-exp-csv">⬇️ .csv</button>
+                <button type="button" class="content-action" id="mcq-exp-to-ai">🤖 AI correction</button>
             </div>
             <div id="mcq-exp-status" class="mcq-hub-note" aria-live="polite"></div>
         </div>`;
@@ -593,6 +594,11 @@ function mcqExportBind_(body) {
         mcqExportDownload_("\uFEFF" + mcqExportCsvString_(mcqExportLast_.built.csvRows),
             mcqExportFileName_(mcqExportLast_.res.title, "csv"), "text/csv;charset=utf-8");
         mcqExportStatus_("Downloaded .csv (" + mcqExportLast_.built.count + " questions)");
+    });
+
+    // H4 shortcut: same questions, but as an AI correction prompt (Correct tab).
+    body.querySelector("#mcq-exp-to-ai")?.addEventListener("click", () => {
+        if (window.mcqReviewOpenAi_) window.mcqReviewOpenAi_(mcqExportScope_ === "paper" ? "paper" : "selected");
     });
 
     mcqExportRefresh_();

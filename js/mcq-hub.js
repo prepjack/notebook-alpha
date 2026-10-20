@@ -121,7 +121,7 @@ function mcqHubRender_() {
     const body = modal.querySelector("#mcq-hub-body");
     if (mcqHubTab_ === "info") body.innerHTML = mcqHubInfoTabHtml_(mcqHubPaperId_);
     else if (mcqHubTab_ === "import") body.innerHTML = mcqHubImportTabHtml_();
-    else if (mcqHubTab_ === "correct") { body.innerHTML = mcqCorrectTabHtml_(); mcqCorrectBind_(body); }
+    else if (mcqHubTab_ === "correct") { body.innerHTML = mcqCorrectShellHtml_(); mcqCorrectShellBind_(body); }
     else if (mcqHubTab_ === "export") { body.innerHTML = mcqExportTabHtml_(); mcqExportBind_(body); }
     else body.innerHTML = mcqHubPapersTabHtml_(papers, loose);
 
