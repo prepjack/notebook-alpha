@@ -387,6 +387,13 @@ function doPost(e) {
       return jsonResponse_(result);
     }
 
+    // PHASE H3: many rows / many content cells in one request (answer-key
+    // bulk save). Same allow-list as update_mcq_content, 200 rows max,
+    // supports dry_run. See updateMcqContentBulk().
+    if (data.action === "update_mcq_content_bulk") {
+      return jsonResponse_(updateMcqContentBulk(data));
+    }
+
     // PHASE 6A: paper-level info (PDF link, website, answer key, remark ...)
     // edited once in the Collections sheet. Fixed allow-list only.
     if (data.action === "update_collection_info") {
@@ -1889,6 +1896,188 @@ function updateMcqContent(data) {
     mcq_id: data.mcq_id,
     fields_changed: changed
   };
+}
+
+// PHASE H3 — bulk content patch. Many rows, many fields, ONE sheet read.
+// Same allow-list (MCQ_CONTENT_EDITABLE_COLUMNS) and same value rules as
+// updateMcqContent(), but it writes ONLY the cells that really change
+// (setValue per cell — whole rows are never rewritten, so ID / number
+// columns keep their formatting). Never touches mcq_id / collection_id /
+// created_at. Never deletes anything.
+//
+// Request : { action:"update_mcq_content_bulk",
+//             updates:[ { mcq_id:"...", fields:{ correct_option:3, ... } }, ... ],
+//             dry_run:true|false }          (1 to 200 updates)
+// Response: { success:true, updated:<rows changed>, cells:<cells changed>,
+//             unchanged:<cells already equal>, not_found:[mcq_id,...],
+//             skipped:[{mcq_id,field,reason}], dry_run:true|false }
+const MCQ_BULK_MAX_UPDATES_ = 200;
+
+function updateMcqContentBulk(data) {
+  const updates = data && data.updates;
+  if (!Array.isArray(updates) || updates.length === 0) {
+    throw new Error("updates must be a non-empty list.");
+  }
+  if (updates.length > MCQ_BULK_MAX_UPDATES_) {
+    throw new Error("Too many updates (" + updates.length + "). Maximum is " +
+      MCQ_BULK_MAX_UPDATES_ + " per request.");
+  }
+  const dryRun = (data.dry_run === true || data.dry_run === "true");
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("MCQs");
+  if (!sheet) throw new Error("MCQs sheet not found.");
+
+  // Real run: lock BEFORE reading, so nobody can change the sheet between
+  // our read and our writes. Dry run writes nothing, so it needs no lock.
+  let lock = null;
+  if (!dryRun) {
+    lock = LockService.getScriptLock();
+    lock.waitLock(20000);
+  }
+
+  try {
+    // ONE read of the whole sheet.
+    const values = sheet.getDataRange().getValues();
+    const headers = values[0].map(function(h) { return String(h); });
+    const idCol = headers.indexOf("mcq_id");
+    if (idCol === -1) throw new Error("mcq_id column not found.");
+
+    // mcq_id -> index into `values` (first match wins, like updateMcqContent).
+    const rowById = {};
+    for (let i = 1; i < values.length; i++) {
+      const id = String(values[i][idCol]);
+      if (id !== "" && rowById[id] === undefined) rowById[id] = i;
+    }
+
+    const notFound = [];
+    const skipped = [];
+    let unchanged = 0;
+    // "row:col" -> { r, c, val }. If the same cell is requested twice, the
+    // later request wins; if it ends up equal to the sheet value, it is dropped.
+    const pending = {};
+
+    updates.forEach(function(u) {
+      const mcqId = (u && u.mcq_id !== undefined && u.mcq_id !== null) ? String(u.mcq_id) : "";
+      if (!mcqId) {
+        skipped.push({ mcq_id: "", field: "", reason: "mcq_id missing" });
+        return;
+      }
+      const r = rowById[mcqId];
+      if (r === undefined) {
+        if (notFound.indexOf(mcqId) === -1) notFound.push(mcqId);
+        return;
+      }
+      const fields = (u && u.fields && typeof u.fields === "object") ? u.fields : {};
+
+      Object.keys(fields).forEach(function(col) {
+        if (MCQ_CONTENT_EDITABLE_COLUMNS.indexOf(col) === -1) {
+          skipped.push({ mcq_id: mcqId, field: col, reason: "column not allowed" });
+          return;
+        }
+        const c = headers.indexOf(col);
+        if (c === -1) {
+          skipped.push({ mcq_id: mcqId, field: col, reason: "column not in sheet" });
+          return;
+        }
+        const raw = fields[col];
+        if (raw === undefined) return;
+        const rawText = (raw === null) ? "" : String(raw);
+        const current = values[r][c];
+
+        let newVal;      // what we would write
+        let same;        // is it already in the sheet?
+        if (col === "correct_option") {
+          newVal = normalizeCorrectOption_(raw);
+          if (newVal === "" && rawText.trim() !== "") {
+            skipped.push({ mcq_id: mcqId, field: col, reason: "invalid correct_option: " + rawText });
+            return;
+          }
+          same = (normalizeCorrectOption_(current) === newVal);
+        } else if (col === "origin") {
+          newVal = normalizeMcqOrigin_(raw);
+          same = (normalizeMcqOrigin_(current) === newVal);
+        } else {
+          newVal = safeSheetText_(rawText);
+          same = (String(current === null || current === undefined ? "" : current) === rawText);
+        }
+
+        const key = r + ":" + c;
+        if (same) {
+          unchanged++;
+          delete pending[key];
+        } else {
+          pending[key] = { r: r, c: c, val: newVal };
+        }
+      });
+    });
+
+    const cellKeys = Object.keys(pending);
+    const rowsChanged = {};
+    cellKeys.forEach(function(k) { rowsChanged[pending[k].r] = true; });
+    const changedRowList = Object.keys(rowsChanged);
+
+    if (!dryRun && cellKeys.length) {
+      const updatedAtCol = headers.indexOf("updated_at");
+      const now = new Date();
+      cellKeys.forEach(function(k) {
+        const p = pending[k];
+        sheet.getRange(p.r + 1, p.c + 1).setValue(p.val);
+      });
+      if (updatedAtCol !== -1) {
+        changedRowList.forEach(function(r) {
+          sheet.getRange(Number(r) + 1, updatedAtCol + 1).setValue(now);
+        });
+      }
+      SpreadsheetApp.flush();
+    }
+
+    return {
+      success: true,
+      updated: changedRowList.length,
+      cells: cellKeys.length,
+      unchanged: unchanged,
+      not_found: notFound,
+      skipped: skipped,
+      dry_run: dryRun
+    };
+  } finally {
+    if (lock) lock.releaseLock();
+  }
+}
+
+// Press Run once to check the bulk function. READ-ONLY: dry_run:true, so
+// nothing is written. Look at View -> Logs (or Execution log):
+//  - "updated" / "cells" should be > 0 for the 2 real rows (answer shifted),
+//  - not_found should list the fake id,
+//  - skipped should list "mcq_id" (column not allowed) and the invalid "Z".
+function testUpdateMcqContentBulk() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("MCQs");
+  if (!sheet) throw new Error("MCQs sheet not found.");
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0].map(function(h) { return String(h); });
+  const idCol = headers.indexOf("mcq_id");
+  const corrCol = headers.indexOf("correct_option");
+  if (values.length < 3) throw new Error("Need at least 2 MCQ rows to run this test.");
+
+  const updates = [];
+  for (let i = 1; i <= 2; i++) {
+    const cur = Number(normalizeCorrectOption_(values[i][corrCol])) || 0;
+    updates.push({
+      mcq_id: String(values[i][idCol]),
+      fields: { correct_option: (cur % 4) + 1 }   // a DIFFERENT answer (dry run only)
+    });
+  }
+  updates.push({ mcq_id: "does_not_exist_123", fields: { correct_option: 1 } });
+  updates.push({ mcq_id: String(values[1][idCol]), fields: { mcq_id: "hacked", correct_option: "Z" } });
+
+  const result = updateMcqContentBulk({
+    action: "update_mcq_content_bulk",
+    dry_run: true,
+    updates: updates
+  });
+  Logger.log(JSON.stringify(result, null, 2));
+  return result;
 }
 
 // Ek node aur uske saare descendants ke node_id (parent_id chain se).

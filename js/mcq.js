@@ -1080,6 +1080,7 @@ function mcqUpdateSelectionUi_() {
     const chip = document.getElementById("mcq-hub-sel-chip");
     if (chip) chip.textContent = `✔ ${n} selected`;
     window.mcqExportOnSelectionChange_?.();
+    window.mcqCorrectOnSelectionChange_?.();
 }
 
 (function setupMcqSelectionListeners() {

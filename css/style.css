@@ -5720,3 +5720,31 @@ a.bottom-strip-btn.practice-open{
     .mcq-info-row{flex-direction:column;gap:0}
     .mcq-info-label{flex:none;font-size:11px}
 }
+
+/* ---- H3 — Correct tab: answer-key grid ---- */
+.mcq-key-red{color:#b3261e;font-weight:700}
+.mcq-key-paste{margin:8px 0;border:1px solid #d8dfd8;border-radius:8px;padding:6px 10px;background:#fafbfa}
+.mcq-key-paste summary{cursor:pointer;font-size:13px;font-weight:700;color:#354239;min-height:30px;display:flex;align-items:center}
+.mcq-key-paste textarea{width:100%;box-sizing:border-box;margin-top:6px;padding:8px;font:inherit;font-size:13px;border:1px solid #d8dfd8;border-radius:6px;resize:vertical}
+.mcq-key-diff{margin:8px 0;border:1px solid #e6cf8f;border-radius:8px;background:#fff8e6;padding:6px 10px;font-size:13px}
+.mcq-key-diff summary{cursor:pointer;font-weight:700;color:#6b4b00}
+.mcq-key-diff ul{margin:6px 0 2px;padding-left:20px}
+.mcq-key-result{margin:8px 0;padding:8px 10px;border-radius:8px;font-size:13px;border:1px solid #d8dfd8;background:#fafbfa}
+.mcq-key-result.is-ok{background:#eef7ee;border-color:#9dc79d;color:#245a24}
+.mcq-key-result.is-bad{background:#fdeeee;border-color:#e3a6a2;color:#7a1f19}
+.mcq-key-result ul{margin:6px 0 2px;padding-left:20px}
+.mcq-key-grid{margin-top:8px}
+.mcq-key-row{padding:8px 4px;border-bottom:1px solid #e6ebe5}
+.mcq-key-row.is-dirty{background:#fff8e6}
+.mcq-key-q{font-size:13px;color:#354239;line-height:1.35;margin-bottom:6px;overflow-wrap:anywhere}
+.mcq-key-text{color:#5d685f}
+.mcq-key-flag{display:inline-block;margin-left:4px;padding:1px 7px;border-radius:10px;background:#fdeeee;border:1px solid #e3a6a2;color:#b3261e;font-size:11px;font-weight:700}
+.mcq-key-chips{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.mcq-key-chip{min-width:40px;height:38px;padding:0 10px;font:inherit;font-size:14px;font-weight:700;border:1px solid #c9d2c9;border-radius:8px;background:#fff;color:#354239;cursor:pointer}
+.mcq-key-chip.is-saved{background:#dff0df;border-color:#4f9a4f;color:#1e5a1e}
+.mcq-key-chip.is-changed{background:#ffe2b8;border-color:#d98a00;color:#6b4000}
+.mcq-key-chip.was-saved{border-style:dashed;border-color:#4f9a4f;color:#1e5a1e}
+.mcq-key-was{font-size:12px;color:#8a5a00;margin-left:4px}
+.mcq-key-savebar{position:sticky;bottom:-20px;z-index:1;display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:10px -12px -10px;padding:10px 12px;background:#fff;border-top:1px solid #d8dfd8}
+.mcq-key-count{flex:1;min-width:120px;font-size:13px;font-weight:700;color:#354239}
+.mcq-key-save:not(:disabled){background:#2f7a3a;border-color:#2f7a3a;color:#fff}

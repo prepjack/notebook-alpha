@@ -14,6 +14,7 @@ const MCQ_HUB_TABS_ = [
     ["papers", "PAPERS"],
     ["info", "INFO"],
     ["import", "IMPORT"],
+    ["correct", "CORRECT"],
     ["export", "EXPORT"]
 ];
 
@@ -120,15 +121,17 @@ function mcqHubRender_() {
     const body = modal.querySelector("#mcq-hub-body");
     if (mcqHubTab_ === "info") body.innerHTML = mcqHubInfoTabHtml_(mcqHubPaperId_);
     else if (mcqHubTab_ === "import") body.innerHTML = mcqHubImportTabHtml_();
+    else if (mcqHubTab_ === "correct") { body.innerHTML = mcqCorrectTabHtml_(); mcqCorrectBind_(body); }
     else if (mcqHubTab_ === "export") { body.innerHTML = mcqExportTabHtml_(); mcqExportBind_(body); }
     else body.innerHTML = mcqHubPapersTabHtml_(papers, loose);
 
     body.querySelectorAll("[data-hub-view]").forEach(b => b.addEventListener("click", () => {
         const id = b.dataset.hubView;
-        closeMcqHub();
+        if (closeMcqHub() === false) return;
         loadFullMcqCollection(id);
     }));
     body.querySelectorAll("[data-hub-info]").forEach(b => b.addEventListener("click", () => {
+        if (b.dataset.hubInfo !== mcqHubPaperId_ && window.mcqCorrectConfirmDiscard_ && !window.mcqCorrectConfirmDiscard_()) return;
         mcqHubPaperId_ = b.dataset.hubInfo;
         mcqHubTab_ = "info";
         mcqHubRender_();
@@ -149,14 +152,19 @@ function mcqHubKeydown_(event) {
     closeMcqHub();
 }
 
-function closeMcqHub() {
+// H3 — returns false (and keeps the Hub open) when the person has unsaved answer
+// changes and chooses to stay. `force` skips the question (used when re-opening).
+function closeMcqHub(force) {
+    if (force !== true && document.getElementById("mcq-hub-modal") &&
+        window.mcqCorrectConfirmDiscard_ && !window.mcqCorrectConfirmDiscard_()) return false;
     document.getElementById("mcq-hub-modal")?.remove();
     document.removeEventListener("keydown", mcqHubKeydown_);
+    return true;
 }
 
 function openMcqHub(opts) {
     opts = opts || {};
-    closeMcqHub();
+    closeMcqHub(true);      // re-opening keeps the unsaved answer grid (same paper)
 
     const { papers } = mcqHubCollectPapers_();
     const wanted = opts.paperId || (currentCollectionView && currentCollectionView.id) || "";
@@ -195,12 +203,18 @@ function openMcqHub(opts) {
         </div>`;
     document.body.appendChild(modal);
 
-    modal.querySelector("#mcq-hub-close").addEventListener("click", closeMcqHub);
+    modal.querySelector("#mcq-hub-close").addEventListener("click", () => closeMcqHub());
     modal.querySelector(".add-resource-overlay").addEventListener("mousedown", e => {
         if (e.target.classList.contains("add-resource-overlay")) closeMcqHub();
     });
     modal.querySelector("#mcq-hub-paper").addEventListener("change", e => {
-        mcqHubPaperId_ = e.target.value;
+        const next = e.target.value;
+        // H3 — unsaved answer changes belong to the old paper
+        if (next !== mcqHubPaperId_ && window.mcqCorrectConfirmDiscard_ && !window.mcqCorrectConfirmDiscard_()) {
+            e.target.value = mcqHubPaperId_;
+            return;
+        }
+        mcqHubPaperId_ = next;
         mcqHubRender_();
     });
     modal.querySelectorAll(".content-layer-tab").forEach(btn => btn.addEventListener("click", () => {
