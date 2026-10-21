@@ -11,6 +11,6 @@
 | H5 | `needs_check` flag + Needs-check list, owner switch, cleanup, docs, `auditMcqNeedsCheck()` | [CHECKPOINT_HUB_H5.md](CHECKPOINT_HUB_H5.md) | yes | awaiting Mahender's manual tests |
 | — | Everything in one place | [CHECKPOINT_HUB_FINAL.md](CHECKPOINT_HUB_FINAL.md) | | |
 
-Other files here: `00_HUB_MASTER_PLAN.md`, `CODE_GS_H5_BLOCKS.md` (the H5 Code.gs FIND→REPLACE blocks), node tests `test-export.js`, `test-correct.js`, `test-review.js`, `test-needs-check.js` (run each with `node docs/hub/<file>`).
+Other files here: `00_HUB_MASTER_PLAN.md` (design). Cleanup (2026-10-21): the developer-only node test files (`test-*.js`) and the one-time `CODE_GS_H5_BLOCKS.md` were removed; the site never used them. Older checkpoints still mention them as history. If a future phase needs tests again, Claude can recreate them.
 
 Golden rule: the `.md` is used only for the FIRST import of a paper. After that the Google Sheet is the truth — correct on the site (Hub) or in the Sheet, never by re-running Fetch and Save.

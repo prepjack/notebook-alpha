@@ -1,7 +1,6 @@
 /* =========================================================
    MCQ EXPORT — H2 (Hub "Export" tab)
-   Part 1: PURE functions (no DOM) — testable with node:
-           docs/hub/test-export.js
+   Part 1: PURE functions (no DOM) — can be tested with node.
    Part 2: thin UI code for the Hub Export tab.
    Plain globals, loaded AFTER mcq.js and BEFORE mcq-hub.js.
    No Sheet writes. Never exports status / hidden fields.
