@@ -121,6 +121,8 @@ function mcqBulkChunk_(list, size) {
 }
 
 function mcqBulkNorm_(field, value) {
+    // H5 — the flag is only "yes" or blank (same rule as Code.gs normalizeNeedsCheck_)
+    if (field === "needs_check") return /^(yes|y|true|1)$/i.test(String(value === undefined || value === null ? "" : value).trim()) ? "yes" : "";
     if (field === "correct_option") return String(mcqCorrectSavedOption_({ correct_option: value }));
     if (field === "origin") return String(value === undefined || value === null ? "" : value).trim().toLowerCase();
     return String(value === undefined || value === null ? "" : value).trim();
@@ -182,7 +184,7 @@ function mcqBulkPrevValue_(field, rawValue) {
 if (typeof module !== "undefined" && module.exports) {
     module.exports = {
         parseAnswerKey, buildAnswerKeyChanges_, formatAnswerKeyChange_, mcqCorrectSavedOption_,
-        mcqBulkChunk_, mcqBulkCompare_, mcqBulkVerify_, mcqBulkPrevValue_, mcqKeyLetter_
+        mcqBulkChunk_, mcqBulkCompare_, mcqBulkVerify_, mcqBulkPrevValue_, mcqKeyLetter_, mcqBulkNorm_
     };
 }
 
@@ -226,7 +228,8 @@ function mcqApplyFreshRows_(paperId, rawRows) {
 
 /* mcqBulkSaveAndVerify(paperId, updates, opts?)
    updates : [{ mcq_id, fields:{ correct_option:3, ... } }]   (content columns only)
-   opts    : { isUndo:boolean }
+   opts    : { isUndo:boolean, keepUndo:boolean (H5: do not touch lastBulkUndo — used for flag changes),
+               noReset:boolean (H5: keep the running attempt/timer — used for flag changes) }
    Steps   : read Sheet (to remember previous values) -> POST in chunks of 100 ->
              re-read (up to 3x, 2 s apart) and compare -> refresh the page's data.
    Returns : { ok, saved, total, mismatches:[{mcq_id,field,expected,got}], notFound:[ids],
@@ -281,18 +284,23 @@ async function mcqBulkSaveAndVerify(paperId, updates, opts) {
         verdict = await mcqBulkVerify_(updates, () => mcqBulkFetchRawRows_(paperId));
     } catch (err) {
         console.warn("Bulk save: verification failed", err);
-        if (undoUpdates.length && !opts.isUndo) lastBulkUndo = { paperId, updates: undoUpdates };
+        if (undoUpdates.length && !opts.isUndo && !opts.keepUndo) lastBulkUndo = { paperId, updates: undoUpdates };
         throw new Error("The save was sent, but I could not read the Sheet back to confirm it. Reload and check the answers.");
     }
 
     // Undo information (something may have landed even when verification complains).
-    if (opts.isUndo) { if (!verdict.mismatches.length) lastBulkUndo = null; }
+    if (opts.keepUndo) { /* H5 flag changes never replace the answer/text undo */ }
+    else if (opts.isUndo) { if (!verdict.mismatches.length) lastBulkUndo = null; }
     else if (undoUpdates.length) lastBulkUndo = { paperId, updates: undoUpdates };
 
     // 4) the Sheet is the truth: refresh the page's data and redraw (current question index is kept).
     const fresh = (verdict.rows || []).filter(r => String(r.status || "").trim().toLowerCase() !== "archived");
     try {
-        if (mcqApplyFreshRows_(paperId, verdict.rows)) applyMcqPracticeFilters();
+        if (mcqApplyFreshRows_(paperId, verdict.rows)) {
+            // H5: a flag change must not reset the running attempt/timer
+            if (opts.noReset && typeof mcqSyncFlagsToSlots_ === "function") mcqSyncFlagsToSlots_();
+            else applyMcqPracticeFilters();
+        }
     } catch (err) {
         console.warn("Bulk save: refresh failed", err);
     }
@@ -537,8 +545,10 @@ function mcqCorrectDrawResult_() {
         const n = r.changedIds.length;
         el.innerHTML = `<div class="mcq-key-result is-ok">✔ Saved ${r.saved}/${r.total} and confirmed from the Sheet.
             <div class="mcq-hub-note">Answer changed — check the explanation too.</div>
+            ${r.flagNote ? `<div class="mcq-hub-note">${esc(r.flagNote)}</div>` : ""}
             <div class="mcq-hub-card-actions">
                 <button type="button" class="content-action" data-key-act="review">Review these ${n} →</button>
+                ${r.flagged || !n ? "" : `<button type="button" class="content-action" data-key-act="flag">⚑ Flag these ${n} for explanation check</button>`}
                 ${undoBtn}
             </div></div>`;
         return;
@@ -654,6 +664,31 @@ async function mcqCorrectSave_() {
     document.getElementById("mcq-key-result")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
+// H5 — after an answer change: mark the changed questions "needs check" (one bulk save, verified).
+async function mcqCorrectFlag_() {
+    const st = mcqCorrectState_;
+    if (st.busy || !st.result || st.result.kind !== "ok" || typeof mcqSetFlags_ !== "function") return;
+    const ids = (st.result.changedIds || []).slice();
+    if (!ids.length) return;
+    st.busy = true;
+    const keep = st.result;
+    st.result = Object.assign({}, keep, { flagNote: "⏳ Flagging…" });
+    mcqCorrectDrawResult_(); mcqCorrectDrawSummary_();
+    let note = "", done = false;
+    try {
+        const r = await mcqSetFlags_(ids, true);
+        done = r.ok;
+        note = r.ok ? "⚑ " + r.saved + " question" + (r.saved === 1 ? "" : "s") + " flagged and confirmed from the Sheet. See Correct → Needs check."
+            : "⚠️ Only " + r.saved + "/" + r.total + " flags could be confirmed. " + (r.hint || "");
+    } catch (err) {
+        note = "⚠️ " + (err && err.message ? err.message : "Could not save the flags.");
+    } finally {
+        st.busy = false;
+    }
+    st.result = Object.assign({}, keep, { flagNote: note, flagged: done });
+    mcqCorrectDraw_();
+}
+
 async function mcqCorrectUndo_() {
     const st = mcqCorrectState_;
     if (st.busy || !lastBulkUndo || lastBulkUndo.paperId !== st.paperId) return;
@@ -697,6 +732,7 @@ function mcqCorrectClick_(event) {
     if (a === "fill") mcqCorrectFill_();
     else if (a === "save") mcqCorrectSave_();
     else if (a === "undo") mcqCorrectUndo_();
+    else if (a === "flag") mcqCorrectFlag_();
     else if (a === "discard") {
         if (st.busy) return;
         st.pending = {}; st.paste = null;

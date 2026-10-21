@@ -244,6 +244,21 @@ Apps Script function `auditBilingualRows()` (READ-ONLY, writes only to the log):
 having `question_group_id`, duplicate `mcq_id`, `correct_option` pointing at an empty option, option-count mismatch between languages,
 `question_alt` without `alt_language`, leftover `_alt` options. Run it after big imports. Phase 7 result on the live sheet: 3 rows, 0 problems.
 
+## MCQ Hub (built Oct 2026, phases H1-H5)
+One button, `🗂️ MCQ Hub` (`#mcq-hub-open`), replaced both ➕ Add MCQs and 📄 Paper info. It opens a full-screen (phone) / large (desktop) panel with a paper selector and tabs: **Papers · Info · Import · Correct · Export**. Files: `js/mcq-hub.js` (shell, tabs), `js/mcq-export.js` (selection export), `js/mcq-correct.js` (bulk-save helper + answer-key grid), `js/mcq-review.js` (Review, AI paste-back, Needs-check list), `css/style.css` (`.mcq-hub-*`, `.mcq-key-*`, `.mcq-rv-*`, `.mcq-flag-*`). Per-phase notes and tests: `docs/hub/` (start with `docs/hub/README.md`).
+
+**Tabs.** Papers: papers of the loaded topic with counts, origin summary and a `⚑ N need check` badge. Info: paper facts (links, remark) + Edit paper info. Import: launcher for the existing Add MCQs modal. Correct: sub-views Answer key · Review · AI correction · Needs check. Export: copy / print-PDF / .md / .csv of selected questions, whole paper or current view.
+
+**Data flow ("after first import the Sheet is the truth").** The `.md` is used ONLY for the first bulk import (Fetch and Save upserts rows by `mcq_id`). After that every correction is made on the site (Hub) or by hand in the Sheet. NEVER re-run Fetch and Save to apply a correction. Hub writes go browser → `update_mcq_content_bulk` (Code.gs, allow-listed columns, max 200 rows per request, script lock, `dry_run` supported). The POST is `no-cors` (reply unreadable), so `mcqBulkSaveAndVerify` re-reads the paper from the Sheet (up to 3 times) and compares before it says "✔ saved and confirmed". `↩️ Undo last save` puts back the previous values. AI output is never saved directly: it goes through the Review screen.
+
+**Selection.** Every question card has a tick box; `mcqSelectedIds` (a Set of `mcq_id`) is shared by Export, Correct and Review.
+
+**Needs-check flag (H5).** Sheet column `needs_check` (`yes` or blank; NOT `status`). ⚑ on a card (or in the Needs-check list) sets/clears it with one verified bulk update and does not reset a running attempt. Visitors see a small `⚠ being rechecked` label: switch `MCQ_SHOW_FLAG_TO_VISITORS` (top of `js/mcq.js`). Review footer `Mark as checked when saved` (default ON) clears the flag in the same save. Answer-key save offers `Flag these N for explanation check`. Re-importing an old `.md` never wipes or sets flags.
+
+**Owner tools switch.** `MCQ_OWNER_TOOLS_ALWAYS = true` (default): everything visible. Set `false` to hide the ⚑ buttons, Import tab and Correct tab unless `localStorage.alpha_mcq_owner === "1"` (open the page once with `?owner=1`). This only hides buttons: the Apps Script endpoint has no login, so anyone who knows the URL can still POST. Future idea: a secret token checked in `doPost`.
+
+**Health report.** Apps Script `auditMcqNeedsCheck()` (READ-ONLY): flagged rows per paper, rows with empty `correct_option`, rows with options but no `explanation`. Press Run and read the log.
+
 ## Important product direction
 The author publishes the initial/core structure and content. Users can extend the structure, maintain My Notes, add resources, and contribute content. The user is the actual builder of their personalized notebook while the author/community layer keeps shared content organized.
 

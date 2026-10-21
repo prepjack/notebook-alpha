@@ -91,8 +91,11 @@ function mcqRvPrune_(drafts, rowsById) {
 }
 
 // Drafts -> bulk-save updates (text trimmed, correct_option as a number 1-6).
-function mcqRvBuildUpdates_(drafts, rowsById) {
+// opts.clearFlag (H5, "Mark as checked when saved"): a saved question that is flagged also
+// gets needs_check = "" in the SAME update. Questions without any real change are never touched.
+function mcqRvBuildUpdates_(drafts, rowsById, opts) {
     const out = [];
+    const clearFlag = !!(opts && opts.clearFlag);
     drafts.forEach((d, id) => {
         const row = rowsById.get(id);
         if (!row) return;
@@ -101,6 +104,7 @@ function mcqRvBuildUpdates_(drafts, rowsById) {
             if (!mcqRvIsChanged_(row, f, d[f])) return;
             fields[f] = f === "correct_option" ? Number(d[f]) : mcqRvNorm_(d[f]);
         });
+        if (Object.keys(fields).length && clearFlag && String(row.needs_check || "").trim().toLowerCase() === "yes") fields.needs_check = "";
         if (Object.keys(fields).length) out.push({ mcq_id: id, fields });
     });
     out.sort((a, b) => (Number(rowsById.get(a.mcq_id).question_no) || 1e9) - (Number(rowsById.get(b.mcq_id).question_no) || 1e9));
@@ -146,6 +150,7 @@ function mcqRvFieldLabel_(field) {
     if (field === "explanation") return "Explanation";
     if (field === "question_alt") return "Question (Language 2)";
     if (field === "explanation_alt") return "Explanation (Language 2)";
+    if (field === "needs_check") return "Needs-check flag";
     const m = /^option_([a-f])(_alt)?$/.exec(field);
     return m ? "Option " + m[1].toUpperCase() + (m[2] ? " (Language 2)" : "") : field;
 }
@@ -361,6 +366,8 @@ const mcqReviewState_ = {
     sub: "key",                         // "key" | "review" | "ai"
     scope: { mode: "selected", ids: [] }, // "selected" | "paper" | "ids"
     curId: "", drafts: new Map(), result: null, busy: false, restored: 0, notice: "",
+    markChecked: true,                  // H5: footer checkbox "Mark as checked when saved" (default ON)
+    flagMsg: "", flagMsgBad: false,     // H5: message line of the Needs check list
     ai: { pasteText: "", parsed: null, ticks: {}, status: "", token: 0 }
 };
 
@@ -407,7 +414,7 @@ function mcqReviewRestore_() {
         mcqRvPrune_(drafts, st.rowsById);
         if (!drafts.size) { sessionStorage.removeItem(mcqReviewStoreKey_()); return; }
         st.drafts = drafts;
-        if (data.scope && data.scope.mode) st.scope = { mode: data.scope.mode, ids: Array.isArray(data.scope.ids) ? data.scope.ids : [] };
+        if (data.scope && data.scope.mode) st.scope = { mode: data.scope.mode, ids: Array.isArray(data.scope.ids) ? data.scope.ids : [], label: data.scope.label || "" };
         st.restored = mcqRvDraftCount_(drafts).fields;
     } catch (e) { /* ignore */ }
 }
@@ -479,12 +486,13 @@ function mcqReviewEffectiveRows_() {
 
 function mcqReviewScopeLabel_() {
     const m = mcqReviewState_.scope.mode;
+    if (m === "ids" && mcqReviewState_.scope.label) return mcqReviewState_.scope.label;
     return m === "paper" ? "whole paper" : (m === "ids" ? "AI-changed questions" : "selected questions");
 }
 
 /* ----- Correct tab shell (sub-views: Answer key · Review · AI correction) ----- */
 
-const MCQ_RV_SUBS_ = [["key", "Answer key"], ["review", "Review"], ["ai", "AI correction"]];
+const MCQ_RV_SUBS_ = [["key", "Answer key"], ["review", "Review"], ["ai", "AI correction"], ["flag", "Needs check"]];
 
 function mcqCorrectShellHtml_() {
     return `<div class="mcq-sub-tabs" id="mcq-sub-tabs">${
@@ -512,10 +520,17 @@ function mcqCorrectShellBind_(body) {
 function mcqReviewUpdateBadge_() {
     const st = mcqReviewState_;
     const el = document.querySelector("[data-sub-badge=\"review\"]");
-    if (!el) return;
-    const n = mcqRvDraftCount_(st.drafts).fields;
-    el.hidden = !n;
-    el.textContent = n ? String(n) : "";
+    if (el) {
+        const n = mcqRvDraftCount_(st.drafts).fields;
+        el.hidden = !n;
+        el.textContent = n ? String(n) : "";
+    }
+    const fl = document.querySelector("[data-sub-badge=\"flag\"]");
+    if (fl) {
+        const k = st.rows.filter(mcqIsFlagged_).length;
+        fl.hidden = !k;
+        fl.textContent = k ? String(k) : "";
+    }
 }
 
 function mcqReviewDrawSub_() {
@@ -545,13 +560,23 @@ if (typeof window !== "undefined") {
 window.mcqReviewOpenSub_ = function (sub, o) {
     const st = mcqReviewState_;
     st.sub = sub;
-    if (o && o.scope) st.scope = { mode: o.scope, ids: o.ids || [] };
+    if (o && o.scope) st.scope = { mode: o.scope, ids: o.ids || [], label: o.label || "" };
+    if (!mcqOwnerToolsOn_()) return;        // Correct is an owner tool (H5 switch)
     mcqHubTab_ = "correct";
     if (document.getElementById("mcq-hub-modal")) mcqHubRender_();
     else if (typeof openMcqHub === "function") openMcqHub({ tab: "correct" });
 };
 window.mcqReviewOpenAi_ = function (scopeMode) {
     window.mcqReviewOpenSub_("ai", { scope: scopeMode === "paper" ? "paper" : "selected" });
+};
+
+// H5 — mcq.js calls this after a flag was saved (card ⚑, answer-key "Flag these", queue).
+// ok: the Sheet confirmed it, so the loaded rows can be updated in place; otherwise reload next time.
+window.mcqFlagChanged_ = function (ids, on, ok) {
+    const st = mcqReviewState_;
+    if (!ok) { st.loadedAt = 0; return; }
+    (ids || []).forEach(id => { const r = st.rowsById.get(String(id)); if (r) r.needs_check = on ? "yes" : ""; });
+    mcqReviewUpdateBadge_();
 };
 
 window.mcqReviewOnSelectionChange_ = function () {
@@ -577,6 +602,7 @@ function mcqReviewDraw_() {
     }
     if (!st.rows.length) { root.innerHTML = `<p class="mcq-hub-empty">This paper has no questions.</p>`; return; }
     if (st.sub === "ai") { mcqReviewDrawAi_(root); return; }
+    if (st.sub === "flag") { mcqReviewDrawFlag_(root); return; }
 
     const rows = mcqReviewEffectiveRows_();
     if (!rows.length) {
@@ -615,6 +641,62 @@ function mcqReviewDraw_() {
     mcqReviewDrawResult_();
     mcqReviewDrawFoot_();
     st.restored = 0; st.notice = "";
+}
+
+/* ----- H5: Needs check queue ----- */
+
+function mcqReviewFlaggedRows_() {
+    return mcqReviewState_.rows.filter(r => mcqIsFlagged_(r));
+}
+
+function mcqReviewDrawFlag_(root) {
+    const st = mcqReviewState_;
+    const esc = mcqEscapeHtml;
+    const rows = mcqReviewFlaggedRows_();
+    mcqReviewUpdateBadge_();
+    const msg = st.flagMsg ? `<div class="mcq-key-result ${st.flagMsgBad ? "is-bad" : "is-ok"}">${esc(st.flagMsg)}</div>` : "";
+    if (!rows.length) {
+        root.innerHTML = `<div class="mcq-hub-card"><div class="mcq-hub-card-title">⚑ Needs check</div>
+            <p class="mcq-hub-note">No question of this paper is flagged. Tap ⚑ on a question card, or use “Flag these for explanation check” after changing answers.</p>
+            ${msg}
+            <div class="mcq-hub-card-actions"><button type="button" class="content-action" data-rv-act="reload">🔄 Reload from Sheet</button></div></div>`;
+        return;
+    }
+    const list = rows.map(r => `<div class="mcq-flag-row">
+            <b class="mcq-flag-q">Q${Number(r.question_no) || "?"}</b>
+            <span class="mcq-flag-text">${esc(mcqCorrectPreview_(r.question))}</span>
+            <button type="button" class="content-action" data-rv-unflag="${esc(String(r.id))}"${st.busy ? " disabled" : ""}>✔ Checked</button>
+        </div>`).join("");
+    root.innerHTML = `<div class="mcq-hub-card"><div class="mcq-hub-card-title">⚑ Needs check · ${rows.length} question${rows.length === 1 ? "" : "s"}</div>
+        <div class="mcq-hub-card-actions">
+            <button type="button" class="content-action" data-rv-act="flag-select">Select all flagged</button>
+            <button type="button" class="content-action" data-rv-act="flag-review">Review these ${rows.length} →</button>
+            <button type="button" class="content-action" data-rv-act="flag-export">Export these ${rows.length}</button>
+            <button type="button" class="content-action" data-rv-act="reload">🔄 Reload</button>
+        </div>
+        ${msg}
+        <div class="mcq-flag-list">${list}</div>
+        <div class="mcq-hub-note">“✔ Checked” clears the flag in the Sheet. “Review these” opens them in Review; saving there clears the flag too (footer checkbox).</div></div>`;
+}
+
+// Clear the flag of some questions (queue button / Review banner). Saved and confirmed from the Sheet.
+async function mcqReviewUnflag_(ids) {
+    const st = mcqReviewState_;
+    if (st.busy || typeof mcqSetFlags_ !== "function") return;
+    st.busy = true; st.flagMsg = "⏳ Saving and checking the Sheet…"; st.flagMsgBad = false;
+    mcqReviewDraw_();
+    try {
+        const r = await mcqSetFlags_(ids, false);
+        st.flagMsg = r.ok ? "✔ Marked as checked and confirmed from the Sheet." : "⚠️ Only " + r.saved + "/" + r.total + " confirmed. " + r.hint;
+        st.flagMsgBad = !r.ok;
+    } catch (err) {
+        st.flagMsg = "⚠️ " + (err && err.message ? err.message : "Could not save.");
+        st.flagMsgBad = true;
+    } finally {
+        st.busy = false;
+    }
+    if (st.sub === "review") { st.notice = st.flagMsg; st.flagMsg = ""; }
+    mcqReviewDraw_();
 }
 
 function mcqRvDraftValue_(row, field) {
@@ -661,7 +743,9 @@ function mcqReviewQuestionHtml_(row) {
         html += mcqRvFieldHtml_(row, "explanation" + sfx, "Explanation", "textarea");
         return html + `</div>`;
     };
-    return panel(false) + (hasAlt ? panel(true) : "") +
+    const flagBanner = mcqIsFlagged_(row)
+        ? `<div class="mcq-flag-note mcq-rv-flagged">⚑ Flagged: needs check <button type="button" class="mcq-rv-link" data-rv-act="unflag-cur">✔ Mark as checked now</button></div>` : "";
+    return flagBanner + panel(false) + (hasAlt ? panel(true) : "") +
         `<div class="mcq-hub-note">You can change option text here, but options cannot be added or removed. Origin / source fields stay in the ✏️ pencil on the question.</div>`;
 }
 
@@ -687,7 +771,8 @@ function mcqReviewDrawFoot_() {
     if (!el) return;
     const st = mcqReviewState_;
     const c = mcqRvDraftCount_(st.drafts);
-    el.innerHTML = `<span class="mcq-key-count">${c.fields ? c.fields + " unsaved edit" + (c.fields === 1 ? "" : "s") : "No changes"}</span>
+    el.innerHTML = `<label class="mcq-rv-markchk"><input type="checkbox" id="mcq-rv-markchecked"${st.markChecked ? " checked" : ""}> Mark as checked when saved</label>
+        <span class="mcq-key-count">${c.fields ? c.fields + " unsaved edit" + (c.fields === 1 ? "" : "s") : "No changes"}</span>
         <button type="button" class="content-action" data-rv-act="discard"${c.fields && !st.busy ? "" : " disabled"}>Discard</button>
         <button type="button" class="content-action mcq-key-save" data-rv-act="save"${c.fields && !st.busy ? "" : " disabled"}>Save all (${c.questions} question${c.questions === 1 ? "" : "s"}, ${c.fields} field${c.fields === 1 ? "" : "s"})</button>`;
     mcqReviewUpdateBadge_();
@@ -710,7 +795,7 @@ function mcqReviewDrawResult_() {
     if (r.kind === "working") { el.innerHTML = `<div class="mcq-key-result">⏳ Saving and checking the Sheet…</div>`; return; }
     if (r.kind === "error") { el.innerHTML = `<div class="mcq-key-result is-bad">⚠️ ${esc(r.msg)}<div class="mcq-hub-card-actions">${undoBtn}</div></div>`; return; }
     if (r.kind === "undone") { el.innerHTML = `<div class="mcq-key-result is-ok">↩️ Undone — ${r.saved}/${r.total} restored and confirmed from the Sheet.</div>`; return; }
-    if (r.kind === "ok") { el.innerHTML = `<div class="mcq-key-result is-ok">✔ Saved ${r.saved}/${r.total} and confirmed from the Sheet.<div class="mcq-hub-card-actions">${undoBtn}</div></div>`; return; }
+    if (r.kind === "ok") { el.innerHTML = `<div class="mcq-key-result is-ok">✔ Saved ${r.saved}/${r.total} and confirmed from the Sheet.${r.cleared ? ` ⚑ ${r.cleared} flag${r.cleared === 1 ? "" : "s"} cleared.` : ""}<div class="mcq-hub-card-actions">${undoBtn}</div></div>`; return; }
     const lines = r.mismatches.map(m => {
         const row = st.rowsById.get(String(m.mcq_id));
         const q = row && row.question_no ? "Q" + row.question_no : esc(String(m.mcq_id));
@@ -773,6 +858,7 @@ function mcqReviewInput_(e) {
 }
 
 function mcqReviewChange_(e) {
+    if (e.target.id === "mcq-rv-markchecked") { mcqReviewState_.markChecked = !!e.target.checked; return; }
     if (e.target.matches && e.target.matches("[data-ai-task]")) {
         const o = mcqReviewAiReadOpts_();
         mcqRvStoreSet_(MCQ_AI_OPTS_KEY_, JSON.stringify({ verify: o.verify, rewrite: o.rewrite, typos: o.typos, translation: o.translation }));
@@ -794,8 +880,9 @@ async function mcqReviewSave_() {
         alert("Fix these first:\n" + problems.slice(0, 8).map(p => "Q" + (p.qno || "?") + ": " + p.msg).join("\n"));
         return;
     }
-    const updates = mcqRvBuildUpdates_(st.drafts, st.rowsById);
+    const updates = mcqRvBuildUpdates_(st.drafts, st.rowsById, { clearFlag: st.markChecked });
     if (!updates.length) return;
+    const cleared = updates.filter(u => u.fields.needs_check === "").length;
     const c = mcqRvDraftCount_(st.drafts);
     if (c.fields > 10 && !confirm("Save " + c.fields + " edits in " + c.questions + " questions to the Sheet?")) return;
     st.busy = true; st.result = { kind: "working" };
@@ -807,7 +894,7 @@ async function mcqReviewSave_() {
         // a question that did not verify keeps its draft untouched
         updates.forEach(u => { if (!bad.has(String(u.mcq_id)) && !st.drafts.has(String(u.mcq_id))) { /* saved */ } });
         st.result = out.ok
-            ? { kind: "ok", saved: out.saved, total: out.total }
+            ? { kind: "ok", saved: out.saved, total: out.total, cleared }
             : { kind: "mismatch", saved: out.saved, total: out.total, mismatches: out.mismatches };
         mcqReviewFlush_();                              // removes the sessionStorage backup when nothing is left
     } catch (err) {
@@ -888,6 +975,8 @@ function mcqReviewClick_(e) {
         if (box) { box.hidden = !box.hidden; mcqReviewRenderPreview_(pv.dataset.rvPrev); }
         return;
     }
+    const unf = t.closest && t.closest("[data-rv-unflag]");
+    if (unf) { mcqReviewUnflag_([unf.dataset.rvUnflag]); return; }
     const tick = t.closest && t.closest("[data-ai-tick]");
     if (tick) { st.ai.ticks[tick.dataset.aiTick] = tick.checked; mcqReviewAiCounters_(); return; }
     const act = t.closest && t.closest("[data-rv-act]");
@@ -902,6 +991,29 @@ function mcqReviewClick_(e) {
         } else if (a === "reload") { if (!st.busy) mcqReviewLoad_(st.paperId); }
         else if (a === "whole") { st.scope = { mode: "paper", ids: [] }; mcqReviewPersist_(); mcqReviewDraw_(); }
         else if (a === "usesel") { st.scope = { mode: "selected", ids: [] }; mcqReviewPersist_(); mcqReviewDraw_(); }
+        else if (a === "unflag-cur") { const row = mcqReviewCurRow_(); if (row) mcqReviewUnflag_([String(row.id)]); }
+        else if (a === "flag-select") {
+            const ids = mcqReviewFlaggedRows_().map(r => String(r.id));
+            ids.forEach(id => mcqSelectedIds.add(id));
+            mcqUpdateSelectionUi_();
+            st.flagMsg = "✔ " + ids.length + " flagged question" + (ids.length === 1 ? "" : "s") + " selected (" + mcqSelectedIds.size + " selected in total).";
+            st.flagMsgBad = false;
+            mcqReviewDraw_();
+        }
+        else if (a === "flag-review") {
+            const ids = mcqReviewFlaggedRows_().map(r => String(r.id));
+            if (ids.length) window.mcqReviewOpenSub_("review", { scope: "ids", ids, label: "flagged questions" });
+        }
+        else if (a === "flag-export") {
+            const ids = mcqReviewFlaggedRows_().map(r => String(r.id));
+            if (!ids.length) return;
+            mcqSelectedIds.clear();                       // Export exactly these questions
+            ids.forEach(id => mcqSelectedIds.add(id));
+            mcqUpdateSelectionUi_();
+            if (typeof mcqExportScope_ !== "undefined") mcqExportScope_ = "selected";
+            mcqHubTab_ = "export";
+            mcqHubRender_();
+        }
         else if (a === "ai-copy") mcqReviewAiCopy_();
         else if (a === "ai-read") mcqReviewAiRead_();
         else if (a === "ai-apply") mcqReviewAiApply_();

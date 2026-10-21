@@ -2,6 +2,7 @@
 > Phase 7 status: all columns below exist in the live sheet. Backend actions for the new columns: `update_mcq_meta` (remark, extra_link, extra_link_label, source_qid, source_page),
 > `update_mcq_content` (alt_language, question_alt, option_*_alt, explanation_alt, explanation_*_alt), `update_collection_info` (Collections: pdf_url, answer_key_url, source_url, source_path, remark, exam, year, session, description; `title` NOT editable).
 > All new columns are copied into the site by `mapMcqRow` (MCQs) and shown in the pencil (tabs), the ⓘ popup, and "Edit paper info". `auditBilingualRows()` (Code.gs) checks them read-only.
+> **H5 (2026-10-21):** new MCQs column `needs_check` (see "Sheet MCQs — H5 column" below).
 Source: live headers pasted by Mahender (2026-10-12) + repo check (HEAD 637a3b3). Nothing here is a code change.
 Legend: **W** = who writes · **R** = who reads · **UI** = editable in UI · **Safe** = goes through `safeSheetText_` today
 
@@ -53,6 +54,12 @@ passage_id · node_id · kind · content · created_at · updated_at
 - **Collections (5):** pdf_url, answer_key_url, source_url, source_path, remark
 - **MCQ_Passages (1):** content_alt
 - New columns are added to: `MCQ_BANK_NEW_COLUMNS_` list pattern (setup), `MCQ_TEXT_COLUMNS_`, `MCQ_META_EDITABLE_COLUMNS` / `MCQ_CONTENT_EDITABLE_COLUMNS`, later `mapMcqRow` (Phase 4).
+
+## Sheet MCQs — H5 column (`needs_check`)
+| Column | Purpose | W | R | UI edit | Safe | Note |
+|--------|---------|---|---|---------|------|------|
+| needs_check | review flag: blank = fine, `yes` = needs check | `update_mcq_content_bulk` / `update_mcq_content` (Hub ⚑, Needs-check list, Review "Mark as checked", answer-key "Flag these") | `mapMcqRow` (`needs_check`: `"yes"` or `""`) | Hub only | no (`normalizeNeedsCheck_` forces `yes`/blank) | NOT the same as `status` (archived/active, filters practice). Added at END of row 1 by `setupMcqBankSheets()` (`MCQ_BANK_NEW_COLUMNS_`) or by typing the header by hand. In `MCQ_CONTENT_EDITABLE_COLUMNS`. Not in `MCQ_TEXT_COLUMNS_` (no free text). `saveMcqsBulk` never writes it (`delete incoming.needs_check`), so a re-import keeps existing flags and new rows start unflagged. Plain-text column format in the Sheet. |
+Column checklist followed: setup list ✔ · text list (not needed) ✔ · content allow-list ✔ · bulk/single normalise ✔ · `saveMcqsBulk` keeps it ✔ · `mapMcqRow` ✔ · parser (not needed: imports never set it) ✔ · docs ✔. Read-only report: `auditMcqNeedsCheck()` (flagged rows per paper, rows with empty `correct_option`, rows with options but no `explanation`).
 
 ## Flags
 1. Duplicate-ish: exam/year/session on MCQs **and** Collections; `source` vs new `remark`. Not deleting anything.

@@ -88,6 +88,29 @@ let currentCollectionView = null;
 // Cleared when the topic changes; kept when switching papers / tabs.
 const mcqSelectedIds = new Set();
 let mcqSelectionTopicId_ = "";
+
+// H5 — needs-check flag. Two switches, both can be changed here (one line each).
+// MCQ_SHOW_FLAG_TO_VISITORS: true = every visitor sees a small "being rechecked"
+//   label on flagged questions; false = nobody but the owner tools show it.
+// MCQ_OWNER_TOOLS_ALWAYS: true = the owner tools (⚑ toggle, Import tab, Correct
+//   tab) are visible to everybody (default — never locks the owner out).
+//   false = they show only when localStorage.alpha_mcq_owner === "1" (set once
+//   by opening the page with ?owner=1). This only HIDES buttons — the Apps
+//   Script endpoint has no login, so it is not security.
+const MCQ_SHOW_FLAG_TO_VISITORS = true;
+const MCQ_OWNER_TOOLS_ALWAYS = true;
+
+function mcqOwnerToolsOn_() {
+    if (MCQ_OWNER_TOOLS_ALWAYS) return true;
+    try {
+        if (new URLSearchParams(location.search).get("owner") === "1") localStorage.setItem("alpha_mcq_owner", "1");
+        return localStorage.getItem("alpha_mcq_owner") === "1";
+    } catch (e) { return false; }
+}
+
+function mcqIsFlagged_(q) {
+    return !!q && String(q.needs_check || "").trim().toLowerCase() === "yes";
+}
 let mcqPreviewRows = [];
 
 function escapeHtml(value) {
@@ -324,10 +347,6 @@ function mcqInfoHtml_(q) {
         + sourceHtml + editPaperBtn;
 }
 
-// PHASE 6 — remembers the shared papers so the MCQ Hub can be redrawn right
-// after "Edit paper info" is saved (no page reload needed).
-let lastMcqPaperShared_ = [];
-
 // PHASE 6 — "Edit paper info": the facts that belong to the WHOLE paper
 // (Collections sheet). Every field is optional; an empty value clears it.
 const MCQ_COLLECTION_EDIT_FIELDS_ = [
@@ -432,7 +451,7 @@ function openMcqCollectionEditModal(collectionId, reopenInfoIndex) {
             if (backupInfo) Object.assign(backupInfo, next);
 
             close();
-            renderMcqPaperSourcesToolbar(lastMcqPaperShared_);
+            window.mcqHubRefresh?.();     // redraw the Hub right after "Edit paper info" is saved
             if (reopenInfoIndex !== undefined) openMcqInfoModal(reopenInfoIndex);
             else alert("Paper info updated.");
         } catch (error) {
@@ -514,6 +533,8 @@ function mapMcqRow(row) {
         passage_id: row.passage_id || "",
         origin: normalizeMcqOrigin(row.origin),
         derived_from: row.derived_from || "",
+        // H5 — review flag: "yes" or "" (copied one by one, as always)
+        needs_check: String(row.needs_check === undefined || row.needs_check === null ? "" : row.needs_check).trim().toLowerCase() === "yes" ? "yes" : "",
         warnings: row.warnings || [],
         // PHASE 4 — one-row bilingual question: second-language columns
         // (copied one by one, as mapMcqRow always does).
@@ -912,26 +933,11 @@ function renderMcqCollectionNotes() {
         document.getElementById("mcq-delete-collection")?.addEventListener("click", () =>
             deleteMcqCollectionPermanently(currentCollectionView.id, info?.title || currentCollectionView.id)
         );
-        renderMcqPaperSourcesToolbar([]);
+        window.mcqHubRefresh?.();
         return;
     }
 
     host.innerHTML = "";
-    const counts = new Map();
-    allLoadedMcqs.forEach(mcq => {
-        const id = String(mcq.collection_id_ref || "").trim();
-        if (id) counts.set(id, (counts.get(id) || 0) + 1);
-    });
-    const shared = Array.from(counts.entries()).filter(([, count]) => count > 1);
-    renderMcqPaperSourcesToolbar(shared);
-}
-
-// Paper-source links used to live as a banner above every question. They
-// now live behind a toolbar button (hidden when there's nothing to show)
-// so the question area stays uncluttered — see renderMcqCollectionNotes.
-function renderMcqPaperSourcesToolbar(shared) {
-    // The 📄 Paper info popover was merged into the 🗂️ MCQ Hub (js/mcq-hub.js).
-    lastMcqPaperShared_ = shared;
     window.mcqHubRefresh?.();
 }
 
@@ -1055,6 +1061,113 @@ function applyMcqPracticeFilters() {
     renderMcqView();
 }
 
+// ---- H5 — needs-check flag (⚑) ----------------------------------------
+function mcqFlagButtonHtml_(q) {
+    const id = String((q && q.id) || "");
+    if (!id || !mcqOwnerToolsOn_()) return "";
+    const on = mcqIsFlagged_(q);
+    return `<button type="button" class="mcq-flag-btn${on ? " is-on" : ""}" data-mcq-flag="${escapeHtml(id)}" aria-pressed="${on}" title="${on ? "Flagged: needs check (tap to clear)" : "Flag: needs check"}" aria-label="Flag question as needs check">⚑</button>`;
+}
+
+function mcqFlagLabelHtml_(q) {
+    return (MCQ_SHOW_FLAG_TO_VISITORS && mcqIsFlagged_(q))
+        ? `<div class="mcq-flag-note">⚠ being rechecked</div>` : "";
+}
+
+// Small message at the bottom of the screen (auto-hides).
+let mcqToastTimer_ = null;
+function mcqToast_(msg, kind) {
+    let el = document.getElementById("mcq-toast");
+    if (!el) { el = document.createElement("div"); el.id = "mcq-toast"; el.className = "mcq-toast"; el.setAttribute("role", "status"); document.body.appendChild(el); }
+    el.textContent = msg;
+    el.className = "mcq-toast" + (kind ? " is-" + kind : "");
+    el.hidden = false;
+    clearTimeout(mcqToastTimer_);
+    mcqToastTimer_ = setTimeout(() => { el.hidden = true; }, kind === "bad" ? 7000 : 3500);
+}
+
+// Instant (optimistic) change of the flag in memory: rows, slots and both language variants.
+function mcqApplyFlagLocal_(ids, on) {
+    const set = new Set((ids || []).map(String));
+    const val = on ? "yes" : "";
+    (allLoadedMcqs || []).forEach(m => { if (set.has(String(m.id))) m.needs_check = val; });
+    (currentMcqs || []).forEach(slot => {
+        if (!set.has(String(slot.id))) return;
+        slot.needs_check = val;
+        Object.keys(slot.variants || {}).forEach(k => { slot.variants[k].needs_check = val; });
+    });
+}
+
+// After a verified save: copy the flag from the fresh rows onto the visible slots and redraw.
+// Does NOT reset the running attempt/timer (that is the point).
+function mcqSyncFlagsToSlots_() {
+    const byId = new Map((allLoadedMcqs || []).map(m => [String(m.id), m]));
+    (currentMcqs || []).forEach(slot => {
+        const m = byId.get(String(slot.id));
+        if (!m) return;
+        slot.needs_check = m.needs_check || "";
+        Object.keys(slot.variants || {}).forEach(k => { slot.variants[k].needs_check = m.needs_check || ""; });
+    });
+    renderMcqView();
+    mcqUpdateSelectionUi_();
+}
+
+// Set or clear the flag of many questions (grouped per paper). Uses the shared bulk
+// helper, so every change is re-read from the Sheet and confirmed.
+// Returns { ok, saved, total, hint }. Throws a friendly Error when nothing could be saved.
+async function mcqSetFlags_(ids, on) {
+    if (typeof mcqBulkSaveAndVerify !== "function") throw new Error("Save helper is not loaded. Reload the page.");
+    const byId = new Map((allLoadedMcqs || []).map(m => [String(m.id), m]));
+    const byPaper = new Map();
+    let loose = 0;
+    Array.from(new Set((ids || []).map(String).filter(Boolean))).forEach(id => {
+        const m = byId.get(id);
+        const pid = m ? String(m.collection_id_ref || m.collection_id || "").trim() : "";
+        if (!pid) { loose++; return; }
+        if (!byPaper.has(pid)) byPaper.set(pid, []);
+        byPaper.get(pid).push(id);
+    });
+    if (!byPaper.size) throw new Error("This question does not belong to a paper, so the flag cannot be saved.");
+    let saved = 0, total = loose;
+    for (const [pid, list] of byPaper) {
+        const out = await mcqBulkSaveAndVerify(pid,
+            list.map(id => ({ mcq_id: id, fields: { needs_check: on ? "yes" : "" } })),
+            { keepUndo: true, noReset: true });
+        saved += out.saved; total += out.total;
+    }
+    const ok = saved === total;
+    if (window.mcqFlagChanged_) window.mcqFlagChanged_(ids, on, ok);
+    return {
+        ok, saved, total,
+        hint: ok ? "" : "If none were saved: add the needs_check column to the Sheet and deploy the new Apps Script version."
+    };
+}
+
+let mcqFlagBusy_ = false;
+async function mcqToggleFlagOnCard_(id) {
+    if (mcqFlagBusy_) return;
+    const q = (allLoadedMcqs || []).find(m => String(m.id) === String(id));
+    if (!q) return;
+    const next = !mcqIsFlagged_(q);
+    mcqFlagBusy_ = true;
+    mcqApplyFlagLocal_([id], next);            // the card changes instantly
+    renderMcqView();
+    mcqUpdateSelectionUi_();
+    mcqToast_("⏳ Saving flag…");
+    try {
+        const r = await mcqSetFlags_([id], next);
+        if (r.ok) mcqToast_(next ? "⚑ Flagged and confirmed from the Sheet" : "✔ Flag cleared and confirmed from the Sheet", "ok");
+        else throw new Error("The Sheet did not confirm the change. " + r.hint);
+    } catch (err) {
+        mcqApplyFlagLocal_([id], !next);       // put the card back
+        renderMcqView();
+        mcqUpdateSelectionUi_();
+        mcqToast_("⚠️ " + (err && err.message ? err.message : "Could not save the flag.") + " Nothing was changed.", "bad");
+    } finally {
+        mcqFlagBusy_ = false;
+    }
+}
+
 // ---- H2 — selection (tick boxes) -------------------------------------
 function mcqSelectBoxHtml_(q) {
     const id = String((q && q.id) || "");
@@ -1074,8 +1187,13 @@ function mcqUpdateSelectionUi_() {
     });
     const bar = document.getElementById("mcq-selection-bar");
     if (bar) {
-        bar.hidden = n === 0;
-        bar.innerHTML = n ? `<span>✔ ${n} selected</span><button type="button" class="content-action" data-sel-act="export">Export</button><button type="button" class="content-action" data-sel-act="clear">Clear</button>` : "";
+        // H5 — owner tools: count flagged questions on screen (for "Select all flagged")
+        const flaggedHere = mcqOwnerToolsOn_() ? (currentMcqs || []).filter(mcqIsFlagged_).length : 0;
+        bar.hidden = n === 0 && flaggedHere === 0;
+        bar.innerHTML = (n
+            ? `<span>✔ ${n} selected</span><button type="button" class="content-action" data-sel-act="export">Export</button><button type="button" class="content-action" data-sel-act="clear">Clear</button>`
+            : (flaggedHere ? `<span>⚑ ${flaggedHere} flagged</span>` : ""))
+            + (flaggedHere ? `<button type="button" class="content-action" data-sel-act="flagged">Select all flagged (${flaggedHere})</button>` : "");
     }
     const chip = document.getElementById("mcq-hub-sel-chip");
     if (chip) chip.textContent = `✔ ${n} selected`;
@@ -1097,6 +1215,16 @@ function mcqUpdateSelectionUi_() {
         if (!act) return;
         if (act.dataset.selAct === "clear") { mcqSelectedIds.clear(); mcqUpdateSelectionUi_(); }
         else if (act.dataset.selAct === "export") window.openMcqHub?.({ tab: "export" });
+        else if (act.dataset.selAct === "flagged") {
+            (currentMcqs || []).filter(mcqIsFlagged_).forEach(q => mcqSelectedIds.add(String(q.id)));
+            mcqUpdateSelectionUi_();
+        }
+    });
+    document.getElementById("mcq-question")?.addEventListener("click", event => {
+        const btn = event.target.closest ? event.target.closest(".mcq-flag-btn") : null;
+        if (!btn) return;
+        event.preventDefault();
+        mcqToggleFlagOnCard_(btn.dataset.mcqFlag);
     });
 })();
 
@@ -1124,6 +1252,8 @@ function renderMcqView() {
                 index === currentMcqIndex ? "current" : ""
             } ${
                 mcqSelectedIds.has(String(mcq.id)) ? "mcq-picked" : ""
+            } ${
+                (mcqIsFlagged_(mcq) && mcqOwnerToolsOn_()) ? "mcq-flagged" : ""
             }"
             data-question-index="${index}"
         >${index + 1}</button>
@@ -1162,8 +1292,9 @@ function renderMcqView() {
                     <div class="mcq-all-item">
                         <div class="mcq-question-number mcq-question-heading">
                             <span>Question ${i + 1} of ${currentMcqs.length}</span>
-                            <span class="mcq-head-tools">${mcqSelectBoxHtml_(q)}${mcqOriginChipHtml_(q, i)}${mcqInfoButtonHtml_(i)}</span>
+                            <span class="mcq-head-tools">${mcqFlagButtonHtml_(q)}${mcqSelectBoxHtml_(q)}${mcqOriginChipHtml_(q, i)}${mcqInfoButtonHtml_(i)}</span>
                         </div>
+                        ${mcqFlagLabelHtml_(q)}
                         ${q.languages.length > 1 ? `
                             <div class="mcq-lang-toggle" role="group" aria-label="Question language">
                                 ${q.languages.map(lang => `
@@ -1250,12 +1381,14 @@ function renderMcqView() {
                     ` : ""}
                 </div>
                 <span class="mcq-head-tools">
+                    ${mcqFlagButtonHtml_(mcq)}
                     ${mcqSelectBoxHtml_(mcq)}
                     ${mcqOriginChipHtml_(mcq, currentMcqIndex)}
                     ${mcqInfoButtonHtml_(currentMcqIndex)}
                     <button type="button" class="mcq-edit-meta" id="mcq-edit-meta" title="Edit question metadata" aria-label="Edit question metadata">✏️</button>
                 </span>
             </div>
+            ${mcqFlagLabelHtml_(mcq)}
 
             ${mcqPassageHtml(mcq)}
             <div class="mcq-question-text">
@@ -2218,7 +2351,9 @@ const MCQ_GUIDE_POINTS = [
     { en: "Origin and paper details — optional. Origin says honestly where the questions come from (Original PYQ only when you are sure). The paper's PDF link, website link/path, answer-key link and remark are saved once per paper in Collections. A missing detail is never an error: leave it blank, the AI must not guess it.",
       hi: "Origin और paper details — optional हैं। Origin सच-सच बताता है कि questions कहाँ से आए हैं (Original PYQ तभी चुनें जब पक्का हो)। Paper का PDF link, website link/path, answer-key link और remark हर paper के लिए Collections में एक बार save होते हैं। कोई detail न हो तो खाली छोड़ दें — यह कभी error नहीं है, और AI को उसका अंदाज़ा नहीं लगाना चाहिए।" },
     { en: "Fetch & Preview — required. Fetches the Drive file, parses it, and opens a preview before anything is saved to the sheet.",
-      hi: "Fetch & Preview — ज़रूरी step है। Drive file को fetch करके parse करता है, और sheet में save होने से पहले एक preview खोलता है।" }
+      hi: "Fetch & Preview — ज़रूरी step है। Drive file को fetch करके parse करता है, और sheet में save होने से पहले एक preview खोलता है।" },
+    { en: "How to correct questions — use the .md only for the FIRST import; after that the Google Sheet is the truth, so never re-run Fetch and Save to fix something. Open 🗂️ MCQ Hub → Correct: (1) Answer key — tap the right option for each question or paste a key like 1-A 2-C, then Save; (2) Review — edit question, options, answer and explanation of chosen questions; (3) AI correction — copy a prompt, paste the AI's reply back and check the before/after preview (nothing is saved until you press Save). Tap ⚑ on a question you doubt: it goes to Correct → Needs check, and visitors see a small “being rechecked” note until you save it from Review with “Mark as checked when saved”.",
+      hi: "Questions ठीक कैसे करें — .md सिर्फ़ पहले import के लिए इस्तेमाल करें; उसके बाद Google Sheet ही सही data है, इसलिए कुछ ठीक करने के लिए Fetch and Save दोबारा न चलाएँ। 🗂️ MCQ Hub → Correct खोलें: (1) Answer key — हर question का सही option tap करें या 1-A 2-C जैसी key paste करें, फिर Save; (2) Review — चुने हुए questions का question, options, answer और explanation बदलें; (3) AI correction — prompt copy करें, AI का जवाब वापस paste करके before/after preview देखें (Save दबाने तक कुछ save नहीं होता)। जिस question पर शक हो उस पर ⚑ दबाएँ: वो Correct → Needs check में आ जाता है, और visitors को “being rechecked” का छोटा note दिखता है, जब तक आप उसे Review से “Mark as checked when saved” के साथ save न कर दें।" }
 ];
 
 // Point 2 (index 1, "Collection name") is dynamic — it mirrors

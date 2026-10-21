@@ -408,7 +408,7 @@ function mcqExportTabHtml_() {
                 <button type="button" class="content-action" id="mcq-exp-print">🖨️ Print / Save as PDF</button>
                 <button type="button" class="content-action" id="mcq-exp-md">⬇️ .md</button>
                 <button type="button" class="content-action" id="mcq-exp-csv">⬇️ .csv</button>
-                <button type="button" class="content-action" id="mcq-exp-to-ai">🤖 AI correction</button>
+                ${mcqOwnerToolsOn_() ? `<button type="button" class="content-action" id="mcq-exp-to-ai">🤖 AI correction</button>` : ""}
             </div>
             <div id="mcq-exp-status" class="mcq-hub-note" aria-live="polite"></div>
         </div>`;

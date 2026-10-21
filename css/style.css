@@ -5780,3 +5780,36 @@ a.bottom-strip-btn.practice-open{
 .mcq-ai-old{background:#f1f1f1;color:#777;text-decoration:line-through}
 .mcq-ai-new{background:#e6f4e6;color:#1e5a1e;border:1px solid #9dc79d}
 .mcq-ai-ign{margin:6px 0;padding-left:20px;font-size:13px}
+
+/* =========================================================
+   MCQ HUB H5 — needs-check flag, queue, phone polish
+   ========================================================= */
+.mcq-flag-btn{border:1px solid var(--line,#d8dfd8);background:#fff;color:#8a8f8b;border-radius:7px;padding:4px 8px;min-height:32px;cursor:pointer;font-size:14px;line-height:1}
+.mcq-flag-btn:hover{filter:brightness(.97)}
+.mcq-flag-btn.is-on{background:#fdeceb;border-color:#e6b3ae;color:#b3261e}
+.mcq-flag-note{display:inline-block;margin:2px 0 6px;padding:2px 8px;border-radius:999px;background:#fff6e0;border:1px solid #ecd9a3;color:#8a6508;font-size:11px;font-weight:700}
+.mcq-rv-flagged{display:flex;flex-wrap:wrap;align-items:center;gap:8px;border-radius:8px;margin:0 0 8px;padding:5px 10px;font-size:12px}
+.mcq-number.mcq-flagged::before{content:"";position:absolute;bottom:3px;right:3px;width:7px;height:7px;border-radius:50%;background:#b3261e}
+.mcq-toast{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:3000;max-width:min(92vw,440px);padding:9px 14px;border-radius:9px;background:#354239;color:#fff;font:600 13px/1.4 Arial,sans-serif;box-shadow:0 6px 18px rgba(0,0,0,.25)}
+.mcq-toast.is-ok{background:#2e7d4f}
+.mcq-toast.is-bad{background:#b3261e}
+.mcq-toast[hidden]{display:none}
+.mcq-hub-flag-badge{display:inline-block;margin:4px 0 0;padding:3px 10px;border:1px solid #e6b3ae;border-radius:999px;background:#fdeceb;color:#b3261e;font:700 12px Arial,sans-serif;cursor:pointer}
+.mcq-flag-list{margin-top:10px}
+.mcq-flag-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid #e6ebe6;font-size:13px}
+.mcq-flag-q{flex-shrink:0;color:#b3261e}
+.mcq-flag-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#3f4b43}
+.mcq-rv-markchk{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:#354239;cursor:pointer;flex-basis:100%}
+.mcq-rv-markchk input{width:18px;height:18px;margin:0}
+
+/* phone: question header, Full paper banner and Hub header use the same small sizes and wrap instead of overflowing */
+@media (max-width:600px){
+    .mcq-question-heading{flex-wrap:wrap;gap:6px 10px}
+    .mcq-head-tools{flex-shrink:1;flex-wrap:wrap;justify-content:flex-end;gap:4px}
+    .mcq-collection-note{gap:5px 10px}
+    .mcq-hub-header{padding:12px 14px 8px}
+    .mcq-hub-select-row,.mcq-hub-sel-row{padding-left:14px;padding-right:14px}
+    .mcq-hub-tabs{margin-left:14px;margin-right:14px}
+    .mcq-hub-body{padding:12px 14px 18px}
+    .mcq-selection-bar{gap:6px;font-size:12px}
+}

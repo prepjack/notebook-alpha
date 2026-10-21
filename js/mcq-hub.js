@@ -18,23 +18,32 @@ const MCQ_HUB_TABS_ = [
     ["export", "EXPORT"]
 ];
 
+// H5 — Import and Correct are "owner tools". With MCQ_OWNER_TOOLS_ALWAYS = true (default)
+// every tab shows. This only hides buttons; the Apps Script endpoint has no login.
+function mcqHubVisibleTabs_() {
+    const owner = mcqOwnerToolsOn_();
+    return MCQ_HUB_TABS_.filter(([key]) => owner || (key !== "import" && key !== "correct"));
+}
+
 // Papers that really have questions in the loaded list, with counts.
 function mcqHubCollectPapers_() {
     const rows = allLoadedMcqs || [];
     const counts = new Map();
     const origins = new Map();
+    const flagged = new Map();
     let loose = 0;
     rows.forEach(mcq => {
         const id = String(mcq.collection_id_ref || "").trim();
         if (!id) { loose++; return; }
         counts.set(id, (counts.get(id) || 0) + 1);
+        if (mcqIsFlagged_(mcq)) flagged.set(id, (flagged.get(id) || 0) + 1);
         if (!origins.has(id)) origins.set(id, new Map());
         const o = normalizeMcqOrigin(mcq.origin);
         origins.get(id).set(o, (origins.get(id).get(o) || 0) + 1);
     });
     const papers = Array.from(counts.entries()).map(([id, count]) => {
         const info = getMcqCollectionInfo(id);
-        return { id, count, info, title: (info && info.title) || id, origins: origins.get(id) };
+        return { id, count, info, title: (info && info.title) || id, origins: origins.get(id), flagged: flagged.get(id) || 0 };
     });
     return { papers, loose };
 }
@@ -57,6 +66,8 @@ function mcqHubPapersTabHtml_(papers, loose) {
             <div class="mcq-hub-card-title">${esc(p.title)}</div>
             <div class="mcq-hub-card-meta">${p.count} question${p.count === 1 ? "" : "s"}${
                 mcqHubOriginSummary_(p.origins) ? " · " + esc(mcqHubOriginSummary_(p.origins)) : ""}</div>
+            ${p.flagged && mcqOwnerToolsOn_()
+                ? `<button type="button" class="mcq-hub-flag-badge" data-hub-flagged="${esc(p.id)}" title="Open the Needs check list">⚑ ${p.flagged} need check</button>` : ""}
             <div class="mcq-hub-card-actions">
                 <button type="button" class="content-action" data-hub-view="${esc(p.id)}">View in order</button>
                 <button type="button" class="content-action" data-hub-info="${esc(p.id)}">Info</button>
@@ -115,6 +126,7 @@ function mcqHubRender_() {
         ? papers.map(p => `<option value="${esc(p.id)}"${p.id === mcqHubPaperId_ ? " selected" : ""}>${esc(p.title)} (${p.count})</option>`).join("")
         : `<option value="">— no paper in this topic —</option>`;
 
+    if (!mcqHubVisibleTabs_().some(([key]) => key === mcqHubTab_)) mcqHubTab_ = "papers";
     modal.querySelectorAll(".content-layer-tab").forEach(btn =>
         btn.classList.toggle("active", btn.dataset.hubTab === mcqHubTab_));
 
@@ -135,6 +147,11 @@ function mcqHubRender_() {
         mcqHubPaperId_ = b.dataset.hubInfo;
         mcqHubTab_ = "info";
         mcqHubRender_();
+    }));
+    body.querySelectorAll("[data-hub-flagged]").forEach(b => b.addEventListener("click", () => {
+        if (b.dataset.hubFlagged !== mcqHubPaperId_ && window.mcqCorrectConfirmDiscard_ && !window.mcqCorrectConfirmDiscard_()) return;
+        mcqHubPaperId_ = b.dataset.hubFlagged;
+        if (window.mcqReviewOpenSub_) window.mcqReviewOpenSub_("flag");
     }));
     body.querySelectorAll("[data-hub-edit]").forEach(b => b.addEventListener("click", () => {
         openMcqCollectionEditModal(b.dataset.hubEdit);
@@ -171,6 +188,7 @@ function openMcqHub(opts) {
     if (wanted) mcqHubPaperId_ = String(wanted);
     else if (!papers.some(p => p.id === mcqHubPaperId_)) mcqHubPaperId_ = papers.length ? papers[0].id : "";
     if (opts.tab) mcqHubTab_ = opts.tab;
+    if (!mcqHubVisibleTabs_().some(([key]) => key === mcqHubTab_)) mcqHubTab_ = "papers";
 
     const modal = document.createElement("div");
     modal.id = "mcq-hub-modal";
@@ -190,12 +208,13 @@ function openMcqHub(opts) {
                     <div class="mcq-hub-sel-menu" id="mcq-hub-sel-menu" hidden>
                         <button type="button" class="content-action" data-hub-sel="paper">Select all in this paper</button>
                         <button type="button" class="content-action" data-hub-sel="visible">Select visible</button>
+                        <button type="button" class="content-action" data-hub-sel="flagged">⚑ Select all flagged</button>
                         <button type="button" class="content-action" data-hub-sel="invert">Invert</button>
                         <button type="button" class="content-action" data-hub-sel="clear">Clear</button>
                     </div>
                 </div>
                 <div class="content-layer-tabs mcq-hub-tabs">
-                    ${MCQ_HUB_TABS_.map(([key, label]) =>
+                    ${mcqHubVisibleTabs_().map(([key, label]) =>
                         `<button type="button" class="content-layer-tab" data-hub-tab="${key}">${label}</button>`).join("")}
                 </div>
                 <div id="mcq-hub-body" class="mcq-hub-body"></div>
@@ -233,6 +252,18 @@ function openMcqHub(opts) {
         if (act === "clear") mcqSelectedIds.clear();
         else if (act === "visible") visibleIds.forEach(id => mcqSelectedIds.add(id));
         else if (act === "invert") visibleIds.forEach(id => { if (mcqSelectedIds.has(id)) mcqSelectedIds.delete(id); else mcqSelectedIds.add(id); });
+        else if (act === "flagged") {
+            try {
+                const paper = await mcqExportGetPaper_(mcqHubPaperId_);
+                const hit = paper.rows.filter(mcqIsFlagged_);
+                hit.forEach(r => mcqSelectedIds.add(String(r.id)));
+                if (!hit.length) alert("No flagged question in this paper.");
+            } catch (err) {
+                console.warn("Select flagged failed:", err);
+                alert("Could not load this paper. Please try again.");
+                return;
+            }
+        }
         else if (act === "paper") {
             try {
                 const paper = await mcqExportGetPaper_(mcqHubPaperId_);
